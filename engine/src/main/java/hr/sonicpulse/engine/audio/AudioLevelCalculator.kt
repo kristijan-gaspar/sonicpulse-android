@@ -5,13 +5,14 @@ import kotlin.math.sqrt
 
 object AudioLevelCalculator {
     private const val PCM_16_FULL_SCALE = 32768.0
+    private const val DBFS_FLOOR = -120.0
 
-    fun calculate(samples: ShortArray): AudioLevel {
+    fun calculate(samples: ShortArray, floor: Double = DBFS_FLOOR): AudioLevel {
         validateSamples(samples)
 
         val rms = calculateRms(samples)
         val normalizedRms = normalizeRms(rms)
-        val dbfs = convertToDbfs(normalizedRms)
+        val dbfs = convertToDbfs(normalizedRms, floor)
 
         return AudioLevel(
             rms = rms,
@@ -38,11 +39,11 @@ object AudioLevelCalculator {
         return rms / PCM_16_FULL_SCALE
     }
 
-    private fun convertToDbfs(normalizedRms: Double): Double {
+    private fun convertToDbfs(normalizedRms: Double, floor: Double): Double {
         return if (normalizedRms == 0.0) {
-            Double.NEGATIVE_INFINITY
+            floor
         } else {
-            20.0 * log10(normalizedRms)
+            (20.0 * log10(normalizedRms)).coerceAtLeast(floor)
         }
     }
 }

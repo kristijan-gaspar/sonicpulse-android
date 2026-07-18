@@ -8,13 +8,23 @@ import org.junit.Test
 class AudioLevelCalculatorTest {
 
     @Test
-    fun `calculate returns negative infinity for silence`() {
+    fun `calculate floors dbfs at minus 120 for silence`() {
         val samples = ShortArray(1024)
 
         val result = AudioLevelCalculator.calculate(samples)
 
         assertEquals(0.0, result.rms, 0.0)
-        assertTrue(result.dbfs == Double.NEGATIVE_INFINITY)
+        assertEquals(-120.0, result.dbfs, 0.0)
+    }
+
+    @Test
+    fun `calculate floors dbfs at minus 120 for near-silent nonzero signal`() {
+        val samples = ShortArray(1024)
+        samples[0] = 1
+
+        val result = AudioLevelCalculator.calculate(samples)
+
+        assertTrue(result.dbfs == -120.0)
     }
 
     @Test
