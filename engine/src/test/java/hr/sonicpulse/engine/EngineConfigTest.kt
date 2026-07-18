@@ -6,7 +6,7 @@ import org.junit.Test
 class EngineConfigTest {
 
     @Test
-    fun `default parameter values are set correctly`() {
+    fun `default values match algorithm document section 1_9`() {
         val config = EngineConfig()
 
         assertEquals(44_100, config.sampleRate)
