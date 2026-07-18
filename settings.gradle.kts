@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "SonicPulse"
 include(":app")
+include(":engine")
