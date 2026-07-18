@@ -1,4 +1,4 @@
-package hr.sonicpulse.engine.audio
+package hr.sonicpulse.engine.metrics
 
 import kotlin.math.log10
 import kotlin.math.sqrt

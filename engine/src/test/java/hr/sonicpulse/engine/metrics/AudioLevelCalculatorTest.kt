@@ -1,4 +1,4 @@
-package hr.sonicpulse.engine.audio
+package hr.sonicpulse.engine.metrics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
