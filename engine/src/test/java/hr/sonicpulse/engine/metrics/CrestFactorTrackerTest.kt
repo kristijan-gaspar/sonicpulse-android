@@ -2,6 +2,7 @@ package hr.sonicpulse.engine.metrics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import kotlin.math.log10
 import kotlin.math.sqrt
@@ -42,5 +43,26 @@ class CrestFactorTrackerTest {
         tracker.addBlock(shortArrayOf(0, 0, 0, 0))
 
         assertNull(tracker.currentCrest())
+    }
+
+    @Test
+    fun `returns null before any block is added`() {
+        val tracker = CrestFactorTracker(windowBlocks = 3)
+
+        assertNull(tracker.currentCrest())
+    }
+
+    @Test
+    fun `rejects non-positive window size`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            CrestFactorTracker(windowBlocks = 0)
+        }
+    }
+
+    @Test
+    fun `rejects empty sample block`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            tracker.addBlock(shortArrayOf())
+        }
     }
 }
