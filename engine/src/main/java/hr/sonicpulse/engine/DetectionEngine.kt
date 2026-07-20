@@ -20,7 +20,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
 
     private var state = State.IDLE
     private var processedBlockIndex = 0L
-    private var silentBlockCount = 0
+    private var consecutiveNonTriggerBlocks = 0
     private var cooldownBlockCount = 0
     private var eventPeakDbfs = Double.NEGATIVE_INFINITY
     private var eventPeakBlockIndex = 0L
@@ -69,7 +69,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
     private fun handleIdle(triggered: Boolean, dbfs: Double, blockIndex: Long): DetectionEvent? {
         if (triggered) {
             state = State.DETECTING
-            silentBlockCount = 0
+            consecutiveNonTriggerBlocks = 0
             eventPeakDbfs = dbfs
             eventPeakBlockIndex = blockIndex
         }
@@ -83,12 +83,12 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
         }
 
         if (triggered) {
-            silentBlockCount = 0
+            consecutiveNonTriggerBlocks = 0
             return null
         }
 
-        silentBlockCount++
-        if (silentBlockCount < config.endSilenceBlocks) {
+        consecutiveNonTriggerBlocks++
+        if (consecutiveNonTriggerBlocks < config.endSilenceBlocks) {
             return null
         }
 
