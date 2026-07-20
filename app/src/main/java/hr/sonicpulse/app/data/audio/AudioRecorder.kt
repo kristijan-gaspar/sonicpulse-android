@@ -22,7 +22,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Lifecycle: `stop()` ends the current session (blocking until its read thread has fully
  * exited) but the same instance can `start()` again afterward. `close()` permanently shuts
- * down the internal executor; `start()` after `close()` throws.
+ * down the internal executor; `start()` after `close()` throws. Session ownership (the
+ * shared `session` field) is only ever cleared by the worker thread's own finalization —
+ * never by `stop()` — so a session is never considered "over" until it truly has finished.
  */
 class AudioRecorder(
     private val audioManager: AudioManager,
@@ -62,34 +64,59 @@ class AudioRecorder(
 
             val record = createRecord(minBufferBytes, onError) ?: return
             val effects = AudioEffectsSession(record.audioSessionId)
-            val newSession = Session(record, effects)
 
-            if (!startRecording(record)) {
-                effects.release()
-                record.release()
-                onError(AudioCaptureError.UnsupportedConfiguration)
-                return
+            when (startRecording(record)) {
+                StartRecordingResult.Started -> Unit
+                StartRecordingResult.PermissionDenied -> {
+                    abortSession(record, effects)
+                    onError(AudioCaptureError.PermissionDenied)
+                    return
+                }
+                StartRecordingResult.Failed -> {
+                    abortSession(record, effects)
+                    onError(AudioCaptureError.UnsupportedConfiguration)
+                    return
+                }
             }
 
+            val newSession = Session(record, effects)
             session = newSession
             try {
                 executor.execute { runSession(newSession, onBlock, onError) }
             } catch (e: RejectedExecutionException) {
                 session = null
-                effects.release()
-                record.release()
+                abortSession(record, effects)
                 onError(AudioCaptureError.Unexpected(e))
             }
         }
     }
 
-    private fun startRecording(record: AudioRecord): Boolean {
+    private enum class StartRecordingResult { Started, PermissionDenied, Failed }
+
+    private fun startRecording(record: AudioRecord): StartRecordingResult {
         try {
             record.startRecording()
+        } catch (e: SecurityException) {
+            return StartRecordingResult.PermissionDenied
         } catch (e: IllegalStateException) {
-            return false
+            return StartRecordingResult.Failed
         }
-        return record.recordingState == AudioRecord.RECORDSTATE_RECORDING
+        return if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+            StartRecordingResult.Started
+        } else {
+            StartRecordingResult.Failed
+        }
+    }
+
+    /** Safe cleanup for a record that never successfully entered a running session. */
+    private fun abortSession(record: AudioRecord, effects: AudioEffectsSession) {
+        try {
+            record.stop()
+        } catch (e: IllegalStateException) {
+            // Not recording; nothing to stop.
+        }
+        record.release()
+        effects.release()
     }
 
     /**
@@ -143,6 +170,8 @@ class AudioRecorder(
             AudioRecord(source, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSizeBytes)
         } catch (e: SecurityException) {
             return CreateAttempt.PermissionDenied
+        } catch (e: IllegalArgumentException) {
+            return CreateAttempt.Unsupported
         }
 
         return if (record.state == AudioRecord.STATE_INITIALIZED) {
@@ -176,13 +205,28 @@ class AudioRecorder(
                 }
                 accumulator.accumulate(readBuffer, samplesRead, onBlock)
             }
+        } catch (e: SecurityException) {
+            // e.g. RECORD_AUDIO permission revoked mid-capture.
+            if (!session.stopRequested) {
+                onError(AudioCaptureError.PermissionDenied)
+            }
         } catch (e: RuntimeException) {
             if (!session.stopRequested) {
                 onError(AudioCaptureError.Unexpected(e))
             }
         } finally {
             cleanup(session)
+            clearOwnership(session)
             session.finished.countDown()
+        }
+    }
+
+    /** Only the worker's own finalization clears session ownership — never `stop()`. */
+    private fun clearOwnership(session: Session) {
+        synchronized(lock) {
+            if (this.session === session) {
+                this.session = null
+            }
         }
     }
 
@@ -202,32 +246,33 @@ class AudioRecorder(
      * Ends the current session, if any. Blocks until the dedicated read thread has fully
      * exited — unless called from that same thread (e.g. from within [onError] triggered
      * by a read failure), in which case waiting for itself would deadlock. Safe to call
-     * multiple times, and safe to call when no session is running.
+     * multiple times, and safe to call when no session is running. Does not itself release
+     * resources or clear session ownership — that is always the worker's own responsibility,
+     * so a session is never considered finished until it truly has.
      */
     fun stop() {
+        val current: Session
         synchronized(lock) {
-            val current = session ?: return
+            current = session ?: return
             current.stopRequested = true
             try {
                 current.record.stop() // unblocks a thread parked in READ_BLOCKING
             } catch (e: IllegalStateException) {
                 // Already stopped; the read loop will exit on its own.
             }
-            if (Thread.currentThread() != current.workerThread) {
-                current.finished.await()
-            }
-            cleanup(current)
-            session = null
+        }
+        if (Thread.currentThread() != current.workerThread) {
+            current.finished.await()
         }
     }
 
     /** Permanently stops capture and releases the internal executor. Idempotent. */
     override fun close() {
-        stop()
         synchronized(lock) {
             if (isClosed) return
             isClosed = true
         }
+        stop()
         executor.shutdown()
     }
 }
