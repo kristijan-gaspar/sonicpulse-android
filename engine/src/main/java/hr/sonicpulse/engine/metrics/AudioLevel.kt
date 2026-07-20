@@ -1,4 +1,4 @@
-package hr.sonicpulse.engine.audio
+package hr.sonicpulse.engine.metrics
 
 data class AudioLevel(
     val rms: Double,

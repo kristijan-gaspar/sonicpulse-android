@@ -1,0 +1,100 @@
+package hr.sonicpulse.engine.metrics
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class AudioLevelCalculatorTest {
+
+    @Test
+    fun `calculate floors dbfs at minus 120 for silence`() {
+        val samples = ShortArray(1024)
+
+        val result = AudioLevelCalculator.calculate(samples)
+
+        assertEquals(0.0, result.rms, 0.0)
+        assertEquals(-120.0, result.dbfs, 0.0)
+    }
+
+    @Test
+    fun `calculate floors dbfs at minus 120 for near-silent nonzero signal`() {
+        val samples = ShortArray(1024)
+        samples[0] = 1
+
+        val result = AudioLevelCalculator.calculate(samples)
+
+        assertTrue(result.dbfs == -120.0)
+    }
+
+    @Test
+    fun `calculate returns approximately minus six dbfs for half scale signal`() {
+        val samples = ShortArray(1024) { 16_384 }
+
+        val result = AudioLevelCalculator.calculate(samples)
+
+        assertEquals(16_384.0, result.rms, 0.0)
+        assertEquals(-6.0206, result.dbfs, 0.0001)
+    }
+
+    @Test
+    fun `calculate returns zero dbfs for full scale signal`() {
+        val samples = ShortArray(1024) { Short.MIN_VALUE }
+
+        val result = AudioLevelCalculator.calculate(samples)
+
+        assertEquals(32_768.0, result.rms, 0.0)
+        assertEquals(0.0, result.dbfs, 0.0)
+    }
+
+    @Test
+    fun `calculate throws exception for empty samples`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(shortArrayOf())
+        }
+    }
+
+    @Test
+    fun `calculate accepts a valid custom floor`() {
+        val samples = ShortArray(1024)
+
+        val result = AudioLevelCalculator.calculate(samples, floor = -90.0)
+
+        assertEquals(-90.0, result.dbfs, 0.0)
+    }
+
+    @Test
+    fun `calculate rejects a NaN floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = Double.NaN)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a positive infinity floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = Double.POSITIVE_INFINITY)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a negative infinity floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = Double.NEGATIVE_INFINITY)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a zero floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = 0.0)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a positive floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = 5.0)
+        }
+    }
+}
