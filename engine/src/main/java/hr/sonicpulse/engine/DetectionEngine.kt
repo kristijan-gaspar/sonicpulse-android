@@ -31,6 +31,10 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
     val currentBaseline: Double get() = baseline.value
 
     fun process(block: ShortArray): DetectionEvent? {
+        require(block.size == config.blockSize) {
+            "Block size must be ${config.blockSize}, was ${block.size}."
+        }
+
         val blockIndex = processedBlockIndex
         processedBlockIndex++
 

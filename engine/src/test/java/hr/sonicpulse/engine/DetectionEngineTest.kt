@@ -3,6 +3,7 @@ package hr.sonicpulse.engine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class DetectionEngineTest {
@@ -133,5 +134,70 @@ class DetectionEngineTest {
 
         assertEquals(1, firstEvents.size)
         assertEquals(1, secondEvents.size)
+    }
+
+    @Test
+    fun `process rejects an empty block`() {
+        val engine = DetectionEngine(config)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            engine.process(ShortArray(0))
+        }
+    }
+
+    @Test
+    fun `process rejects a block smaller than the configured block size`() {
+        val engine = DetectionEngine(config)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            engine.process(ShortArray(config.blockSize - 1))
+        }
+    }
+
+    @Test
+    fun `process rejects a block larger than the configured block size`() {
+        val engine = DetectionEngine(config)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            engine.process(ShortArray(config.blockSize + 1))
+        }
+    }
+
+    @Test
+    fun `process accepts a correctly sized block without throwing`() {
+        val engine = DetectionEngine(config)
+
+        engine.process(silenceBlock())
+    }
+
+    @Test
+    fun `a rejected block does not seed or mutate the baseline`() {
+        val engine = DetectionEngine(config)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            engine.process(ShortArray(0))
+        }
+        assertEquals(0.0, engine.currentBaseline, 0.0)
+
+        engine.process(silenceBlock())
+        assertEquals(config.dbfsFloor, engine.currentBaseline, 0.0)
+    }
+
+    @Test
+    fun `rejected blocks do not advance the processed block index used for warmup gating`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks - 1)
+
+        repeat(5) {
+            assertThrows(IllegalArgumentException::class.java) {
+                engine.process(ShortArray(config.blockSize - 1))
+            }
+        }
+
+        val events = mutableListOf<DetectionEvent>()
+        events += listOfNotNull(engine.process(impulseBlock()))
+        events += (0 until config.endSilenceBlocks + 5).mapNotNull { engine.process(silenceBlock()) }
+
+        assertEquals(emptyList<DetectionEvent>(), events)
     }
 }
