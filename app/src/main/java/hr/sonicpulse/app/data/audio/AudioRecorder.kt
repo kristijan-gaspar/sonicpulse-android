@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * shared `session` field) is only ever cleared by the worker thread's own finalization —
  * never by `stop()` — so a session is never considered "over" until it truly has finished.
  */
-class   AudioRecorder(
+class AudioRecorder(
     private val audioManager: AudioManager,
     private val sampleRate: Int = EngineConfig().sampleRate,
     private val blockSize: Int = EngineConfig().blockSize
