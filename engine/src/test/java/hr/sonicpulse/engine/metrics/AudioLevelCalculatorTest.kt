@@ -53,4 +53,48 @@ class AudioLevelCalculatorTest {
             AudioLevelCalculator.calculate(shortArrayOf())
         }
     }
+
+    @Test
+    fun `calculate accepts a valid custom floor`() {
+        val samples = ShortArray(1024)
+
+        val result = AudioLevelCalculator.calculate(samples, floor = -90.0)
+
+        assertEquals(-90.0, result.dbfs, 0.0)
+    }
+
+    @Test
+    fun `calculate rejects a NaN floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = Double.NaN)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a positive infinity floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = Double.POSITIVE_INFINITY)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a negative infinity floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = Double.NEGATIVE_INFINITY)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a zero floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = 0.0)
+        }
+    }
+
+    @Test
+    fun `calculate rejects a positive floor`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioLevelCalculator.calculate(ShortArray(1024), floor = 5.0)
+        }
+    }
 }

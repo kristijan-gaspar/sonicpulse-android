@@ -9,6 +9,7 @@ object AudioLevelCalculator {
 
     fun calculate(samples: ShortArray, floor: Double = DBFS_FLOOR): AudioLevel {
         validateSamples(samples)
+        validateFloor(floor)
 
         val rms = calculateRms(samples)
         val normalizedRms = normalizeRms(rms)
@@ -23,6 +24,12 @@ object AudioLevelCalculator {
     private fun validateSamples(samples: ShortArray) {
         require(samples.isNotEmpty()) {
             "Audio samples must not be empty."
+        }
+    }
+
+    private fun validateFloor(floor: Double) {
+        require(floor.isFinite() && floor < 0.0) {
+            "dBFS floor must be finite and below zero, was $floor."
         }
     }
 
