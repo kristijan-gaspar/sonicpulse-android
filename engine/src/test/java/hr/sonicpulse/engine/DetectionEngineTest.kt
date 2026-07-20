@@ -286,4 +286,143 @@ class DetectionEngineTest {
         assertEquals(plateauDbfs, events.single().peakDbfs, 1e-9)
         assertEquals(plateauIndex, events.single().peakBlockIndex)
     }
+
+    @Test
+    fun `the last warmup block still suppresses triggering`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks - 1)
+
+        val duringLastWarmupBlock = engine.process(impulseBlock())
+        val followUp = (0 until config.endSilenceBlocks + 5).mapNotNull { engine.process(silenceBlock()) }
+
+        assertNull(duringLastWarmupBlock)
+        assertEquals(emptyList<DetectionEvent>(), followUp)
+    }
+
+    @Test
+    fun `the first post-warmup block is eligible to trigger`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        assertEquals(1, events.size)
+    }
+
+    @Test
+    fun `one non-trigger block does not end an open detection`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val result = engine.process(silenceBlock())
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `endSilenceBlocks minus one consecutive non-trigger blocks do not end an open detection`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val results = (0 until config.endSilenceBlocks - 1).map { engine.process(silenceBlock()) }
+
+        assertEquals(List(config.endSilenceBlocks - 1) { null }, results)
+    }
+
+    @Test
+    fun `exactly endSilenceBlocks consecutive non-trigger blocks end the detection`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val results = (0 until config.endSilenceBlocks).map { engine.process(silenceBlock()) }
+
+        assertEquals(config.endSilenceBlocks - 1, results.count { it == null })
+        assertNotNull(results.last())
+    }
+
+    @Test
+    fun `a new trigger before reaching endSilenceBlocks resets the non-trigger counter`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        engine.process(silenceBlock()) // 1 non-trigger block toward the count
+        engine.process(impulseBlock()) // re-triggers mid-DETECTING, resets the counter to 0
+
+        val stillOpen = engine.process(silenceBlock()) // this is only the 1st non-trigger block since the reset
+        val closing = (0 until config.endSilenceBlocks - 1).mapNotNull { engine.process(silenceBlock()) }
+
+        assertNull(stillOpen)
+        assertEquals(1, closing.size)
+    }
+
+    @Test
+    fun `an impulse during COOLDOWN is ignored and does not start a new event`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(config.endSilenceBlocks) { engine.process(silenceBlock()) } // closes event, enters COOLDOWN
+
+        val duringCooldown = engine.process(impulseBlock())
+        val remainder = (0 until config.cooldownBlocks + config.endSilenceBlocks + 5)
+            .mapNotNull { engine.process(silenceBlock()) }
+
+        assertNull(duringCooldown)
+        assertEquals(emptyList<DetectionEvent>(), remainder)
+    }
+
+    @Test
+    fun `cooldown completes after exactly cooldownBlocks and the final block is not re-evaluated as IDLE`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(config.endSilenceBlocks) { engine.process(silenceBlock()) } // closes event, enters COOLDOWN
+        repeat(config.cooldownBlocks - 1) { engine.process(silenceBlock()) } // one block short of IDLE
+
+        // This block is the cooldownBlocks-th cooldown block: state flips to IDLE by the end of
+        // processing it, but the block itself was dispatched while still COOLDOWN and must not
+        // be retroactively evaluated as a fresh IDLE trigger, despite being a loud impulse.
+        val finalCooldownBlock = engine.process(impulseBlock())
+        val afterCooldown = (0 until config.endSilenceBlocks + 5).mapNotNull { engine.process(silenceBlock()) }
+
+        assertNull(finalCooldownBlock)
+        assertEquals(emptyList<DetectionEvent>(), afterCooldown)
+    }
+
+    @Test
+    fun `baseline is frozen while in the COOLDOWN state`() {
+        val ambientAmplitude: Short = 50
+        fun ambientBlock(): ShortArray = ShortArray(config.blockSize) { ambientAmplitude }
+
+        val engine = DetectionEngine(config)
+        repeat(config.warmupBlocks) { engine.process(ambientBlock()) }
+        val baselineBeforeEvent = engine.currentBaseline
+
+        engine.process(impulseBlock()) // far louder than ambient; triggers and opens DETECTING
+        repeat(config.endSilenceBlocks) { engine.process(silenceBlock()) } // closes event, enters COOLDOWN
+
+        // Silence is much quieter than the ambient baseline; if COOLDOWN did not freeze the
+        // baseline, this block would pull it toward the floor via alphaDown.
+        engine.process(silenceBlock())
+
+        assertEquals(baselineBeforeEvent, engine.currentBaseline, 0.0)
+    }
+
+    @Test
+    fun `a single impulse produces exactly one DetectionEvent, not zero or multiple`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        val events = mutableListOf<DetectionEvent?>()
+        events += engine.process(impulseBlock())
+        events += (0 until config.endSilenceBlocks + 10).map { engine.process(silenceBlock()) }
+
+        assertEquals(1, events.count { it != null })
+    }
 }
