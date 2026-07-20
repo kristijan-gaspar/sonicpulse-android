@@ -60,6 +60,13 @@ class CrestFactorTrackerTest {
     }
 
     @Test
+    fun `rejects a negative window size`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            CrestFactorTracker(windowBlocks = -1)
+        }
+    }
+
+    @Test
     fun `rejects empty sample block`() {
         assertThrows(IllegalArgumentException::class.java) {
             tracker.addBlock(shortArrayOf())
