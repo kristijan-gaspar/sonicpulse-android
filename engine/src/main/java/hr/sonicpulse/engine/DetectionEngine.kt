@@ -77,12 +77,13 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
     }
 
     private fun handleDetecting(triggered: Boolean, dbfs: Double, blockIndex: Long): DetectionEvent? {
+        if (dbfs > eventPeakDbfs) {
+            eventPeakDbfs = dbfs
+            eventPeakBlockIndex = blockIndex
+        }
+
         if (triggered) {
             silentBlockCount = 0
-            if (dbfs > eventPeakDbfs) {
-                eventPeakDbfs = dbfs
-                eventPeakBlockIndex = blockIndex
-            }
             return null
         }
 

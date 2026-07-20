@@ -251,4 +251,39 @@ class DetectionEngineTest {
 
         assertEquals(1, closingEvents.size)
     }
+
+    @Test
+    fun `a later louder block that fails the full trigger still becomes the tracked peak`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        fun burstDbfs(amplitude: Int, burstSize: Int): Double {
+            val rms = amplitude * sqrt(burstSize.toDouble() / config.blockSize)
+            return 20.0 * log10(rms / 32768.0)
+        }
+
+        val impulseIndex = config.warmupBlocks.toLong()
+        val impulseDbfs = burstDbfs(amplitude = 20_000, burstSize = 32) // matches impulseBlock()'s shape
+
+        // A loud, sustained plateau: louder overall than the impulse, but its flat shape
+        // (crest ~0) fails the full onset trigger, so it must not itself start a new event —
+        // it should only extend the peak of the one already open.
+        val plateauAmplitude = 25_000
+        val plateauDbfs = 20.0 * log10(plateauAmplitude / 32768.0)
+        check(plateauDbfs > impulseDbfs) {
+            "test setup invalid: plateau ($plateauDbfs dBFS) must be louder than the impulse ($impulseDbfs dBFS)"
+        }
+
+        fun loudPlateauBlock(): ShortArray = ShortArray(config.blockSize) { plateauAmplitude.toShort() }
+
+        engine.process(impulseBlock())
+        val plateauIndex = impulseIndex + 1
+        engine.process(loudPlateauBlock())
+
+        val events = (0 until config.endSilenceBlocks - 1).mapNotNull { engine.process(silenceBlock()) }
+
+        assertEquals(1, events.size)
+        assertEquals(plateauDbfs, events.single().peakDbfs, 1e-9)
+        assertEquals(plateauIndex, events.single().peakBlockIndex)
+    }
 }
