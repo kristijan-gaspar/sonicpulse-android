@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * shared `session` field) is only ever cleared by the worker thread's own finalization —
  * never by `stop()` — so a session is never considered "over" until it truly has finished.
  */
-class AudioRecorder(
+class   AudioRecorder(
     private val audioManager: AudioManager,
     private val sampleRate: Int = EngineConfig().sampleRate,
     private val blockSize: Int = EngineConfig().blockSize
@@ -84,8 +84,12 @@ class AudioRecorder(
             try {
                 executor.execute { runSession(newSession, onBlock, onError) }
             } catch (e: RejectedExecutionException) {
-                session = null
-                abortSession(record, effects)
+                newSession.stopRequested = true
+                cleanup(newSession)
+                if (session === newSession) {
+                    session = null
+                }
+                newSession.finished.countDown()
                 onError(AudioCaptureError.Unexpected(e))
             }
         }
@@ -112,10 +116,14 @@ class AudioRecorder(
     private fun abortSession(record: AudioRecord, effects: AudioEffectsSession) {
         try {
             record.stop()
-        } catch (e: IllegalStateException) {
-            // Not recording; nothing to stop.
+        } catch (e: RuntimeException) {
+            // Not recording, or another platform quirk; must not prevent release() below.
         }
-        record.release()
+        try {
+            record.release()
+        } catch (e: RuntimeException) {
+            // Best-effort: must not prevent effects cleanup below.
+        }
         effects.release()
     }
 
@@ -215,17 +223,20 @@ class AudioRecorder(
                 onError(AudioCaptureError.Unexpected(e))
             }
         } finally {
-            cleanup(session)
-            clearOwnership(session)
-            session.finished.countDown()
-        }
-    }
-
-    /** Only the worker's own finalization clears session ownership — never `stop()`. */
-    private fun clearOwnership(session: Session) {
-        synchronized(lock) {
-            if (this.session === session) {
-                this.session = null
+            // Nested try/finally: even if cleanup() unexpectedly throws, the completion
+            // signal (ownership clear + countDown) must never be skipped.
+            try {
+                cleanup(session)
+            } finally {
+                synchronized(lock) {
+                    if (this.session === session) {
+                        this.session = null
+                    }
+                    // Last operation in this block: a new start() can only proceed once
+                    // this synchronized block exits, so by then the latch is already open
+                    // too — the previous worker is guaranteed to have fully completed.
+                    session.finished.countDown()
+                }
             }
         }
     }
@@ -235,10 +246,15 @@ class AudioRecorder(
 
         try {
             session.record.stop()
-        } catch (e: IllegalStateException) {
-            // Already stopped or never started recording; nothing to clean up here.
+        } catch (e: RuntimeException) {
+            // Already stopped, never started, or another platform quirk — must not
+            // prevent release() or effects cleanup below.
         }
-        session.record.release()
+        try {
+            session.record.release()
+        } catch (e: RuntimeException) {
+            // Best-effort: must not prevent effects cleanup below.
+        }
         session.effects.release()
     }
 
@@ -255,11 +271,11 @@ class AudioRecorder(
         synchronized(lock) {
             current = session ?: return
             current.stopRequested = true
-            try {
-                current.record.stop() // unblocks a thread parked in READ_BLOCKING
-            } catch (e: IllegalStateException) {
-                // Already stopped; the read loop will exit on its own.
-            }
+        }
+        try {
+            current.record.stop() // unblocks a thread parked in READ_BLOCKING
+        } catch (e: IllegalStateException) {
+            // Already stopped; the read loop will exit on its own.
         }
         if (Thread.currentThread() != current.workerThread) {
             current.finished.await()
