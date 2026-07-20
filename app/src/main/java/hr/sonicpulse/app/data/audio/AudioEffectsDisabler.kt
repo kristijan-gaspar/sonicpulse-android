@@ -12,13 +12,13 @@ object AudioEffectsDisabler {
 
     fun disableIfAvailable(audioSessionId: Int) {
         if (AutomaticGainControl.isAvailable()) {
-            AutomaticGainControl.create(audioSessionId)?.setEnabled(false)
+            AutomaticGainControl.create(audioSessionId)?.enabled = false
         }
         if (NoiseSuppressor.isAvailable()) {
-            NoiseSuppressor.create(audioSessionId)?.setEnabled(false)
+            NoiseSuppressor.create(audioSessionId)?.enabled = false
         }
         if (AcousticEchoCanceler.isAvailable()) {
-            AcousticEchoCanceler.create(audioSessionId)?.setEnabled(false)
+            AcousticEchoCanceler.create(audioSessionId)?.enabled = false
         }
     }
 }
