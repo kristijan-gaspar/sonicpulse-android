@@ -92,7 +92,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             return null
         }
 
-        state = State.COOLDOWN
+        state = if (config.cooldownBlocks == 0) State.IDLE else State.COOLDOWN
         cooldownBlockCount = 0
         return DetectionEvent(peakDbfs = eventPeakDbfs, peakBlockIndex = eventPeakBlockIndex)
     }

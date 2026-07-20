@@ -425,4 +425,24 @@ class DetectionEngineTest {
 
         assertEquals(1, events.count { it != null })
     }
+
+    @Test
+    fun `cooldownBlocks of zero skips COOLDOWN entirely, allowing the very next block to start a new event`() {
+        val zeroCooldownConfig = EngineConfig(cooldownBlocks = 0)
+        val engine = DetectionEngine(zeroCooldownConfig)
+        feedSilence(engine, zeroCooldownConfig.warmupBlocks)
+
+        val firstEvents = mutableListOf<DetectionEvent>()
+        firstEvents += listOfNotNull(engine.process(impulseBlock()))
+        firstEvents += (0 until zeroCooldownConfig.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        // No blocks should be ignored: the impulse immediately following the first event's
+        // close must itself start a second, independent detection.
+        val secondEvents = mutableListOf<DetectionEvent>()
+        secondEvents += listOfNotNull(engine.process(impulseBlock()))
+        secondEvents += (0 until zeroCooldownConfig.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        assertEquals(1, firstEvents.size)
+        assertEquals(1, secondEvents.size)
+    }
 }
