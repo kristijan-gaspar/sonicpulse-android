@@ -5,6 +5,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import kotlin.math.log10
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 class DetectionEngineTest {
 
@@ -199,5 +202,53 @@ class DetectionEngineTest {
         events += (0 until config.endSilenceBlocks + 5).mapNotNull { engine.process(silenceBlock()) }
 
         assertEquals(emptyList<DetectionEvent>(), events)
+    }
+
+    @Test
+    fun `spike is computed against the baseline as it stood before this block, not after`() {
+        val burstSize = 32
+        val seedAmplitude = 1000
+
+        fun burstBlock(amplitude: Int): ShortArray =
+            ShortArray(config.blockSize) { index -> if (index < burstSize) amplitude.toShort() else 0 }
+
+        fun dbfsOf(rms: Double): Double = 20.0 * log10(rms / 32768.0)
+
+        val seedDbfs = dbfsOf(seedAmplitude.toDouble())
+
+        // A target spike that, computed against the OLD (pre-update) baseline, clears
+        // spikeMin — but that the buggy ordering (this block's own dBFS shrinking the
+        // spike via an alphaUp-sized baseline nudge first) would pull back under spikeMin.
+        // Midpoint of the window (spikeMin, spikeMin / (1 - alphaUp)) where exactly this happens.
+        val targetSpike = config.spikeMin / (1 - config.alphaUp / 2)
+        val buggySpike = targetSpike * (1 - config.alphaUp)
+        check(buggySpike < config.spikeMin) {
+            "test setup invalid: buggySpike=$buggySpike must fall under spikeMin=${config.spikeMin}"
+        }
+
+        val impulseDbfs = seedDbfs + targetSpike
+        check(impulseDbfs > config.dbfsMin) {
+            "test setup invalid: impulseDbfs=$impulseDbfs must clear dbfsMin=${config.dbfsMin}"
+        }
+        val burstRms = 32768.0 * 10.0.pow(impulseDbfs / 20.0)
+        val impulseAmplitude = (burstRms * sqrt(config.blockSize.toDouble() / burstSize)).toInt()
+        check(impulseAmplitude in 1..32_767) {
+            "test setup invalid: impulseAmplitude=$impulseAmplitude out of Short range"
+        }
+
+        val engine = DetectionEngine(config)
+        repeat(config.warmupBlocks) {
+            engine.process(ShortArray(config.blockSize) { seedAmplitude.toShort() })
+        }
+        check(engine.currentBaseline == seedDbfs) {
+            "test setup invalid: baseline did not converge to seedDbfs, was ${engine.currentBaseline}"
+        }
+
+        engine.process(burstBlock(impulseAmplitude))
+        val closingEvents = (0 until config.endSilenceBlocks).mapNotNull {
+            engine.process(ShortArray(config.blockSize) { seedAmplitude.toShort() })
+        }
+
+        assertEquals(1, closingEvents.size)
     }
 }

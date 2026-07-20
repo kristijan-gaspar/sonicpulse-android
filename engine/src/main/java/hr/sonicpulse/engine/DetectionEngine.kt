@@ -39,9 +39,15 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
         processedBlockIndex++
 
         val stateAtEntry = state
-        val signal = analyzeBlock(block, stateAtEntry)
+        val signal = analyzeBlock(block)
         val triggered = blockIndex >= config.warmupBlocks &&
             TriggerEvaluator.shouldTrigger(signal.dbfs, signal.spike, signal.crest, signal.clipRatio, config)
+
+        // Baseline reflects the established background, not the candidate block itself:
+        // a block that starts a detection must not be allowed to raise its own reference.
+        if (stateAtEntry == State.IDLE && !triggered) {
+            baseline.update(signal.dbfs)
+        }
 
         return when (stateAtEntry) {
             State.IDLE -> handleIdle(triggered, signal.dbfs, blockIndex)
@@ -50,15 +56,11 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
         }
     }
 
-    private fun analyzeBlock(block: ShortArray, stateAtEntry: State): BlockSignal {
+    private fun analyzeBlock(block: ShortArray): BlockSignal {
         val level = AudioLevelCalculator.calculate(block, config.dbfsFloor)
         val clipRatio = ClippingCalculator.calculateClipRatio(block, config.clipLevel)
         crestTracker.addBlock(block)
         val crest = crestTracker.currentCrest()
-
-        if (stateAtEntry == State.IDLE) {
-            baseline.update(level.dbfs)
-        }
         val spike = SpikeCalculator.calculateSpike(level.dbfs, baseline.value)
 
         return BlockSignal(level.dbfs, clipRatio, crest, spike)
