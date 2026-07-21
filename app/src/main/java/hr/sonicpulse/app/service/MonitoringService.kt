@@ -102,7 +102,12 @@ class MonitoringService : Service() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
-    /** Returns false (instead of throwing) if the OS rejects the microphone FGS promotion. */
+    /**
+     * Returns false (instead of throwing) if the OS rejects the microphone FGS promotion.
+     * Covers both a missing/denied RECORD_AUDIO permission (SecurityException) and the OS
+     * refusing the promotion for app-state reasons, e.g. ForegroundServiceStartNotAllowedException
+     * (API 31+) — which is a subclass of IllegalStateException, not SecurityException.
+     */
     private fun tryStartForeground(): Boolean {
         createNotificationChannelIfNeeded()
         return try {
@@ -115,12 +120,20 @@ class MonitoringService : Service() {
             true
         } catch (e: SecurityException) {
             false
+        } catch (e: IllegalStateException) {
+            false
         }
     }
 
     private fun startAudioCapture() {
         isMonitoringActive = true
         firstBlockInstant = null
+
+        // Set before recorder.start(): a setup failure (unsupported config, permission
+        // denied, executor rejection) invokes onError synchronously on this same thread,
+        // and handleCaptureError()'s monitoringFailed() call must be the one to have the
+        // last word on state — not get overwritten by a monitoringStarted() call after.
+        monitoringStateRepository.monitoringStarted()
 
         val engine = DetectionEngine(engineConfig)
         val recorder = AudioRecorder(
@@ -134,8 +147,6 @@ class MonitoringService : Service() {
             onBlock = { block -> handleBlock(engine, block) },
             onError = { error -> serviceScope.launch { handleCaptureError(error) } }
         )
-
-        monitoringStateRepository.monitoringStarted()
     }
 
     private fun handleBlock(engine: DetectionEngine, block: ShortArray) {
