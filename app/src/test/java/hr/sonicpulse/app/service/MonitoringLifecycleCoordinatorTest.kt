@@ -95,7 +95,7 @@ class MonitoringLifecycleCoordinatorTest {
     }
 
     @Test
-    fun `Cancelled returns None and does not resurrect any state`() {
+    fun `a Cancelled result for an already-invalidated generation is ignored and does not resurrect state`() {
         val coordinator = MonitoringLifecycleCoordinator()
         val generation = (coordinator.onActionStart() as MonitoringLifecycleEffect.StartLocation).generation
         coordinator.onStopOrDestroy() // invalidates the generation, moves to IDLE
@@ -104,6 +104,33 @@ class MonitoringLifecycleCoordinatorTest {
 
         assertEquals(MonitoringLifecycleEffect.None, effect)
         assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
+    }
+
+    @Test
+    fun `a genuine Task cancellation while still STARTING returns to IDLE and reports a startup failure`() {
+        val coordinator = MonitoringLifecycleCoordinator()
+        val generation = (coordinator.onActionStart() as MonitoringLifecycleEffect.StartLocation).generation
+
+        val effect = coordinator.onLocationStartResult(generation, LocationStartResult.Cancelled)
+
+        assertTrue(effect is MonitoringLifecycleEffect.ReportStartupFailure)
+        assertTrue(
+            (effect as MonitoringLifecycleEffect.ReportStartupFailure).failure is MonitoringStartupFailure.LocationStartFailed
+        )
+        assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
+    }
+
+    @Test
+    fun `a genuine Task cancellation never leaves the coordinator stuck in STARTING`() {
+        val coordinator = MonitoringLifecycleCoordinator()
+        val generation = (coordinator.onActionStart() as MonitoringLifecycleEffect.StartLocation).generation
+        coordinator.onLocationStartResult(generation, LocationStartResult.Cancelled)
+
+        // A later Start must be accepted again — the coordinator must not be wedged in STARTING.
+        val effect = coordinator.onActionStart()
+
+        assertTrue(effect is MonitoringLifecycleEffect.StartLocation)
+        assertEquals(MonitoringLifecycleState.STARTING, coordinator.state)
     }
 
     @Test

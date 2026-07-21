@@ -118,21 +118,34 @@ class DefaultLocationProvider @Inject constructor(
                 activeCallback = newCallback
                 task.addOnSuccessListener { resolve(newCallback, LocationStartResult.Started) }
                 task.addOnFailureListener { e -> resolve(newCallback, LocationStartResult.Failed(e)) }
+                // A Task can also finish cancelled (neither success nor failure) — e.g. Play
+                // Services itself giving up on the request. Without this, that outcome would
+                // never call resolve() at all, leaving the tracker (and the caller waiting on
+                // onResult) stuck indefinitely.
+                task.addOnCanceledListener { resolve(newCallback, LocationStartResult.Cancelled) }
             } catch (e: SecurityException) {
                 resolve(newCallback, LocationStartResult.PermissionDenied)
             }
         }
     }
 
-    /** Resolves [forCallback]'s attempt via [tracker], and — for any non-Started result —
-     * removes it from fusedClient and clears [activeCallback] if it's still the active one.
-     * Safe (and a documented no-op) even if [forCallback] was never actually registered (the
-     * synchronous permission/location-services rejection paths) or was already removed by [stop]. */
+    /**
+     * Resolves [forCallback]'s attempt via [tracker], and removes it from fusedClient whenever
+     * either: (a) [tracker] reports the attempt as [LocationStartTracker.CompleteResult.Stale] —
+     * meaning it was already invalidated by [stop] or superseded, regardless of what [result]
+     * claims (this is what catches a *stale Started* specifically: a late success arriving after
+     * Stop must still have its registration torn down, not be treated as "started, nothing to
+     * clean up" just because the result says Started); or (b) [result] genuinely isn't Started
+     * for the still-current attempt. Safe (and a documented no-op) even if [forCallback] was
+     * never actually registered (the synchronous permission/location-services rejection paths)
+     * or was already removed by [stop].
+     */
     private fun resolve(forCallback: LocationCallback, result: LocationStartResult) {
         val outcome: LocationStartTracker.CompleteResult
         synchronized(lock) {
             outcome = tracker.complete(forCallback, result)
-            if (result !is LocationStartResult.Started) {
+            val isStale = outcome is LocationStartTracker.CompleteResult.Stale
+            if (isStale || result !is LocationStartResult.Started) {
                 fusedClient.removeLocationUpdates(forCallback)
                 if (activeCallback === forCallback) {
                     activeCallback = null

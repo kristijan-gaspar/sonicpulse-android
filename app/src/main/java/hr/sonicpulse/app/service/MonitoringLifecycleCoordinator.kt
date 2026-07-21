@@ -1,6 +1,7 @@
 package hr.sonicpulse.app.service
 
 import hr.sonicpulse.app.data.location.LocationStartResult
+import java.util.concurrent.CancellationException
 
 enum class MonitoringLifecycleState { IDLE, STARTING, ACTIVE }
 
@@ -58,9 +59,19 @@ class MonitoringLifecycleCoordinator {
                 MonitoringLifecycleEffect.ReportStartupFailure(MonitoringStartupFailure.LocationStartFailed(result.cause))
             }
             LocationStartResult.Cancelled -> {
-                // No state resurrection: whatever stop-triggered transition is already in
-                // progress (or already finished) owns the state from here.
-                MonitoringLifecycleEffect.None
+                // Reaching this branch at all means the guard above already confirmed we're
+                // genuinely still STARTING for the current generation — a Cancelled reported
+                // for our own stop() would have arrived after onStopOrDestroy() already moved
+                // state off STARTING and bumped the generation, so it would never reach here
+                // (the guard would have already returned None). A Cancelled that DOES reach
+                // this point is therefore always a genuine, unexpected termination (e.g. Play
+                // Services itself cancelling the underlying Task) and must be treated as a
+                // real startup failure — never silently ignored, which would leave the service
+                // stuck in STARTING forever.
+                state = MonitoringLifecycleState.IDLE
+                MonitoringLifecycleEffect.ReportStartupFailure(
+                    MonitoringStartupFailure.LocationStartFailed(CancellationException("Location start was cancelled"))
+                )
             }
         }
     }

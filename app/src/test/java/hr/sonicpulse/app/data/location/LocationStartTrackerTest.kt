@@ -161,4 +161,52 @@ class LocationStartTrackerTest {
 
         assertTrue(tracker.isCurrent(token))
     }
+
+    @Test
+    fun `a cancelled Task completes the attempt, delivers Cancelled, and allows a restart`() {
+        val tracker = LocationStartTracker()
+        val firstToken = Any()
+        var delivered: LocationStartResult? = null
+        tracker.begin(firstToken) { delivered = it }
+
+        // Simulates Task.addOnCanceledListener firing — not triggered by our own stop().
+        val outcome = tracker.complete(firstToken, LocationStartResult.Cancelled)
+        (outcome as LocationStartTracker.CompleteResult.Deliver).onResult(LocationStartResult.Cancelled)
+
+        assertEquals(LocationStartResult.Cancelled, delivered)
+        assertFalse(tracker.isCurrent(firstToken))
+
+        val secondToken = Any()
+        assertEquals(LocationStartTracker.BeginResult.Accepted(secondToken), tracker.begin(secondToken) { })
+    }
+
+    @Test
+    fun `a late Task cancellation after Stop is stale and is not delivered`() {
+        val tracker = LocationStartTracker()
+        val token = Any()
+        var deliveries = 0
+        tracker.begin(token) { deliveries++ }
+        tracker.stop()
+
+        val result = tracker.complete(token, LocationStartResult.Cancelled)
+
+        assertEquals(LocationStartTracker.CompleteResult.Stale, result)
+        assertEquals(0, deliveries)
+    }
+
+    @Test
+    fun `stop is idempotent when called repeatedly`() {
+        val tracker = LocationStartTracker()
+        val token = Any()
+        var deliveries = 0
+        tracker.begin(token) { deliveries++ }
+
+        val first = tracker.stop()
+        first?.invoke(LocationStartResult.Cancelled)
+        val second = tracker.stop()
+
+        assertEquals(1, deliveries)
+        assertEquals(null, second)
+        assertFalse(tracker.isCurrent(token))
+    }
 }
