@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">SonicPulse</string>
+    <string name="monitoring_channel_name">Monitoring</string>
+    <string name="monitoring_notification_title">SonicPulse monitoring active</string>
 </resources>
