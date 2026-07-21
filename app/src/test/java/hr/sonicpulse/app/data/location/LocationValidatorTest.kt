@@ -7,76 +7,71 @@ import org.junit.Test
 class LocationValidatorTest {
 
     private val policy = LocationPolicy(maxLocationAgeMillis = 10_000, maxLocationAccuracyMeters = 50.0f)
+    private val now = 1_000_000_000_000L
 
     private fun fix(
-        ageMillis: Long = 0,
-        accuracyMeters: Float = 10.0f,
-        nowElapsedRealtimeNanos: Long = 1_000_000_000_000L
+        elapsedRealtimeNanos: Long,
+        accuracyMeters: Float = 10.0f
     ): RawLocationFix = RawLocationFix(
         latitude = 45.0,
         longitude = 15.0,
         accuracyMeters = accuracyMeters,
-        elapsedRealtimeNanos = nowElapsedRealtimeNanos - ageMillis * 1_000_000L
+        elapsedRealtimeNanos = elapsedRealtimeNanos
     )
 
-    private val now = 1_000_000_000_000L
-
     @Test
-    fun `no permission is reported even when a fresh, accurate fix is available`() {
-        val result = LocationValidator.evaluate(
-            fix = fix(ageMillis = 0, accuracyMeters = 10.0f, nowElapsedRealtimeNanos = now),
-            permissionLevel = LocationPermissionLevel.NONE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
-        )
-
-        assertEquals(LocationSnapshot.PermissionDenied, result)
-    }
-
-    @Test
-    fun `permission granted but no fix yet is reported as NoFixYet`() {
-        val result = LocationValidator.evaluate(
-            fix = null,
-            permissionLevel = LocationPermissionLevel.FINE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
-        )
+    fun `no fix yet is reported when there is no fix at all`() {
+        val result = LocationValidator.evaluate(fix = null, policy = policy, nowElapsedRealtimeNanos = now)
 
         assertEquals(LocationSnapshot.NoFixYet, result)
     }
 
     @Test
-    fun `a fix exactly at the max age boundary is still valid`() {
-        val result = LocationValidator.evaluate(
-            fix = fix(ageMillis = policy.maxLocationAgeMillis, nowElapsedRealtimeNanos = now),
-            permissionLevel = LocationPermissionLevel.FINE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
-        )
+    fun `a fix timestamped exactly now is valid`() {
+        val result = LocationValidator.evaluate(fix(elapsedRealtimeNanos = now), policy, now)
 
         assertEquals(LocationSnapshot.Valid(45.0, 15.0, 10.0f), result)
     }
 
     @Test
-    fun `a fix one millisecond beyond the max age is stale`() {
-        val ageMillis = policy.maxLocationAgeMillis + 1
-        val result = LocationValidator.evaluate(
-            fix = fix(ageMillis = ageMillis, nowElapsedRealtimeNanos = now),
-            permissionLevel = LocationPermissionLevel.FINE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
-        )
+    fun `a fix timestamped one nanosecond in the future is invalid`() {
+        val result = LocationValidator.evaluate(fix(elapsedRealtimeNanos = now + 1), policy, now)
 
-        assertEquals(LocationSnapshot.Stale(ageMillis), result)
+        assertEquals(LocationSnapshot.Invalid, result)
+    }
+
+    @Test
+    fun `a fix timestamped far in the future is invalid`() {
+        val result = LocationValidator.evaluate(fix(elapsedRealtimeNanos = now + 1_000_000_000_000L), policy, now)
+
+        assertEquals(LocationSnapshot.Invalid, result)
+    }
+
+    @Test
+    fun `a fix exactly at the max age boundary is still valid`() {
+        val maxAgeNanos = policy.maxLocationAgeMillis * 1_000_000L
+        val result = LocationValidator.evaluate(fix(elapsedRealtimeNanos = now - maxAgeNanos), policy, now)
+
+        assertEquals(LocationSnapshot.Valid(45.0, 15.0, 10.0f), result)
+    }
+
+    @Test
+    fun `a fix one nanosecond beyond the max age boundary is stale`() {
+        val maxAgeNanos = policy.maxLocationAgeMillis * 1_000_000L
+        val elapsedRealtimeNanos = now - maxAgeNanos - 1
+        val expectedAgeMillis = (now - elapsedRealtimeNanos) / 1_000_000L
+
+        val result = LocationValidator.evaluate(fix(elapsedRealtimeNanos), policy, now)
+
+        assertEquals(LocationSnapshot.Stale(expectedAgeMillis), result)
     }
 
     @Test
     fun `a fix exactly at the max accuracy boundary is still valid`() {
         val result = LocationValidator.evaluate(
-            fix = fix(accuracyMeters = policy.maxLocationAccuracyMeters, nowElapsedRealtimeNanos = now),
-            permissionLevel = LocationPermissionLevel.FINE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
+            fix(elapsedRealtimeNanos = now, accuracyMeters = policy.maxLocationAccuracyMeters),
+            policy,
+            now
         )
 
         assertEquals(LocationSnapshot.Valid(45.0, 15.0, policy.maxLocationAccuracyMeters), result)
@@ -85,40 +80,21 @@ class LocationValidatorTest {
     @Test
     fun `a fix just above the max accuracy is inaccurate`() {
         val accuracy = policy.maxLocationAccuracyMeters + 0.01f
-        val result = LocationValidator.evaluate(
-            fix = fix(accuracyMeters = accuracy, nowElapsedRealtimeNanos = now),
-            permissionLevel = LocationPermissionLevel.FINE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
-        )
+        val result = LocationValidator.evaluate(fix(elapsedRealtimeNanos = now, accuracyMeters = accuracy), policy, now)
 
         assertEquals(LocationSnapshot.Inaccurate(accuracy), result)
     }
 
     @Test
     fun `a fix that is both stale and inaccurate is classified as stale`() {
-        val ageMillis = policy.maxLocationAgeMillis + 1
+        val maxAgeNanos = policy.maxLocationAgeMillis * 1_000_000L
+        val elapsedRealtimeNanos = now - maxAgeNanos - 1
+        val expectedAgeMillis = (now - elapsedRealtimeNanos) / 1_000_000L
         val accuracy = policy.maxLocationAccuracyMeters + 10.0f
-        val result = LocationValidator.evaluate(
-            fix = fix(ageMillis = ageMillis, accuracyMeters = accuracy, nowElapsedRealtimeNanos = now),
-            permissionLevel = LocationPermissionLevel.FINE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
-        )
 
-        assertEquals(LocationSnapshot.Stale(ageMillis), result)
-    }
+        val result = LocationValidator.evaluate(fix(elapsedRealtimeNanos, accuracy), policy, now)
 
-    @Test
-    fun `a fresh, accurate fix with permission is valid and passes through its coordinates`() {
-        val result = LocationValidator.evaluate(
-            fix = fix(ageMillis = 100, accuracyMeters = 5.0f, nowElapsedRealtimeNanos = now),
-            permissionLevel = LocationPermissionLevel.COARSE,
-            policy = policy,
-            nowElapsedRealtimeNanos = now
-        )
-
-        assertEquals(LocationSnapshot.Valid(45.0, 15.0, 5.0f), result)
+        assertEquals(LocationSnapshot.Stale(expectedAgeMillis), result)
     }
 
     @Test

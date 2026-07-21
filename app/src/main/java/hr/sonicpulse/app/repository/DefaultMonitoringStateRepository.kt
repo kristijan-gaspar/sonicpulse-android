@@ -34,11 +34,11 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     }
 
     override fun monitoringFailed(error: AudioCaptureError) {
-        _state.update { it.copy(isMonitoring = false, captureError = error) }
+        _state.update { it.copy(isMonitoring = false, captureError = error, startupError = null) }
     }
 
     override fun monitoringStartupFailed(failure: MonitoringStartupFailure) {
-        _state.update { it.copy(isMonitoring = false, startupError = failure) }
+        _state.update { it.copy(isMonitoring = false, startupError = failure, captureError = null) }
     }
 
     override fun publishMetrics(metrics: BlockMetrics) {

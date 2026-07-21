@@ -114,6 +114,42 @@ class DefaultMonitoringStateRepositoryTest {
     }
 
     @Test
+    fun `monitoringStartupFailed clears a previous capture error so both are never set together`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        repository.monitoringStartupFailed(MonitoringStartupFailure.LocationServicesDisabled)
+
+        val state = repository.state.value
+        assertNull(state.captureError)
+        assertEquals(MonitoringStartupFailure.LocationServicesDisabled, state.startupError)
+    }
+
+    @Test
+    fun `monitoringFailed clears a previous startup error so both are never set together`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStartupFailed(MonitoringStartupFailure.LocationServicesDisabled)
+
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        val state = repository.state.value
+        assertNull(state.startupError)
+        assertEquals(AudioCaptureError.PermissionDenied, state.captureError)
+    }
+
+    @Test
+    fun `monitoringStarted clears both capture and startup errors`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        repository.monitoringStarted()
+
+        val state = repository.state.value
+        assertNull(state.captureError)
+        assertNull(state.startupError)
+    }
+
+    @Test
     fun `monitoringStarted sets isMonitoring true`() {
         val repository = DefaultMonitoringStateRepository()
 

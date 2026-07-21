@@ -22,6 +22,7 @@ import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.audio.AudioRecorder
 import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
+import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
@@ -39,9 +40,16 @@ import kotlinx.coroutines.launch
  * Owns the active monitoring process (§2.6/§2.11): audio capture and engine processing run
  * synchronously on AudioRecorder's own capture thread (no separate executor here, per the
  * threading contract) — this service only coordinates lifecycle and publishes state. Location
- * updates run alongside audio capture (foregroundServiceType "microphone|location"); the audio
- * thread itself never touches LocationProvider — a detected block's location snapshot is read
- * on this service's own coroutine scope, after the lightweight local-detection payload is built.
+ * updates run alongside audio capture (foregroundServiceType "microphone|location"), started
+ * asynchronously via LocationProvider.start() — AudioRecorder only starts once that reports
+ * LocationStartResult.Started. [MonitoringLifecycleCoordinator] guards this asynchronous startup
+ * with a generation token, so a location result that arrives after its attempt was invalidated
+ * (e.g. by a Stop) can never resurrect state or start audio capture.
+ *
+ * The audio thread itself never touches LocationProvider except reading [LocationProvider.currentSnapshot]
+ * (a cheap volatile-field read, not I/O) at the exact moment a detection is handed off — capturing
+ * the classification as it stood then, before handing the rest of the work to this service's own
+ * coroutine scope.
  *
  * No backend submission yet in this branch.
  *
@@ -65,10 +73,10 @@ class MonitoringService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val engineConfig = EngineConfig()
     private val sessionCoordinator by lazy { MonitoringSessionCoordinator(monitoringStateRepository) }
+    private val lifecycleCoordinator = MonitoringLifecycleCoordinator()
 
     private var audioRecorder: AudioRecorder? = null
     private var firstBlockInstant: Instant? = null
-    private var isMonitoringActive = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -82,37 +90,58 @@ class MonitoringService : Service() {
     }
 
     override fun onDestroy() {
-        // Captured before cleanup: stopMonitoringInternal() sets isMonitoringActive = false,
-        // so this is the only place that can tell whether destruction interrupted an
-        // otherwise-active session (vs. one already stopped or failed via ACTION_STOP /
-        // handleCaptureError, in which case a redundant monitoringStopped() must not run).
-        val wasActive = isMonitoringActive
-        stopMonitoringInternal()
-        sessionCoordinator.endSession(wasActive)
+        val effect = lifecycleCoordinator.onStopOrDestroy()
+        if (effect is MonitoringLifecycleEffect.StopSession) {
+            sessionCoordinator.endSession(effect.wasActive)
+            tearDownCaptureAndLocation()
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
 
     private fun startMonitoringIfNeeded() {
-        if (isMonitoringActive) {
-            return
-        }
+        val effect = lifecycleCoordinator.onActionStart()
+        val generation = (effect as? MonitoringLifecycleEffect.StartLocation)?.generation ?: return
 
         val gate = MonitoringStartupGate(
             hasRecordAudioPermission = ::hasRecordAudioPermission,
             locationPermissionLevel = locationProvider::permissionLevel,
+            areLocationServicesEnabled = locationProvider::areLocationServicesEnabled,
             startForeground = ::tryStartForeground
         )
         when (val result = gate.attemptStartup()) {
-            is MonitoringStartupResult.Failed -> {
-                monitoringStateRepository.monitoringStartupFailed(result.failure)
-                // Safe even if startForeground() never succeeded (stopForeground() on a
-                // service that isn't in the foreground state is a documented no-op).
+            is MonitoringStartupResult.Failed -> abortStartup(result.failure)
+            MonitoringStartupResult.Proceed -> beginLocationStart(generation)
+        }
+    }
+
+    private fun beginLocationStart(generation: Long) {
+        locationProvider.start { result ->
+            serviceScope.launch { handleLocationStartResult(generation, result) }
+        }
+    }
+
+    private fun handleLocationStartResult(generation: Long, result: LocationStartResult) {
+        when (val effect = lifecycleCoordinator.onLocationStartResult(generation, result)) {
+            MonitoringLifecycleEffect.StartAudioCapture -> startAudioCapture()
+            is MonitoringLifecycleEffect.ReportStartupFailure -> {
+                monitoringStateRepository.monitoringStartupFailed(effect.failure)
                 stopForegroundCompat()
                 stopSelf()
             }
-            MonitoringStartupResult.Proceed -> startCaptureAndLocation()
+            MonitoringLifecycleEffect.None,
+            is MonitoringLifecycleEffect.StopSession,
+            is MonitoringLifecycleEffect.StartLocation -> Unit // stale callback or not applicable here; ignore
         }
+    }
+
+    /** A synchronous startup-gate failure (permission/location-services/foreground promotion) —
+     * nothing async was ever started, but the lifecycle must still return to IDLE. */
+    private fun abortStartup(failure: MonitoringStartupFailure) {
+        lifecycleCoordinator.onStopOrDestroy()
+        monitoringStateRepository.monitoringStartupFailed(failure)
+        stopForegroundCompat()
+        stopSelf()
     }
 
     private fun hasRecordAudioPermission(): Boolean =
@@ -139,20 +168,15 @@ class MonitoringService : Service() {
             // Message intentionally omitted: it may echo permission/package details back into
             // logs. The catch itself already tells us why this can happen (see KDoc above).
             Log.w(TAG, "startForeground() rejected the foreground service promotion")
-            ForegroundStartOutcome.PermissionDenied
+            ForegroundStartOutcome.PermissionDenied(e)
         } catch (e: IllegalStateException) {
             Log.w(TAG, "startForeground() failed for a non-permission reason")
             ForegroundStartOutcome.Failed(e)
         }
     }
 
-    private fun startCaptureAndLocation() {
-        isMonitoringActive = true
+    private fun startAudioCapture() {
         firstBlockInstant = null
-
-        // Started before audio capture, per §2.11 ordering. Location snapshots are read (not
-        // pushed) from the audio thread's handoff below, so there's no callback wiring here.
-        locationProvider.start()
 
         val engine = DetectionEngine(engineConfig)
         val recorder = AudioRecorder(
@@ -185,18 +209,18 @@ class MonitoringService : Service() {
                 engineConfig.sampleRate,
                 engineConfig.blockSize
             )
+            // Captured here, on the audio thread, at the exact moment of handoff — not inside
+            // the coroutine below, whose scheduling could otherwise let a newer location update
+            // arrive first and misrepresent what was actually known when this detection occurred.
+            val locationSnapshot = locationProvider.currentSnapshot
             val localEventId = UUID.randomUUID()
-            // Off the audio thread: the engine/peak-time math above is all that thread does.
-            // Reading the location snapshot (and everything else involving a detection) happens
-            // here instead, on this service's own scope — the same seam feature/submission will
-            // later hang its network call off of.
             serviceScope.launch {
                 monitoringStateRepository.localDetectionOccurred(
                     SessionDetection(
                         localEventId = localEventId,
                         peakDbfs = event.peakDbfs,
                         peakTimeClient = peakTimeClient,
-                        location = locationProvider.currentSnapshot
+                        location = locationSnapshot
                     )
                 )
             }
@@ -207,21 +231,31 @@ class MonitoringService : Service() {
         // monitoringFailed(error) has already been published by MonitoringSessionCoordinator
         // (synchronously, inside the onError it wraps) — this only does the Service-specific
         // cleanup that must run on this service's own coordinating thread.
-        stopMonitoringInternal()
+        val effect = lifecycleCoordinator.onStopOrDestroy()
+        if (effect !is MonitoringLifecycleEffect.StopSession) {
+            // Already torn down by an explicit stop that raced ahead of this (possibly stale)
+            // capture-error notification; nothing further to do.
+            return
+        }
+        // false, not effect.wasActive: an error already fully describes the terminal state via
+        // monitoringFailed() above — a monitoringStopped() call here must not run alongside it.
+        sessionCoordinator.endSession(wasActiveBeforeTeardown = false)
+        tearDownCaptureAndLocation()
         stopForegroundCompat()
         stopSelf()
     }
 
     private fun stopMonitoringAndService() {
-        val wasActive = isMonitoringActive
-        stopMonitoringInternal()
-        sessionCoordinator.endSession(wasActive)
+        val effect = lifecycleCoordinator.onStopOrDestroy()
+        if (effect is MonitoringLifecycleEffect.StopSession) {
+            sessionCoordinator.endSession(effect.wasActive)
+            tearDownCaptureAndLocation()
+        }
         stopForegroundCompat()
         stopSelf()
     }
 
-    private fun stopMonitoringInternal() {
-        isMonitoringActive = false
+    private fun tearDownCaptureAndLocation() {
         locationProvider.stop()
         audioRecorder?.close()
         audioRecorder = null
