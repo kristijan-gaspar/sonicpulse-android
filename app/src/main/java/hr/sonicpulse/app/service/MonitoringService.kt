@@ -66,10 +66,10 @@ class MonitoringService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopMonitoringAndService()
-        } else {
-            startMonitoringIfNeeded()
+        when (intent?.action) {
+            ACTION_START -> startMonitoringIfNeeded()
+            ACTION_STOP -> stopMonitoringAndService()
+            else -> stopSelf()
         }
         return START_NOT_STICKY
     }
@@ -95,11 +95,16 @@ class MonitoringService : Service() {
             hasRecordAudioPermission = ::hasRecordAudioPermission,
             startForeground = ::tryStartForeground
         )
-        when (gate.attemptStartup()) {
+        when (val result = gate.attemptStartup()) {
             MonitoringStartupResult.PermissionDenied -> {
                 monitoringStateRepository.monitoringFailed(AudioCaptureError.PermissionDenied)
                 // Safe even if startForeground() never succeeded (stopForeground() on a
                 // service that isn't in the foreground state is a documented no-op).
+                stopForegroundCompat()
+                stopSelf()
+            }
+            is MonitoringStartupResult.ForegroundStartFailed -> {
+                monitoringStateRepository.monitoringFailed(AudioCaptureError.Unexpected(result.cause))
                 stopForegroundCompat()
                 stopSelf()
             }
@@ -112,12 +117,12 @@ class MonitoringService : Service() {
             PackageManager.PERMISSION_GRANTED
 
     /**
-     * Returns false (instead of throwing) if the OS rejects the microphone FGS promotion.
-     * Covers both a missing/denied RECORD_AUDIO permission (SecurityException) and the OS
-     * refusing the promotion for app-state reasons, e.g. ForegroundServiceStartNotAllowedException
-     * (API 31+) — which is a subclass of IllegalStateException, not SecurityException.
+     * Distinguishes a missing/denied RECORD_AUDIO permission (SecurityException) from the OS
+     * refusing the promotion for an unrelated reason, e.g. ForegroundServiceStartNotAllowedException
+     * (API 31+) — a subclass of IllegalStateException, not SecurityException, and not a
+     * permission problem at all, so it must not be reported as PermissionDenied.
      */
-    private fun tryStartForeground(): Boolean {
+    private fun tryStartForeground(): ForegroundStartOutcome {
         createNotificationChannelIfNeeded()
         return try {
             ServiceCompat.startForeground(
@@ -126,14 +131,14 @@ class MonitoringService : Service() {
                 buildNotification(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
-            true
+            ForegroundStartOutcome.Started
         } catch (e: SecurityException) {
             // Message intentionally omitted: it may echo permission/package details back into
             // logs. The catch itself already tells us why this can happen (see KDoc above).
             Log.w(TAG, "startForeground() rejected the microphone foreground service promotion")
-            false
+            ForegroundStartOutcome.PermissionDenied
         } catch (e: IllegalStateException) {
-            false
+            ForegroundStartOutcome.Failed(e)
         }
     }
 
@@ -240,10 +245,11 @@ class MonitoringService : Service() {
         private const val TAG = "MonitoringService"
         private const val CHANNEL_ID = "monitoring_channel"
         private const val NOTIFICATION_ID = 1
+        private const val ACTION_START = "hr.sonicpulse.app.action.START_MONITORING"
         private const val ACTION_STOP = "hr.sonicpulse.app.action.STOP_MONITORING"
 
         fun startIntent(context: Context): Intent =
-            Intent(context, MonitoringService::class.java)
+            Intent(context, MonitoringService::class.java).setAction(ACTION_START)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, MonitoringService::class.java).setAction(ACTION_STOP)

@@ -1,0 +1,4 @@
+<resources>
+    <string name="notif_monitoring_active">Monitoring active</string>
+    <string name="action_stop">Stop</string>
+</resources>
