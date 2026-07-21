@@ -445,4 +445,74 @@ class DetectionEngineTest {
         assertEquals(1, firstEvents.size)
         assertEquals(1, secondEvents.size)
     }
+
+    @Test
+    fun `lastBlockMetrics is null before any block has been processed`() {
+        val engine = DetectionEngine(config)
+
+        assertNull(engine.lastBlockMetrics)
+    }
+
+    @Test
+    fun `lastBlockMetrics reflects dbfs, rms, clipRatio and a null crest for a silence block in IDLE`() {
+        val engine = DetectionEngine(config)
+
+        engine.process(silenceBlock())
+
+        val metrics = engine.lastBlockMetrics
+        assertNotNull(metrics)
+        assertEquals(0.0, metrics!!.rms, 0.0)
+        assertEquals(config.dbfsFloor, metrics.dbfs, 0.0)
+        assertEquals(0.0, metrics.clipRatio, 0.0)
+        assertNull(metrics.crest)
+        assertEquals(DetectionState.IDLE, metrics.state)
+    }
+
+    @Test
+    fun `lastBlockMetrics baseline is the pre-update value used for this block's spike, not the value after`() {
+        val engine = DetectionEngine(config)
+        val baselineBeforeFirstCall = engine.currentBaseline
+
+        engine.process(silenceBlock())
+
+        val baselineAfterFirstCall = engine.currentBaseline
+        check(baselineBeforeFirstCall != baselineAfterFirstCall) {
+            "test setup invalid: baseline did not change on the first update, " +
+                "was $baselineBeforeFirstCall before and after"
+        }
+        assertEquals(baselineBeforeFirstCall, engine.lastBlockMetrics!!.baseline, 0.0)
+    }
+
+    @Test
+    fun `lastBlockMetrics reports DETECTING right after a triggering impulse block`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+
+        assertEquals(DetectionState.DETECTING, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `lastBlockMetrics reports COOLDOWN on the block that closes a detection`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(config.endSilenceBlocks) { engine.process(silenceBlock()) }
+
+        assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `lastBlockMetrics reports IDLE on the closing block when cooldownBlocks is zero`() {
+        val zeroCooldownConfig = EngineConfig(cooldownBlocks = 0)
+        val engine = DetectionEngine(zeroCooldownConfig)
+        feedSilence(engine, zeroCooldownConfig.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(zeroCooldownConfig.endSilenceBlocks) { engine.process(silenceBlock()) }
+
+        assertEquals(DetectionState.IDLE, engine.lastBlockMetrics!!.state)
+    }
 }
