@@ -21,6 +21,7 @@ import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.audio.AudioRecorder
 import hr.sonicpulse.app.data.audio.PeakTimeCalculator
+import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
@@ -37,23 +38,29 @@ import kotlinx.coroutines.launch
 /**
  * Owns the active monitoring process (§2.6/§2.11): audio capture and engine processing run
  * synchronously on AudioRecorder's own capture thread (no separate executor here, per the
- * threading contract) — this service only coordinates lifecycle and publishes state.
+ * threading contract) — this service only coordinates lifecycle and publishes state. Location
+ * updates run alongside audio capture (foregroundServiceType "microphone|location"); the audio
+ * thread itself never touches LocationProvider — a detected block's location snapshot is read
+ * on this service's own coroutine scope, after the lightweight local-detection payload is built.
  *
- * Microphone-only for this branch: no location, no backend submission.
+ * No backend submission yet in this branch.
  *
  * Must only be started (via [startIntent]) from a visible user action (e.g. a Start button on
- * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO) to apply, and
- * the future UI is expected to have already requested and confirmed RECORD_AUDIO before calling
- * `startForegroundService()`. This service still defensively re-checks RECORD_AUDIO itself
- * (via [MonitoringStartupGate]) — Android 14+ validates the permission again when promoting a
- * microphone-typed foreground service, so `ServiceCompat.startForeground()` can fail with a
- * SecurityException even when a permission check moments earlier passed.
+ * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO, location) to
+ * apply, and the future UI is expected to have already requested and confirmed both permissions
+ * before calling `startForegroundService()`. This service still defensively re-checks both
+ * itself (via [MonitoringStartupGate]) — Android 14+ validates permissions again when promoting
+ * a foreground service, so `ServiceCompat.startForeground()` can fail with a SecurityException
+ * even when a permission check moments earlier passed.
  */
 @AndroidEntryPoint
 class MonitoringService : Service() {
 
     @Inject
     lateinit var monitoringStateRepository: MonitoringStateRepository
+
+    @Inject
+    lateinit var locationProvider: LocationProvider
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val engineConfig = EngineConfig()
@@ -93,22 +100,18 @@ class MonitoringService : Service() {
 
         val gate = MonitoringStartupGate(
             hasRecordAudioPermission = ::hasRecordAudioPermission,
+            locationPermissionLevel = locationProvider::permissionLevel,
             startForeground = ::tryStartForeground
         )
         when (val result = gate.attemptStartup()) {
-            MonitoringStartupResult.PermissionDenied -> {
-                monitoringStateRepository.monitoringFailed(AudioCaptureError.PermissionDenied)
+            is MonitoringStartupResult.Failed -> {
+                monitoringStateRepository.monitoringStartupFailed(result.failure)
                 // Safe even if startForeground() never succeeded (stopForeground() on a
                 // service that isn't in the foreground state is a documented no-op).
                 stopForegroundCompat()
                 stopSelf()
             }
-            is MonitoringStartupResult.ForegroundStartFailed -> {
-                monitoringStateRepository.monitoringFailed(AudioCaptureError.Unexpected(result.cause))
-                stopForegroundCompat()
-                stopSelf()
-            }
-            MonitoringStartupResult.Proceed -> startAudioCapture()
+            MonitoringStartupResult.Proceed -> startCaptureAndLocation()
         }
     }
 
@@ -117,10 +120,10 @@ class MonitoringService : Service() {
             PackageManager.PERMISSION_GRANTED
 
     /**
-     * Distinguishes a missing/denied RECORD_AUDIO permission (SecurityException) from the OS
-     * refusing the promotion for an unrelated reason, e.g. ForegroundServiceStartNotAllowedException
-     * (API 31+) — a subclass of IllegalStateException, not SecurityException, and not a
-     * permission problem at all, so it must not be reported as PermissionDenied.
+     * Distinguishes a missing/denied permission (SecurityException — could be RECORD_AUDIO or
+     * location; MonitoringStartupGate attributes which one) from the OS refusing the promotion
+     * for an unrelated reason, e.g. ForegroundServiceStartNotAllowedException (API 31+) — a
+     * subclass of IllegalStateException, not SecurityException, and not a permission problem.
      */
     private fun tryStartForeground(): ForegroundStartOutcome {
         createNotificationChannelIfNeeded()
@@ -129,13 +132,13 @@ class MonitoringService : Service() {
                 this,
                 NOTIFICATION_ID,
                 buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             )
             ForegroundStartOutcome.Started
         } catch (e: SecurityException) {
             // Message intentionally omitted: it may echo permission/package details back into
             // logs. The catch itself already tells us why this can happen (see KDoc above).
-            Log.w(TAG, "startForeground() rejected the microphone foreground service promotion")
+            Log.w(TAG, "startForeground() rejected the foreground service promotion")
             ForegroundStartOutcome.PermissionDenied
         } catch (e: IllegalStateException) {
             Log.w(TAG, "startForeground() failed for a non-permission reason")
@@ -143,9 +146,13 @@ class MonitoringService : Service() {
         }
     }
 
-    private fun startAudioCapture() {
+    private fun startCaptureAndLocation() {
         isMonitoringActive = true
         firstBlockInstant = null
+
+        // Started before audio capture, per §2.11 ordering. Location snapshots are read (not
+        // pushed) from the audio thread's handoff below, so there's no callback wiring here.
+        locationProvider.start()
 
         val engine = DetectionEngine(engineConfig)
         val recorder = AudioRecorder(
@@ -178,13 +185,21 @@ class MonitoringService : Service() {
                 engineConfig.sampleRate,
                 engineConfig.blockSize
             )
-            monitoringStateRepository.localDetectionOccurred(
-                SessionDetection(
-                    localEventId = UUID.randomUUID(),
-                    peakDbfs = event.peakDbfs,
-                    peakTimeClient = peakTimeClient
+            val localEventId = UUID.randomUUID()
+            // Off the audio thread: the engine/peak-time math above is all that thread does.
+            // Reading the location snapshot (and everything else involving a detection) happens
+            // here instead, on this service's own scope — the same seam feature/submission will
+            // later hang its network call off of.
+            serviceScope.launch {
+                monitoringStateRepository.localDetectionOccurred(
+                    SessionDetection(
+                        localEventId = localEventId,
+                        peakDbfs = event.peakDbfs,
+                        peakTimeClient = peakTimeClient,
+                        location = locationProvider.currentSnapshot
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -207,6 +222,7 @@ class MonitoringService : Service() {
 
     private fun stopMonitoringInternal() {
         isMonitoringActive = false
+        locationProvider.stop()
         audioRecorder?.close()
         audioRecorder = null
     }

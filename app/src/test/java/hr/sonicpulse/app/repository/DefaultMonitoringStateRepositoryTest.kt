@@ -1,7 +1,9 @@
 package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
+import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import hr.sonicpulse.engine.DetectionState
 import org.junit.Assert.assertEquals
@@ -31,7 +33,8 @@ class DefaultMonitoringStateRepositoryTest {
     private fun detection(peakDbfs: Double = -10.0) = SessionDetection(
         localEventId = UUID.randomUUID(),
         peakDbfs = peakDbfs,
-        peakTimeClient = Instant.EPOCH
+        peakTimeClient = Instant.EPOCH,
+        location = LocationSnapshot.NoFixYet
     )
 
     @Test
@@ -44,6 +47,38 @@ class DefaultMonitoringStateRepositoryTest {
         assertEquals(DetectionState.IDLE, state.engineState)
         assertTrue(state.sessionDetections.isEmpty())
         assertNull(state.captureError)
+        assertNull(state.startupError)
+    }
+
+    @Test
+    fun `monitoringStartupFailed sets isMonitoring false and stores the startup error`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repository.monitoringStartupFailed(MonitoringStartupFailure.LocationPermissionDenied)
+
+        val state = repository.state.value
+        assertFalse(state.isMonitoring)
+        assertEquals(MonitoringStartupFailure.LocationPermissionDenied, state.startupError)
+    }
+
+    @Test
+    fun `monitoringStarted clears a previous startup error`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStartupFailed(MonitoringStartupFailure.MicrophonePermissionDenied)
+
+        repository.monitoringStarted()
+
+        assertNull(repository.state.value.startupError)
+    }
+
+    @Test
+    fun `monitoringStopped does not set a startup error`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStarted()
+
+        repository.monitoringStopped()
+
+        assertNull(repository.state.value.startupError)
     }
 
     @Test

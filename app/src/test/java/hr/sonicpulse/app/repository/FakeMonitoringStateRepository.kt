@@ -2,6 +2,7 @@ package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +27,10 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
 
     override fun monitoringFailed(error: AudioCaptureError) {
         _state.update { it.copy(isMonitoring = false, captureError = error) }
+    }
+
+    override fun monitoringStartupFailed(failure: MonitoringStartupFailure) {
+        _state.update { it.copy(isMonitoring = false, startupError = failure) }
     }
 
     override fun publishMetrics(metrics: BlockMetrics) {

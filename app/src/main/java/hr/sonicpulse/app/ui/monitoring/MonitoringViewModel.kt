@@ -35,5 +35,6 @@ private fun MonitoringState.toUiState(): MonitoringUiState = MonitoringUiState(
     liveBaseline = liveBaseline,
     engineState = engineState,
     sessionDetections = sessionDetections,
-    captureError = captureError
+    captureError = captureError,
+    startupError = startupError
 )
