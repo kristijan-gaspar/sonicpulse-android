@@ -138,6 +138,7 @@ class MonitoringService : Service() {
             Log.w(TAG, "startForeground() rejected the microphone foreground service promotion")
             ForegroundStartOutcome.PermissionDenied
         } catch (e: IllegalStateException) {
+            Log.w(TAG, "startForeground() failed for a non-permission reason")
             ForegroundStartOutcome.Failed(e)
         }
     }
