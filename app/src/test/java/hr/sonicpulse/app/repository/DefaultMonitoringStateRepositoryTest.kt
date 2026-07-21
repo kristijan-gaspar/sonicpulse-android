@@ -1,10 +1,12 @@
 package hr.sonicpulse.app.repository
 
+import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.engine.BlockMetrics
 import hr.sonicpulse.engine.DetectionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -41,6 +43,39 @@ class DefaultMonitoringStateRepositoryTest {
         assertFalse(state.isMonitoring)
         assertEquals(DetectionState.IDLE, state.engineState)
         assertTrue(state.sessionDetections.isEmpty())
+        assertNull(state.captureError)
+    }
+
+    @Test
+    fun `monitoringFailed sets isMonitoring false and stores the capture error`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStarted()
+
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        val state = repository.state.value
+        assertFalse(state.isMonitoring)
+        assertEquals(AudioCaptureError.PermissionDenied, state.captureError)
+    }
+
+    @Test
+    fun `monitoringStarted clears a previous capture error`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        repository.monitoringStarted()
+
+        assertNull(repository.state.value.captureError)
+    }
+
+    @Test
+    fun `monitoringStopped does not set a capture error`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStarted()
+
+        repository.monitoringStopped()
+
+        assertNull(repository.state.value.captureError)
     }
 
     @Test
