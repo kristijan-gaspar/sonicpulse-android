@@ -9,16 +9,15 @@ import hr.sonicpulse.engine.metrics.TriggerEvaluator
 
 class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
 
-    private enum class State { IDLE, DETECTING, COOLDOWN }
-
     private data class BlockSignal(
+        val rms: Double,
         val dbfs: Double,
         val clipRatio: Double,
         val crest: Double?,
         val spike: Double
     )
 
-    private var state = State.IDLE
+    private var state = DetectionState.IDLE
     private var processedBlockIndex = 0L
     private var consecutiveNonTriggerBlocks = 0
     private var cooldownBlockCount = 0
@@ -30,6 +29,9 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
 
     val currentBaseline: Double get() = baseline.value
 
+    var lastBlockMetrics: BlockMetrics? = null
+        private set
+
     fun process(block: ShortArray): DetectionEvent? {
         require(block.size == config.blockSize) {
             "Block size must be ${config.blockSize}, was ${block.size}."
@@ -40,20 +42,33 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
 
         val stateAtEntry = state
         val signal = analyzeBlock(block)
+        val baselineUsedForSpike = baseline.value
         val triggered = blockIndex >= config.warmupBlocks &&
             TriggerEvaluator.shouldTrigger(signal.dbfs, signal.spike, signal.crest, signal.clipRatio, config)
 
         // Baseline reflects the established background, not the candidate block itself:
         // a block that starts a detection must not be allowed to raise its own reference.
-        if (stateAtEntry == State.IDLE && !triggered) {
+        if (stateAtEntry == DetectionState.IDLE && !triggered) {
             baseline.update(signal.dbfs)
         }
 
-        return when (stateAtEntry) {
-            State.IDLE -> handleIdle(triggered, signal.dbfs, blockIndex)
-            State.DETECTING -> handleDetecting(triggered, signal.dbfs, blockIndex)
-            State.COOLDOWN -> handleCooldown()
+        val event = when (stateAtEntry) {
+            DetectionState.IDLE -> handleIdle(triggered, signal.dbfs, blockIndex)
+            DetectionState.DETECTING -> handleDetecting(triggered, signal.dbfs, blockIndex)
+            DetectionState.COOLDOWN -> handleCooldown()
         }
+
+        lastBlockMetrics = BlockMetrics(
+            rms = signal.rms,
+            dbfs = signal.dbfs,
+            baseline = baselineUsedForSpike,
+            spike = signal.spike,
+            crest = signal.crest,
+            clipRatio = signal.clipRatio,
+            state = state
+        )
+
+        return event
     }
 
     private fun analyzeBlock(block: ShortArray): BlockSignal {
@@ -63,12 +78,12 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
         val crest = crestTracker.currentCrest()
         val spike = SpikeCalculator.calculateSpike(level.dbfs, baseline.value)
 
-        return BlockSignal(level.dbfs, clipRatio, crest, spike)
+        return BlockSignal(level.rms, level.dbfs, clipRatio, crest, spike)
     }
 
     private fun handleIdle(triggered: Boolean, dbfs: Double, blockIndex: Long): DetectionEvent? {
         if (triggered) {
-            state = State.DETECTING
+            state = DetectionState.DETECTING
             consecutiveNonTriggerBlocks = 0
             eventPeakDbfs = dbfs
             eventPeakBlockIndex = blockIndex
@@ -92,7 +107,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             return null
         }
 
-        state = if (config.cooldownBlocks == 0) State.IDLE else State.COOLDOWN
+        state = if (config.cooldownBlocks == 0) DetectionState.IDLE else DetectionState.COOLDOWN
         cooldownBlockCount = 0
         return DetectionEvent(peakDbfs = eventPeakDbfs, peakBlockIndex = eventPeakBlockIndex)
     }
@@ -100,7 +115,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
     private fun handleCooldown(): DetectionEvent? {
         cooldownBlockCount++
         if (cooldownBlockCount >= config.cooldownBlocks) {
-            state = State.IDLE
+            state = DetectionState.IDLE
         }
         return null
     }
