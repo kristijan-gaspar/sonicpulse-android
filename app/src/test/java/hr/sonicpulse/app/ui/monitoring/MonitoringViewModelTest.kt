@@ -1,8 +1,10 @@
 package hr.sonicpulse.app.ui.monitoring
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
+import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.repository.FakeMonitoringStateRepository
+import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import hr.sonicpulse.engine.DetectionState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -89,7 +91,7 @@ class MonitoringViewModelTest {
         val repository = FakeMonitoringStateRepository()
         val viewModel = MonitoringViewModel(repository)
 
-        val detection = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH)
+        val detection = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH, LocationSnapshot.NoFixYet)
         repository.localDetectionOccurred(detection)
         advanceUntilIdle()
 
@@ -105,5 +107,16 @@ class MonitoringViewModelTest {
         advanceUntilIdle()
 
         assertEquals(AudioCaptureError.PermissionDenied, viewModel.uiState.value.captureError)
+    }
+
+    @Test
+    fun `ui state reflects a startup error`() = runTest(testDispatcher) {
+        val repository = FakeMonitoringStateRepository()
+        val viewModel = MonitoringViewModel(repository)
+
+        repository.monitoringStartupFailed(MonitoringStartupFailure.LocationPermissionDenied)
+        advanceUntilIdle()
+
+        assertEquals(MonitoringStartupFailure.LocationPermissionDenied, viewModel.uiState.value.startupError)
     }
 }

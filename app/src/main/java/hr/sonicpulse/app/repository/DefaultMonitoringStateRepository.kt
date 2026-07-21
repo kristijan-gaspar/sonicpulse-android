@@ -2,6 +2,7 @@ package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,7 +34,11 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     }
 
     override fun monitoringFailed(error: AudioCaptureError) {
-        _state.update { it.copy(isMonitoring = false, captureError = error) }
+        _state.update { it.copy(isMonitoring = false, captureError = error, startupError = null) }
+    }
+
+    override fun monitoringStartupFailed(failure: MonitoringStartupFailure) {
+        _state.update { it.copy(isMonitoring = false, startupError = failure, captureError = null) }
     }
 
     override fun publishMetrics(metrics: BlockMetrics) {
