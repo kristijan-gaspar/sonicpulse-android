@@ -30,15 +30,16 @@ sealed interface ForegroundStartOutcome {
 /**
  * Decides whether it's safe to start audio capture and location updates. Checks run in order:
  * RECORD_AUDIO permission, location permission (COARSE or FINE), system location services
- * enabled, then foreground promotion. All three checks re-run once more after a successful
- * [startForeground] call (Android 14+ validates permissions again when promoting a foreground
- * service, so it can fail with [ForegroundStartOutcome.PermissionDenied] even when the earlier
- * checks passed). When that happens, the gate re-checks both permissions to attribute the
- * failure to the one that's actually missing — if neither explains it, the original
- * SecurityException is preserved as an unattributed [MonitoringStartupFailure.ForegroundStartFailed],
- * never assumed to be a location-permission problem by default.
- * [ForegroundStartOutcome.Failed] (e.g. ForegroundServiceStartNotAllowedException) is always a
- * distinct, non-permission failure.
+ * enabled, then foreground promotion. Only the two permission checks — not the location-services
+ * check — re-run once more after a successful [startForeground] call (Android 14+ validates
+ * permissions again when promoting a foreground service, so it can fail with
+ * [ForegroundStartOutcome.PermissionDenied] even when the earlier checks passed; there is no
+ * equivalent re-validation of location services at promotion time). When that SecurityException
+ * happens, the gate re-checks both permissions to attribute the failure to the one that's
+ * actually missing — if neither explains it, the original SecurityException is preserved as an
+ * unattributed [MonitoringStartupFailure.ForegroundStartFailed], never assumed to be a
+ * location-permission problem by default. [ForegroundStartOutcome.Failed] (e.g.
+ * ForegroundServiceStartNotAllowedException) is always a distinct, non-permission failure.
  */
 class MonitoringStartupGate(
     private val hasRecordAudioPermission: () -> Boolean,

@@ -2,7 +2,7 @@ package hr.sonicpulse.app.service
 
 import hr.sonicpulse.app.data.location.LocationStartResult
 
-enum class MonitoringLifecycleState { IDLE, STARTING, ACTIVE, STOPPING }
+enum class MonitoringLifecycleState { IDLE, STARTING, ACTIVE }
 
 sealed interface MonitoringLifecycleEffect {
     data class StartLocation(val generation: Long) : MonitoringLifecycleEffect
@@ -77,6 +77,6 @@ class MonitoringLifecycleCoordinator {
             state = MonitoringLifecycleState.IDLE
             MonitoringLifecycleEffect.StopSession(wasActive = true)
         }
-        MonitoringLifecycleState.IDLE, MonitoringLifecycleState.STOPPING -> MonitoringLifecycleEffect.None
+        MonitoringLifecycleState.IDLE -> MonitoringLifecycleEffect.None
     }
 }

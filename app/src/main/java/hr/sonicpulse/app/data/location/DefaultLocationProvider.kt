@@ -17,10 +17,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Session-safe: start()/stop() are idempotent, stop() always removes the callback (so a later
- * start() never registers a duplicate), and a cancelled attempt can never affect a later session
- * (a late success/failure for an already-invalidated callback is detected by identity and
- * discarded — see completeAttempt). A recent cached fix survives across sessions; only its age
+ * Session-safe: start()/stop() are idempotent, stop() always removes the active callback (so a
+ * later start() never registers a duplicate), and every accepted start attempt (see
+ * [LocationStartTracker]) resolves its onResult exactly once — including a restart after an
+ * async failure/cancellation, and discarding a late Task result or location update that belongs
+ * to an already-invalidated attempt. A recent cached fix survives across sessions; only its age
  * (evaluated fresh on every read, never cached) determines whether it's still Valid.
  */
 @Singleton
@@ -31,9 +32,12 @@ class DefaultLocationProvider @Inject constructor(
     private val locationPolicy = LocationPolicy()
     private val fusedClient = LocationServices.getFusedLocationProviderClient(context)
     private val lock = Any()
+    private val tracker = LocationStartTracker()
 
-    private var callback: LocationCallback? = null
-    private var pendingOnResult: ((LocationStartResult) -> Unit)? = null
+    /** The callback currently registered with fusedClient, if any — tracked separately from
+     * [tracker] because only DefaultLocationProvider knows the real Play Services object to
+     * call removeLocationUpdates() on; [tracker] only reasons about opaque token identity. */
+    private var activeCallback: LocationCallback? = null
 
     @Volatile
     private var lastFix: RawLocationFix? = null
@@ -60,26 +64,16 @@ class DefaultLocationProvider @Inject constructor(
 
     override fun start(onResult: (LocationStartResult) -> Unit) {
         synchronized(lock) {
-            if (callback != null) {
-                // Already running, or an attempt is already pending. The caller (the service's
-                // own lifecycle coordinator) guarantees start() is never invoked again while a
-                // session is STARTING/ACTIVE, so this should not happen in practice — reject
-                // silently rather than inventing new semantics for a call that should not occur.
-                return
-            }
-            if (permissionLevel() == LocationPermissionLevel.NONE) {
-                onResult(LocationStartResult.PermissionDenied)
-                return
-            }
-            // Re-checked here, not just by the caller's own gate: location services can be
-            // toggled off by the user at any time, including between the gate's check and now.
-            if (!areLocationServicesEnabled()) {
-                onResult(LocationStartResult.LocationServicesDisabled)
-                return
-            }
-
             val newCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
+                    // Only the currently active attempt may update lastFix. removeLocationUpdates()
+                    // is asynchronous, so a callback belonging to a stopped or superseded session
+                    // can still be delivered after the fact — both this check and every mutation
+                    // of the tracker/activeCallback happen exclusively on the main thread
+                    // (Looper.getMainLooper() below), so no extra synchronization is needed here.
+                    if (!tracker.isCurrent(this)) {
+                        return
+                    }
                     val location = result.lastLocation ?: return
                     val fix = try {
                         RawLocationFix(
@@ -96,53 +90,67 @@ class DefaultLocationProvider @Inject constructor(
                 }
             }
 
+            if (tracker.begin(newCallback, onResult) !is LocationStartTracker.BeginResult.Accepted) {
+                // Already running or an attempt is already pending. The caller (the service's
+                // own lifecycle coordinator) guarantees start() is never invoked again while a
+                // session is STARTING/ACTIVE, so this should not happen in practice — reject
+                // silently rather than inventing new semantics for a call that should not occur.
+                return
+            }
+
+            if (permissionLevel() == LocationPermissionLevel.NONE) {
+                resolve(newCallback, LocationStartResult.PermissionDenied)
+                return
+            }
+            // Re-checked here, not just by the caller's own gate: location services can be
+            // toggled off by the user at any time, including between the gate's check and now.
+            if (!areLocationServicesEnabled()) {
+                resolve(newCallback, LocationStartResult.LocationServicesDisabled)
+                return
+            }
+
             val request = LocationRequest.Builder(locationPolicy.updateIntervalMillis)
                 .setPriority(locationPolicy.priority)
                 .build()
 
-            callback = newCallback
-            pendingOnResult = onResult
-
             try {
                 val task = fusedClient.requestLocationUpdates(request, newCallback, Looper.getMainLooper())
-                task.addOnSuccessListener {
-                    completeAttempt(newCallback) { LocationStartResult.Started }
-                }
-                task.addOnFailureListener { e ->
-                    completeAttempt(newCallback) { LocationStartResult.Failed(e) }
-                }
+                activeCallback = newCallback
+                task.addOnSuccessListener { resolve(newCallback, LocationStartResult.Started) }
+                task.addOnFailureListener { e -> resolve(newCallback, LocationStartResult.Failed(e)) }
             } catch (e: SecurityException) {
-                callback = null
-                pendingOnResult = null
-                onResult(LocationStartResult.PermissionDenied)
+                resolve(newCallback, LocationStartResult.PermissionDenied)
             }
         }
     }
 
-    /** Resolves a pending attempt only if [forCallback] is still the current one; otherwise it
-     * was already invalidated by [stop] — remove the now-orphaned callback and report nothing
-     * (Cancelled was already reported, exactly once, at invalidation time). */
-    private fun completeAttempt(forCallback: LocationCallback, result: () -> LocationStartResult) {
-        val onResult: ((LocationStartResult) -> Unit)?
+    /** Resolves [forCallback]'s attempt via [tracker], and — for any non-Started result —
+     * removes it from fusedClient and clears [activeCallback] if it's still the active one.
+     * Safe (and a documented no-op) even if [forCallback] was never actually registered (the
+     * synchronous permission/location-services rejection paths) or was already removed by [stop]. */
+    private fun resolve(forCallback: LocationCallback, result: LocationStartResult) {
+        val outcome: LocationStartTracker.CompleteResult
         synchronized(lock) {
-            if (callback !== forCallback) {
+            outcome = tracker.complete(forCallback, result)
+            if (result !is LocationStartResult.Started) {
                 fusedClient.removeLocationUpdates(forCallback)
-                return
+                if (activeCallback === forCallback) {
+                    activeCallback = null
+                }
             }
-            onResult = pendingOnResult
-            pendingOnResult = null
         }
-        onResult?.invoke(result())
+        (outcome as? LocationStartTracker.CompleteResult.Deliver)?.onResult?.invoke(result)
     }
 
     override fun stop() {
         val onResult: ((LocationStartResult) -> Unit)?
         synchronized(lock) {
-            val current = callback ?: return
-            fusedClient.removeLocationUpdates(current)
-            callback = null
-            onResult = pendingOnResult
-            pendingOnResult = null
+            val current = activeCallback
+            onResult = tracker.stop()
+            if (current != null) {
+                fusedClient.removeLocationUpdates(current)
+                activeCallback = null
+            }
         }
         onResult?.invoke(LocationStartResult.Cancelled)
     }
