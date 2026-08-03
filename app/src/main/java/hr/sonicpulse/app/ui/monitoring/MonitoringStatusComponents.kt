@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -81,13 +82,20 @@ private data class PillStyle(val background: Color, val contentColor: Color, val
 
 @Composable
 private fun StatusDot(color: Color, blinking: Boolean) {
-    val transition = rememberInfiniteTransition(label = "statusDot")
-    val alpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = if (blinking) 0.2f else 1f,
-        animationSpec = infiniteRepeatable(animation = tween(1400), repeatMode = RepeatMode.Reverse),
-        label = "statusDotAlpha"
-    )
+    // No infiniteRepeatable at all for the static case — a non-blinking dot must not keep an
+    // animation (and its recompositions) running forever in the background.
+    val alpha = if (blinking) {
+        val transition = rememberInfiniteTransition(label = "statusDot")
+        val animatedAlpha by transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 0.2f,
+            animationSpec = infiniteRepeatable(animation = tween(1400), repeatMode = RepeatMode.Reverse),
+            label = "statusDotAlpha"
+        )
+        animatedAlpha
+    } else {
+        1f
+    }
     Box(
         modifier = Modifier
             .size(8.dp)
@@ -122,11 +130,11 @@ fun MonitoringActionButton(
     onEnableLocation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val buttonModifier = modifier.fillMaxWidth().height(54.dp)
+    val singleButtonModifier = Modifier.fillMaxWidth().height(54.dp)
     when (phase) {
         MonitoringPhase.Idle -> Button(
             onClick = onStart,
-            modifier = buttonModifier,
+            modifier = modifier.then(singleButtonModifier),
             shape = AppShapes.Button
         ) {
             Icon(Icons.Filled.PlayArrow, contentDescription = null)
@@ -135,21 +143,36 @@ fun MonitoringActionButton(
 
         MonitoringPhase.AcquiringLocation, MonitoringPhase.Listening -> OutlinedButton(
             onClick = onStop,
-            modifier = buttonModifier,
+            modifier = modifier.then(singleButtonModifier),
             shape = AppShapes.Button
         ) {
             Icon(Icons.Filled.Stop, contentDescription = null)
             Text(stringResource(R.string.action_stop), modifier = Modifier.padding(start = Spacing.sm))
         }
 
-        MonitoringPhase.PreciseLocationRequired -> Button(
-            onClick = onEnableLocation,
-            modifier = buttonModifier,
-            shape = AppShapes.Button,
-            colors = ButtonDefaults.buttonColors(containerColor = SemanticColors.Danger, contentColor = Color.White)
+        // Monitoring is still active here (§2.8) — the enable-location action must not be the
+        // only control on screen, or there would be no way to stop monitoring from this state.
+        MonitoringPhase.PreciseLocationRequired -> Column(
+            modifier = modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            Icon(Icons.Filled.LocationOn, contentDescription = null)
-            Text(stringResource(R.string.action_enable_location), modifier = Modifier.padding(start = Spacing.sm))
+            Button(
+                onClick = onEnableLocation,
+                modifier = singleButtonModifier,
+                shape = AppShapes.Button,
+                colors = ButtonDefaults.buttonColors(containerColor = SemanticColors.Danger, contentColor = Color.White)
+            ) {
+                Icon(Icons.Filled.LocationOn, contentDescription = null)
+                Text(stringResource(R.string.action_enable_location), modifier = Modifier.padding(start = Spacing.sm))
+            }
+            OutlinedButton(
+                onClick = onStop,
+                modifier = singleButtonModifier,
+                shape = AppShapes.Button
+            ) {
+                Icon(Icons.Filled.Stop, contentDescription = null)
+                Text(stringResource(R.string.action_stop), modifier = Modifier.padding(start = Spacing.sm))
+            }
         }
     }
 }
@@ -222,6 +245,30 @@ private fun MiniStatusCard(
                 StatusDot(color = dotColor, blinking = blinking)
                 Text(text = statusText, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
             }
+        }
+    }
+}
+
+/**
+ * Persistent server-configuration warning (plan §2.9's `serverConfigurationError`). Shown for the
+ * rest of the monitoring session after a 401/403 — every subsequent submission will keep failing
+ * until the API key/backend configuration is fixed, so this must stay visible independent of
+ * whatever the last individual detection's send-result banner currently shows.
+ */
+@Composable
+fun ServerConfigurationWarning(modifier: Modifier = Modifier) {
+    Surface(modifier = modifier.fillMaxWidth(), shape = AppShapes.ChipOrBadge, color = SemanticColors.DangerBg) {
+        Row(
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Icon(Icons.Filled.WarningAmber, contentDescription = null, tint = SemanticColors.Danger, modifier = Modifier.size(16.dp))
+            Text(
+                text = stringResource(R.string.error_server_configuration),
+                style = MaterialTheme.typography.labelMedium,
+                color = SemanticColors.Danger
+            )
         }
     }
 }

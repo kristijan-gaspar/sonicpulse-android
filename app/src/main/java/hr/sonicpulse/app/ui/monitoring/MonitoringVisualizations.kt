@@ -48,16 +48,23 @@ private const val RING_SWEEP_ANGLE = 270f
 /** dBFS ring (design spec §5.1A) — a 270° arc gauge with a pulsing glow while monitoring is active. */
 @Composable
 fun DbfsRing(currentDbfs: Float, active: Boolean, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "dbfsRingGlow")
-    val glowAlpha by transition.animateFloat(
-        initialValue = 0.05f,
-        targetValue = 0.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dbfsRingGlowAlpha"
-    )
+    // No infiniteRepeatable at all while inactive — an idle ring must not keep an animation (and
+    // its recompositions) running forever in the background; the glow isn't drawn then either.
+    val glowAlpha = if (active) {
+        val transition = rememberInfiniteTransition(label = "dbfsRingGlow")
+        val animatedGlowAlpha by transition.animateFloat(
+            initialValue = 0.05f,
+            targetValue = 0.2f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "dbfsRingGlowAlpha"
+        )
+        animatedGlowAlpha
+    } else {
+        0.05f
+    }
 
     val trackColor = MaterialTheme.colorScheme.outline
     val valueColor = MaterialTheme.colorScheme.primary

@@ -15,6 +15,9 @@ data class MonitoringUiState(
     val currentDbfs: Float = -120f,
     val dbfsHistory: List<Float> = emptyList(),
     val lastDetection: DetectionUiModel? = null,
+    /** Persistent for the rest of the session after a 401/403 (plan §2.9) — stays true even
+     * after a later successful submission, until monitoringStarted() resets the next session. */
+    val serverConfigurationError: Boolean = false,
     @StringRes val errorMessageRes: Int? = null,
     /** Changes on every reported failure, even repeats of the same errorMessageRes — lets the
      * Composable key a one-shot Snackbar on this instead of on errorMessageRes, which wouldn't

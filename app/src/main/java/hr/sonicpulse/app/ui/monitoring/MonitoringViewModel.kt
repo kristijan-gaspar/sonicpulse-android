@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
+import hr.sonicpulse.app.data.datastore.PermissionRequestHistory
 import hr.sonicpulse.app.data.location.LocationPermissionLevel
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.domain.model.SubmissionStatus
 import hr.sonicpulse.app.repository.MonitoringState
 import hr.sonicpulse.app.repository.MonitoringStateRepository
@@ -24,7 +26,8 @@ import kotlinx.coroutines.flow.stateIn
 
 @HiltViewModel
 class MonitoringViewModel @Inject constructor(
-    monitoringStateRepository: MonitoringStateRepository
+    monitoringStateRepository: MonitoringStateRepository,
+    private val permissionRequestHistory: PermissionRequestHistory
 ) : ViewModel() {
 
     val uiState: StateFlow<MonitoringUiState> = monitoringStateRepository.state
@@ -38,6 +41,15 @@ class MonitoringViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = monitoringStateRepository.state.value.toUiState()
         )
+
+    /** Whether [permission] has ever been requested before this installation — see
+     * [PermissionRequestHistory] for why Android itself doesn't expose this. */
+    suspend fun hasRequestedPermissionBefore(permission: String): Boolean =
+        permissionRequestHistory.hasRequestedBefore(permission)
+
+    suspend fun markPermissionRequested(permission: String) {
+        permissionRequestHistory.markRequested(permission)
+    }
 }
 
 private val TimestampFormatter: DateTimeFormatter =
@@ -51,6 +63,7 @@ private fun MonitoringState.toUiState(): MonitoringUiState = MonitoringUiState(
     currentDbfs = liveDbfs.toFloat(),
     dbfsHistory = dbfsHistory.map { it.toFloat() },
     lastDetection = sessionDetections.lastOrNull()?.toUiModel(),
+    serverConfigurationError = serverConfigurationError,
     errorMessageRes = errorMessageRes(this),
     errorEventId = errorEventId
 )
@@ -122,5 +135,22 @@ private fun coordinatesTextOf(location: LocationSnapshot): String? =
 private fun sendResultOf(status: SubmissionStatus): SendResult = when (status) {
     SubmissionStatus.Pending -> SendResult.Sending
     SubmissionStatus.Sent -> SendResult.Sent
-    is SubmissionStatus.Failed -> SendResult.Failed
+    is SubmissionStatus.Failed -> sendResultForFailure(status.reason)
+}
+
+/** Preserves the plan §2.9 distinctions the UI must show, without leaking raw HTTP codes,
+ * exceptions or other protocol/diagnostic detail — those stay in the repository's counters. */
+private fun sendResultForFailure(reason: SubmissionFailureReason): SendResult = when (reason) {
+    SubmissionFailureReason.NoLocation,
+    SubmissionFailureReason.StaleLocation,
+    SubmissionFailureReason.InaccurateLocation -> SendResult.FailedNoLocation
+    SubmissionFailureReason.NetworkError -> SendResult.FailedNetwork
+    SubmissionFailureReason.Unauthorized -> SendResult.FailedServerConfig
+    SubmissionFailureReason.LocalStorageError,
+    SubmissionFailureReason.Cancelled,
+    SubmissionFailureReason.BadRequest,
+    is SubmissionFailureReason.RateLimited,
+    is SubmissionFailureReason.ClientError,
+    is SubmissionFailureReason.ServerError,
+    is SubmissionFailureReason.UnexpectedHttpStatus -> SendResult.FailedOther
 }

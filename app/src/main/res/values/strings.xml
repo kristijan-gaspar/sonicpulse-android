@@ -52,6 +52,10 @@
     <string name="send_success">Sent</string>
     <string name="send_failed">Send failed</string>
     <string name="send_in_progress">Sending…</string>
+    <string name="send_failed_no_location">Not sent — no location</string>
+    <string name="send_failed_network">Not sent — network error</string>
+    <string name="send_failed_server_config">Not sent — server configuration</string>
+    <string name="send_failed_other">Not sent — error</string>
 
     <!-- Monitoring — transient error snackbar -->
     <string name="error_capture_generic">Audio capture stopped unexpectedly</string>
@@ -60,4 +64,11 @@
     <string name="error_startup_location_services_disabled">Location services are turned off</string>
     <string name="error_startup_location_start_failed">Could not start location</string>
     <string name="error_startup_foreground_failed">Could not start monitoring</string>
+
+    <!-- Monitoring — persistent server configuration warning -->
+    <string name="error_server_configuration">Server configuration problem — check the API key</string>
+
+    <!-- Monitoring — runtime permission flow -->
+    <string name="permission_permanently_denied_message">Permission permanently denied. Open app settings to enable it.</string>
+    <string name="action_open_settings">Open settings</string>
 </resources>

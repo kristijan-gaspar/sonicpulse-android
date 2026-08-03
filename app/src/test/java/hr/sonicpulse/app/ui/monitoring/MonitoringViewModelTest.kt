@@ -2,6 +2,7 @@ package hr.sonicpulse.app.ui.monitoring
 
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
+import hr.sonicpulse.app.data.datastore.FakePermissionRequestHistory
 import hr.sonicpulse.app.data.location.LocationPermissionLevel
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
@@ -71,7 +72,7 @@ class MonitoringViewModelTest {
     @Test
     fun `initial ui state is idle with no history and no detection`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
 
         val state = viewModel.uiState.value
 
@@ -85,7 +86,7 @@ class MonitoringViewModelTest {
     @Test
     fun `monitoringStarted with no fix yet is AcquiringLocation and Searching`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
 
         repository.monitoringStarted()
         advanceUntilIdle()
@@ -100,7 +101,7 @@ class MonitoringViewModelTest {
     @Test
     fun `a valid location fix while monitoring is Listening and Gps`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         repository.monitoringStarted()
 
         repository.updateLocationStatus(
@@ -118,7 +119,7 @@ class MonitoringViewModelTest {
     @Test
     fun `coarse permission with an inaccurate fix is PreciseLocationRequired`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         repository.monitoringStarted()
 
         repository.updateLocationStatus(
@@ -137,7 +138,7 @@ class MonitoringViewModelTest {
     fun `fine permission with an inaccurate fix is still just AcquiringLocation, not PreciseLocationRequired`() =
         runTest(testDispatcher) {
             val repository = FakeMonitoringStateRepository()
-            val viewModel = MonitoringViewModel(repository)
+            val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
             repository.monitoringStarted()
 
             repository.updateLocationStatus(
@@ -155,7 +156,7 @@ class MonitoringViewModelTest {
     @Test
     fun `location services disabled is Unavailable even with an otherwise valid fix`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         repository.monitoringStarted()
 
         repository.updateLocationStatus(
@@ -172,7 +173,7 @@ class MonitoringViewModelTest {
     fun `location services disabled never leaves phase stuck on Listening from a stale cached fix`() =
         runTest(testDispatcher) {
             val repository = FakeMonitoringStateRepository()
-            val viewModel = MonitoringViewModel(repository)
+            val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
             repository.monitoringStarted()
             repository.updateLocationStatus(
                 snapshot = LocationSnapshot.Valid(45.8, 16.0, 8.0f),
@@ -195,7 +196,7 @@ class MonitoringViewModelTest {
     @Test
     fun `monitoringStopped returns to Idle even with a residual valid location snapshot`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         repository.monitoringStarted()
         repository.updateLocationStatus(LocationSnapshot.Valid(45.8, 16.0, 8.0f), LocationPermissionLevel.FINE, true)
 
@@ -211,7 +212,7 @@ class MonitoringViewModelTest {
     @Test
     fun `publishMetrics updates currentDbfs and appends to dbfsHistory as Float`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
 
         repository.publishMetrics(metrics(dbfs = -12.5))
         advanceUntilIdle()
@@ -224,7 +225,7 @@ class MonitoringViewModelTest {
     @Test
     fun `a detection with no location fix has null coordinatesText and Sending status`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         val target = detection(location = LocationSnapshot.NoFixYet)
 
         repository.localDetectionOccurred(target)
@@ -241,7 +242,7 @@ class MonitoringViewModelTest {
     @Test
     fun `a detection with a valid location fix formats coordinatesText`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         val target = detection(location = LocationSnapshot.Valid(45.8, 16.0, 8.0f))
 
         repository.localDetectionOccurred(target)
@@ -253,7 +254,7 @@ class MonitoringViewModelTest {
     @Test
     fun `submissionSucceeded updates the last detection's sendResult to Sent`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         val target = detection()
         repository.localDetectionOccurred(target)
 
@@ -264,22 +265,115 @@ class MonitoringViewModelTest {
     }
 
     @Test
-    fun `submissionFailed updates the last detection's sendResult to Failed`() = runTest(testDispatcher) {
+    fun `submissionFailed with NetworkError maps to FailedNetwork`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         val target = detection()
         repository.localDetectionOccurred(target)
 
         repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
         advanceUntilIdle()
 
-        assertEquals(SendResult.Failed, viewModel.uiState.value.lastDetection?.sendResult)
+        assertEquals(SendResult.FailedNetwork, viewModel.uiState.value.lastDetection?.sendResult)
+    }
+
+    @Test
+    fun `submissionFailed with NoLocation, StaleLocation or InaccurateLocation all map to FailedNoLocation`() =
+        runTest(testDispatcher) {
+            listOf(
+                SubmissionFailureReason.NoLocation,
+                SubmissionFailureReason.StaleLocation,
+                SubmissionFailureReason.InaccurateLocation
+            ).forEach { reason ->
+                val repository = FakeMonitoringStateRepository()
+                val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
+                val target = detection()
+                repository.localDetectionOccurred(target)
+
+                repository.submissionFailed(target.localEventId, reason)
+                advanceUntilIdle()
+
+                assertEquals("reason $reason", SendResult.FailedNoLocation, viewModel.uiState.value.lastDetection?.sendResult)
+            }
+        }
+
+    @Test
+    fun `submissionFailed with Unauthorized maps to FailedServerConfig`() = runTest(testDispatcher) {
+        val repository = FakeMonitoringStateRepository()
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.Unauthorized)
+        advanceUntilIdle()
+
+        assertEquals(SendResult.FailedServerConfig, viewModel.uiState.value.lastDetection?.sendResult)
+    }
+
+    @Test
+    fun `submissionFailed with other reasons maps to the generic FailedOther, without leaking protocol detail`() =
+        runTest(testDispatcher) {
+            listOf(
+                SubmissionFailureReason.BadRequest,
+                SubmissionFailureReason.LocalStorageError,
+                SubmissionFailureReason.Cancelled,
+                SubmissionFailureReason.RateLimited(retryAfterSeconds = 30L),
+                SubmissionFailureReason.ClientError(httpCode = 404),
+                SubmissionFailureReason.ServerError(httpCode = 500),
+                SubmissionFailureReason.UnexpectedHttpStatus(httpCode = 302)
+            ).forEach { reason ->
+                val repository = FakeMonitoringStateRepository()
+                val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
+                val target = detection()
+                repository.localDetectionOccurred(target)
+
+                repository.submissionFailed(target.localEventId, reason)
+                advanceUntilIdle()
+
+                assertEquals("reason $reason", SendResult.FailedOther, viewModel.uiState.value.lastDetection?.sendResult)
+            }
+        }
+
+    @Test
+    fun `serverConfigurationError is reflected in ui state and stays true after a later success`() =
+        runTest(testDispatcher) {
+            val repository = FakeMonitoringStateRepository()
+            val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
+            val first = detection()
+            val second = detection()
+            repository.localDetectionOccurred(first)
+            repository.localDetectionOccurred(second)
+
+            repository.submissionFailed(first.localEventId, SubmissionFailureReason.Unauthorized)
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.serverConfigurationError)
+
+            repository.submissionSucceeded(second.localEventId)
+            advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.serverConfigurationError)
+        }
+
+    @Test
+    fun `serverConfigurationError resets to false when a new monitoring session starts`() = runTest(testDispatcher) {
+        val repository = FakeMonitoringStateRepository()
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
+        val target = detection()
+        repository.localDetectionOccurred(target)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.Unauthorized)
+        advanceUntilIdle()
+        check(viewModel.uiState.value.serverConfigurationError)
+
+        repository.monitoringStarted()
+        advanceUntilIdle()
+
+        assertTrue(!viewModel.uiState.value.serverConfigurationError)
     }
 
     @Test
     fun `a mid-session microphone permission revocation maps to the microphone-denied message`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
 
         repository.monitoringFailed(AudioCaptureError.PermissionDenied)
         advanceUntilIdle()
@@ -291,7 +385,7 @@ class MonitoringViewModelTest {
     fun `two identical consecutive failures still change errorEventId so a one-shot Snackbar can re-fire`() =
         runTest(testDispatcher) {
             val repository = FakeMonitoringStateRepository()
-            val viewModel = MonitoringViewModel(repository)
+            val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
 
             repository.monitoringFailed(AudioCaptureError.PermissionDenied)
             advanceUntilIdle()
@@ -308,7 +402,7 @@ class MonitoringViewModelTest {
     @Test
     fun `an unexpected capture error maps to the generic capture error message`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
 
         repository.monitoringFailed(AudioCaptureError.UnsupportedConfiguration)
         advanceUntilIdle()
@@ -319,7 +413,7 @@ class MonitoringViewModelTest {
     @Test
     fun `a startup failure maps to its specific message`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository)
+        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
 
         repository.monitoringStartupFailed(MonitoringStartupFailure.LocationServicesDisabled)
         advanceUntilIdle()

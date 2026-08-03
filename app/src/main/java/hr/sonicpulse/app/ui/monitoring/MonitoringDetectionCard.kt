@@ -120,11 +120,29 @@ private fun SendResultBanner(sendResult: SendResult, modifier: Modifier = Modifi
             icon = Icons.Filled.CloudDone
             textRes = R.string.send_success
         }
-        SendResult.Failed -> {
+        SendResult.FailedNoLocation -> {
             background = SemanticColors.DangerBg
             contentColor = SemanticColors.Danger
             icon = Icons.Filled.CloudOff
-            textRes = R.string.send_failed
+            textRes = R.string.send_failed_no_location
+        }
+        SendResult.FailedNetwork -> {
+            background = SemanticColors.DangerBg
+            contentColor = SemanticColors.Danger
+            icon = Icons.Filled.CloudOff
+            textRes = R.string.send_failed_network
+        }
+        SendResult.FailedServerConfig -> {
+            background = SemanticColors.DangerBg
+            contentColor = SemanticColors.Danger
+            icon = Icons.Filled.CloudOff
+            textRes = R.string.send_failed_server_config
+        }
+        SendResult.FailedOther -> {
+            background = SemanticColors.DangerBg
+            contentColor = SemanticColors.Danger
+            icon = Icons.Filled.CloudOff
+            textRes = R.string.send_failed_other
         }
         SendResult.Sending -> {
             background = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)

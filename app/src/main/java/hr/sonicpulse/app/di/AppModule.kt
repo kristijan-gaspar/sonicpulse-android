@@ -5,7 +5,9 @@ import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import hr.sonicpulse.app.data.datastore.DefaultInstallationIdRepository
+import hr.sonicpulse.app.data.datastore.DefaultPermissionRequestHistory
 import hr.sonicpulse.app.data.datastore.InstallationIdRepository
+import hr.sonicpulse.app.data.datastore.PermissionRequestHistory
 import hr.sonicpulse.app.data.location.DefaultLocationProvider
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.remote.AndroidSubmissionLogger
@@ -36,4 +38,9 @@ abstract class AppModule {
     abstract fun bindSubmissionLogger(
         impl: AndroidSubmissionLogger
     ): SubmissionLogger
+
+    @Binds
+    abstract fun bindPermissionRequestHistory(
+        impl: DefaultPermissionRequestHistory
+    ): PermissionRequestHistory
 }

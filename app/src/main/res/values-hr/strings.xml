@@ -50,6 +50,10 @@
     <string name="send_success">Poslano</string>
     <string name="send_failed">Slanje nije uspjelo</string>
     <string name="send_in_progress">Šalje se…</string>
+    <string name="send_failed_no_location">Nije poslano — nema lokacije</string>
+    <string name="send_failed_network">Nije poslano — mrežna pogreška</string>
+    <string name="send_failed_server_config">Nije poslano — konfiguracija servera</string>
+    <string name="send_failed_other">Nije poslano — pogreška</string>
 
     <!-- Monitoring — transient error snackbar -->
     <string name="error_capture_generic">Snimanje zvuka je prekinuto</string>
@@ -58,4 +62,11 @@
     <string name="error_startup_location_services_disabled">Lokacijske usluge su isključene</string>
     <string name="error_startup_location_start_failed">Pokretanje lokacije nije uspjelo</string>
     <string name="error_startup_foreground_failed">Pokretanje praćenja nije uspjelo</string>
+
+    <!-- Monitoring — persistent server configuration warning -->
+    <string name="error_server_configuration">Problem s konfiguracijom poslužitelja — provjerite API ključ</string>
+
+    <!-- Monitoring — runtime permission flow -->
+    <string name="permission_permanently_denied_message">Dozvola je trajno odbijena. Otvorite postavke aplikacije da je omogućite.</string>
+    <string name="action_open_settings">Otvori postavke</string>
 </resources>

@@ -208,6 +208,15 @@ class MonitoringService : Service() {
             onCaptureError = { error -> serviceScope.launch { handleCaptureError(error) } }
         )
 
+        // serviceScope uses Dispatchers.Main.immediate, so a synchronous capture failure (recorder
+        // calling onError before recorder.start() itself returns) runs handleCaptureError() inline
+        // — including tearDownCaptureAndLocation() — before this line, while locationPollingJob is
+        // still null (it's assigned below). That teardown can therefore never cancel a job that
+        // doesn't exist yet: only start polling if the session is genuinely still ACTIVE here.
+        if (lifecycleCoordinator.state != MonitoringLifecycleState.ACTIVE) {
+            return
+        }
+
         // The audio thread only reads currentSnapshot at the instant of a detection (§2.7); this
         // is the separate, continuous feed the Monitoring screen needs for its live status pill
         // and location card (§2.8) regardless of whether any detection ever occurs.
