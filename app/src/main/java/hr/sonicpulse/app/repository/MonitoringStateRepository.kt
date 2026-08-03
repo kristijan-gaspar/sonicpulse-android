@@ -27,6 +27,10 @@ interface MonitoringStateRepository {
     /** Nonfatal — unlike [monitoringFailed]/[monitoringStartupFailed], never touches isMonitoring. */
     fun locationRefreshFailed(failure: LocationRefreshFailure)
 
+    /** Clears a previous [locationRefreshFailed] error once a refresh succeeds. Does not touch
+     * errorEventId — a cleared error is not itself a new one-shot event to show the user. */
+    fun locationRefreshSucceeded()
+
     /** Continuously refreshed while monitoring is active — independent of any single detection. */
     fun updateLocationStatus(
         snapshot: LocationSnapshot,

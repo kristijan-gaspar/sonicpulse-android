@@ -50,7 +50,8 @@ class MonitoringServiceRefreshRaceTest {
             return
         }
         when (result) {
-            LocationStartResult.Started, LocationStartResult.Cancelled -> Unit
+            LocationStartResult.Started -> repository.locationRefreshSucceeded()
+            LocationStartResult.Cancelled -> repository.locationRefreshFailed(LocationRefreshFailure.Failed)
             LocationStartResult.PermissionDenied ->
                 repository.locationRefreshFailed(LocationRefreshFailure.PermissionDenied)
             LocationStartResult.LocationServicesDisabled -> {
@@ -207,16 +208,103 @@ class MonitoringServiceRefreshRaceTest {
     }
 
     @Test
-    fun `Cancelled during refresh creates no UI error`() {
+    fun `a current-generation Cancelled while ACTIVE publishes LocationRefreshFailure Failed`() {
         val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
         val repository = FakeMonitoringStateRepository()
         repository.monitoringStarted()
         refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
-        val eventIdBefore = repository.state.value.errorEventId
+
+        locationProvider.completeStart(LocationStartResult.Cancelled)
+
+        assertEquals(LocationRefreshFailure.Failed, repository.state.value.locationRefreshError)
+    }
+
+    @Test
+    fun `a current-generation Cancelled keeps isMonitoring true`() {
+        val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
+        val repository = FakeMonitoringStateRepository()
+        repository.monitoringStarted()
+        refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
+
+        locationProvider.completeStart(LocationStartResult.Cancelled)
+
+        assertTrue(repository.state.value.isMonitoring)
+    }
+
+    @Test
+    fun `a stale Cancelled after Stop produces no error`() {
+        val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
+        val repository = FakeMonitoringStateRepository()
+        repository.monitoringStarted()
+        refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
+        // Mirrors MonitoringService.stopMonitoringAndService(): lifecycle -> IDLE, then invalidate(),
+        // then tearDownCaptureAndLocation()'s locationProvider.stop() resolving the pending attempt.
+        lifecycleCoordinator.onStopOrDestroy()
+        refreshCoordinator.invalidate()
 
         locationProvider.completeStart(LocationStartResult.Cancelled)
 
         assertNull(repository.state.value.locationRefreshError)
+        assertTrue(repository.locationRefreshFailures.isEmpty())
+    }
+
+    @Test
+    fun `a stale Cancelled after a newer refresh produces no error`() {
+        val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
+        val repository = FakeMonitoringStateRepository()
+        repository.monitoringStarted()
+        refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
+        // The second refreshLocation() call's own locationProvider.stop() resolves the first
+        // attempt's callback with Cancelled synchronously, before the second attempt registers.
+        refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
+
+        assertNull(repository.state.value.locationRefreshError)
+        assertTrue(repository.locationRefreshFailures.isEmpty())
+    }
+
+    @Test
+    fun `Started clears a previous locationRefreshError`() {
+        val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
+        val repository = FakeMonitoringStateRepository()
+        repository.monitoringStarted()
+        repository.locationRefreshFailed(LocationRefreshFailure.PermissionDenied)
+        check(repository.state.value.locationRefreshError == LocationRefreshFailure.PermissionDenied)
+
+        refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
+        locationProvider.completeStart(LocationStartResult.Started)
+
+        assertNull(repository.state.value.locationRefreshError)
+    }
+
+    @Test
+    fun `Started does not bump errorEventId`() {
+        val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
+        val repository = FakeMonitoringStateRepository()
+        repository.monitoringStarted()
+        val eventIdBefore = repository.state.value.errorEventId
+
+        refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
+        locationProvider.completeStart(LocationStartResult.Started)
+
         assertEquals(eventIdBefore, repository.state.value.errorEventId)
+    }
+
+    @Test
+    fun `Started keeps monitoring active and preserves detections and submission counters — no session restart`() {
+        val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
+        val repository = FakeMonitoringStateRepository()
+        repository.monitoringStarted()
+        val target = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH, LocationSnapshot.NoFixYet)
+        repository.localDetectionOccurred(target)
+        repository.submissionSucceeded(target.localEventId)
+
+        refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
+        locationProvider.completeStart(LocationStartResult.Started)
+
+        // monitoringStarted() resets MonitoringState entirely — if refresh had called it again,
+        // both sessionDetections and submissionCounters would be back to empty/zero.
+        assertTrue(repository.state.value.isMonitoring)
+        assertEquals(listOf(target.localEventId), repository.state.value.sessionDetections.map { it.localEventId })
+        assertEquals(1, repository.state.value.submissionCounters.submissionSucceeded)
     }
 }

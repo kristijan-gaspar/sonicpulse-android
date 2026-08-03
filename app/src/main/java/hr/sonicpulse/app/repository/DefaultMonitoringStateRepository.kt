@@ -84,6 +84,10 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
         _state.update { it.copy(locationRefreshError = failure, errorEventId = it.errorEventId + 1) }
     }
 
+    override fun locationRefreshSucceeded() {
+        _state.update { it.copy(locationRefreshError = null) }
+    }
+
     override fun updateLocationStatus(
         snapshot: LocationSnapshot,
         permissionLevel: LocationPermissionLevel,

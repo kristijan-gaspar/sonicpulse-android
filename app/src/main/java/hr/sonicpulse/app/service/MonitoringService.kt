@@ -320,11 +320,16 @@ class MonitoringService : Service() {
             return
         }
         when (result) {
-            // The existing location-polling job already observes the fresh subscription; a
-            // genuine Cancelled reaching this point (current generation, still ACTIVE) has no
-            // user-visible effect either — refresh failure must never surface as a hard error.
-            LocationStartResult.Started,
-            LocationStartResult.Cancelled -> Unit
+            // The existing location-polling job already observes the fresh subscription — clear
+            // any error from a previous refresh attempt, since this one succeeded.
+            LocationStartResult.Started -> monitoringStateRepository.locationRefreshSucceeded()
+            // Reaching this branch at all means the guard above already confirmed we're current
+            // and still ACTIVE — our own stop() (superseded/Stop/destroy) would never get here,
+            // since that always changes generation and/or lifecycle state first. A Cancelled that
+            // DOES reach this point is therefore a genuine failure: the refreshed location request
+            // never resolved and no subscription is active — nonfatal, same as the other branches.
+            LocationStartResult.Cancelled ->
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.Failed)
             LocationStartResult.PermissionDenied ->
                 monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.PermissionDenied)
             LocationStartResult.LocationServicesDisabled -> {
