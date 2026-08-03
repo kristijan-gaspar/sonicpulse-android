@@ -35,4 +35,8 @@ class FakeDetectionApi(
         throwOnSubmit?.let { throw it }
         return responseProvider(body)
     }
+
+    override suspend fun getDetectionHistory(deviceId: String, cursor: Long?, limit: Int): DetectionHistoryPageDto {
+        throw NotImplementedError("FakeDetectionApi does not yet fake getDetectionHistory — not used by any Chunk 1 test")
+    }
 }
