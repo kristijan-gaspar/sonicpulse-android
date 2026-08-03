@@ -8,13 +8,13 @@ import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.datastore.PermissionRequestHistory
 import hr.sonicpulse.app.data.location.LocationPermissionLevel
-import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.domain.model.SubmissionStatus
 import hr.sonicpulse.app.repository.MonitoringState
 import hr.sonicpulse.app.repository.MonitoringStateRepository
+import hr.sonicpulse.app.service.LocationRefreshFailure
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -28,8 +28,7 @@ import kotlinx.coroutines.flow.stateIn
 @HiltViewModel
 class MonitoringViewModel @Inject constructor(
     monitoringStateRepository: MonitoringStateRepository,
-    private val permissionRequestHistory: PermissionRequestHistory,
-    private val locationProvider: LocationProvider
+    private val permissionRequestHistory: PermissionRequestHistory
 ) : ViewModel() {
 
     val uiState: StateFlow<MonitoringUiState> = monitoringStateRepository.state
@@ -51,27 +50,6 @@ class MonitoringViewModel @Inject constructor(
 
     suspend fun markPermissionRequested(permission: String) {
         permissionRequestHistory.markRequested(permission)
-    }
-
-    /**
-     * A location subscription already active on coarse-only access does not automatically start
-     * producing precise fixes just because ACCESS_FINE_LOCATION was granted afterwards — Android's
-     * own guidance for approximate/precise transitions is to stop and restart the location
-     * request, and [LocationProvider.start] is itself a no-op while already active, so simply
-     * calling start() again here would do nothing. Only the location subscription is touched:
-     * [locationProvider] is application-scoped (the same singleton MonitoringService uses), so
-     * this never restarts the service, audio capture, or the monitoring session.
-     *
-     * Guarded on the current phase so a stray call after monitoring has already stopped (e.g. a
-     * fast Stop tap racing this one) can't start an orphaned location subscription nothing would
-     * ever tear down.
-     */
-    fun refreshLocationForPreciseUpgrade() {
-        if (uiState.value.phase != MonitoringPhase.PreciseLocationRequired) {
-            return
-        }
-        locationProvider.stop()
-        locationProvider.start { }
     }
 }
 
@@ -125,6 +103,7 @@ private fun isPreciseLocationRequired(state: MonitoringState): Boolean =
 private fun errorMessageRes(state: MonitoringState): Int? {
     state.captureError?.let { return captureErrorMessageRes(it) }
     state.startupError?.let { return startupErrorMessageRes(it) }
+    state.locationRefreshError?.let { return locationRefreshErrorMessageRes(it) }
     return null
 }
 
@@ -141,6 +120,12 @@ private fun startupErrorMessageRes(failure: MonitoringStartupFailure): Int = whe
     MonitoringStartupFailure.LocationServicesDisabled -> R.string.error_startup_location_services_disabled
     is MonitoringStartupFailure.LocationStartFailed -> R.string.error_startup_location_start_failed
     is MonitoringStartupFailure.ForegroundStartFailed -> R.string.error_startup_foreground_failed
+}
+
+private fun locationRefreshErrorMessageRes(failure: LocationRefreshFailure): Int = when (failure) {
+    LocationRefreshFailure.PermissionDenied -> R.string.error_startup_location_denied
+    LocationRefreshFailure.LocationServicesDisabled -> R.string.error_startup_location_services_disabled
+    LocationRefreshFailure.Failed -> R.string.error_location_refresh_failed
 }
 
 private fun SessionDetection.toUiModel(): DetectionUiModel = DetectionUiModel(

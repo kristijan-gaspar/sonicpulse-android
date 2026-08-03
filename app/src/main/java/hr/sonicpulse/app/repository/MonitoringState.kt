@@ -4,6 +4,7 @@ import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.location.LocationPermissionLevel
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.service.LocationRefreshFailure
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.DetectionState
 
@@ -20,6 +21,9 @@ data class MonitoringState(
      * failure — lets the UI re-show a one-shot error notification instead of keying purely off
      * captureError/startupError's value, which wouldn't change for two identical failures in a row. */
     val errorEventId: Int = 0,
+    /** Set only by a nonfatal ACTION_REFRESH_LOCATION outcome — unlike [captureError]/[startupError],
+     * never accompanies isMonitoring being set to false. */
+    val locationRefreshError: LocationRefreshFailure? = null,
     val submissionCounters: SubmissionCounters = SubmissionCounters(),
     val serverConfigurationError: Boolean = false,
     val currentLocationSnapshot: LocationSnapshot = LocationSnapshot.NoFixYet,

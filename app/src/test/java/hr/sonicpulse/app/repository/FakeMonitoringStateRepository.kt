@@ -5,6 +5,7 @@ import hr.sonicpulse.app.data.location.LocationPermissionLevel
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
+import hr.sonicpulse.app.service.LocationRefreshFailure
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import java.util.UUID
@@ -72,6 +73,13 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
 
     override fun cancelPendingSubmissions() {
         _state.update { SubmissionTransitions.cancelPending(it) }
+    }
+
+    val locationRefreshFailures = mutableListOf<LocationRefreshFailure>()
+
+    override fun locationRefreshFailed(failure: LocationRefreshFailure) {
+        locationRefreshFailures += failure
+        _state.update { it.copy(locationRefreshError = failure, errorEventId = it.errorEventId + 1) }
     }
 
     override fun updateLocationStatus(

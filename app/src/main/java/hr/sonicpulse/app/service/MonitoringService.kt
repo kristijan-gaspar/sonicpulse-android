@@ -82,6 +82,7 @@ class MonitoringService : Service() {
     private val engineConfig = EngineConfig()
     private val sessionCoordinator by lazy { MonitoringSessionCoordinator(monitoringStateRepository) }
     private val lifecycleCoordinator = MonitoringLifecycleCoordinator()
+    private val refreshCoordinator = MonitoringRefreshCoordinator()
 
     private var audioRecorder: AudioRecorder? = null
     private var firstBlockInstant: Instant? = null
@@ -93,6 +94,7 @@ class MonitoringService : Service() {
         when (intent?.action) {
             ACTION_START -> startMonitoringIfNeeded()
             ACTION_STOP -> stopMonitoringAndService()
+            ACTION_REFRESH_LOCATION -> refreshLocation()
             else -> stopSelf()
         }
         return START_NOT_STICKY
@@ -100,6 +102,7 @@ class MonitoringService : Service() {
 
     override fun onDestroy() {
         val effect = lifecycleCoordinator.onStopOrDestroy()
+        refreshCoordinator.invalidate()
         if (effect is MonitoringLifecycleEffect.StopSession) {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
@@ -285,8 +288,61 @@ class MonitoringService : Service() {
         stopSelf()
     }
 
+    /**
+     * Location-only refresh for the precise-location upgrade flow: never touches audio capture,
+     * DetectionEngine, the session, or the foreground notification — only the location subscription
+     * is stopped and restarted, since [LocationProvider.start] is itself a no-op while already
+     * active and Android does not auto-upgrade an active subscription to precise fixes on its own.
+     * [locationPollingJob] is left running throughout and simply observes whatever
+     * [LocationProvider.currentSnapshot] becomes once the fresh subscription resolves.
+     *
+     * Guarded on [MonitoringLifecycleCoordinator.state] being ACTIVE via [refreshCoordinator]: a
+     * stale intent reaching an instance where nothing is running must do no monitoring work and
+     * stop that instance, not silently no-op and leave it dangling.
+     */
+    private fun refreshLocation() {
+        val effect = refreshCoordinator.onRefreshRequested(lifecycleCoordinator.state)
+        val generation = (effect as? MonitoringRefreshEffect.Begin)?.generation
+        if (generation == null) {
+            stopSelf()
+            return
+        }
+        locationProvider.stop()
+        locationProvider.start { result ->
+            serviceScope.launch { handleRefreshResult(generation, result) }
+        }
+    }
+
+    private fun handleRefreshResult(generation: Long, result: LocationStartResult) {
+        if (!refreshCoordinator.isCurrent(generation, lifecycleCoordinator.state)) {
+            // Superseded by a newer refresh, or monitoring already stopped/destroyed — including
+            // the ordinary case where this Cancelled came from our own stop() above.
+            return
+        }
+        when (result) {
+            // The existing location-polling job already observes the fresh subscription; a
+            // genuine Cancelled reaching this point (current generation, still ACTIVE) has no
+            // user-visible effect either — refresh failure must never surface as a hard error.
+            LocationStartResult.Started,
+            LocationStartResult.Cancelled -> Unit
+            LocationStartResult.PermissionDenied ->
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.PermissionDenied)
+            LocationStartResult.LocationServicesDisabled -> {
+                monitoringStateRepository.updateLocationStatus(
+                    snapshot = locationProvider.currentSnapshot,
+                    permissionLevel = locationProvider.permissionLevel(),
+                    servicesEnabled = false
+                )
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.LocationServicesDisabled)
+            }
+            is LocationStartResult.Failed ->
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.Failed)
+        }
+    }
+
     private fun stopMonitoringAndService() {
         val effect = lifecycleCoordinator.onStopOrDestroy()
+        refreshCoordinator.invalidate()
         if (effect is MonitoringLifecycleEffect.StopSession) {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
@@ -346,6 +402,7 @@ class MonitoringService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_START = "hr.sonicpulse.app.action.START_MONITORING"
         private const val ACTION_STOP = "hr.sonicpulse.app.action.STOP_MONITORING"
+        private const val ACTION_REFRESH_LOCATION = "hr.sonicpulse.app.action.REFRESH_LOCATION"
         private const val LOCATION_POLL_INTERVAL_MILLIS = 1_000L
 
         fun startIntent(context: Context): Intent =
@@ -353,5 +410,10 @@ class MonitoringService : Service() {
 
         fun stopIntent(context: Context): Intent =
             Intent(context, MonitoringService::class.java).setAction(ACTION_STOP)
+
+        /** Sent via startService() (never startForegroundService() — monitoring must already be
+         * ACTIVE and foreground for this to do anything). */
+        fun refreshLocationIntent(context: Context): Intent =
+            Intent(context, MonitoringService::class.java).setAction(ACTION_REFRESH_LOCATION)
     }
 }

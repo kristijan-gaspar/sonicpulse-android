@@ -62,6 +62,7 @@
     <string name="error_startup_location_services_disabled">Lokacijske usluge su isključene</string>
     <string name="error_startup_location_start_failed">Pokretanje lokacije nije uspjelo</string>
     <string name="error_startup_foreground_failed">Pokretanje praćenja nije uspjelo</string>
+    <string name="error_location_refresh_failed">Osvježavanje lokacije nije uspjelo. Praćenje se nastavlja.</string>
 
     <!-- Monitoring — persistent server configuration warning -->
     <string name="error_server_configuration">Problem s konfiguracijom poslužitelja — provjerite API ključ</string>

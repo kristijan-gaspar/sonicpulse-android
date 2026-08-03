@@ -64,6 +64,7 @@
     <string name="error_startup_location_services_disabled">Location services are turned off</string>
     <string name="error_startup_location_start_failed">Could not start location</string>
     <string name="error_startup_foreground_failed">Could not start monitoring</string>
+    <string name="error_location_refresh_failed">Couldn\'t refresh your location. Monitoring is still running.</string>
 
     <!-- Monitoring — persistent server configuration warning -->
     <string name="error_server_configuration">Server configuration problem — check the API key</string>

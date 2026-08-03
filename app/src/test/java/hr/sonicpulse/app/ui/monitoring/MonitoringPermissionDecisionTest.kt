@@ -182,3 +182,50 @@ class PreciseLocationUpgradeEvaluatorTest {
         )
     }
 }
+
+class ShouldSendPreciseLocationRefreshOnResumeTest {
+
+    @Test
+    fun `settings opened for precise location, monitoring active, fine granted — sends refresh`() {
+        assertTrue(
+            shouldSendPreciseLocationRefreshOnResume(
+                openedSettingsForPreciseLocation = true,
+                monitoringActive = true,
+                fineLocationGranted = true
+            )
+        )
+    }
+
+    @Test
+    fun `an ordinary resume (flag false) never sends a refresh, even if otherwise eligible`() {
+        assertFalse(
+            shouldSendPreciseLocationRefreshOnResume(
+                openedSettingsForPreciseLocation = false,
+                monitoringActive = true,
+                fineLocationGranted = true
+            )
+        )
+    }
+
+    @Test
+    fun `no refresh if monitoring stopped while Settings was open`() {
+        assertFalse(
+            shouldSendPreciseLocationRefreshOnResume(
+                openedSettingsForPreciseLocation = true,
+                monitoringActive = false,
+                fineLocationGranted = true
+            )
+        )
+    }
+
+    @Test
+    fun `no refresh if the user didn't actually grant fine location in Settings`() {
+        assertFalse(
+            shouldSendPreciseLocationRefreshOnResume(
+                openedSettingsForPreciseLocation = true,
+                monitoringActive = true,
+                fineLocationGranted = false
+            )
+        )
+    }
+}

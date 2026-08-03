@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,16 +22,22 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.service.MonitoringService
@@ -104,6 +111,11 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
 
     var upgradeFineRequestedBefore by remember { mutableStateOf(false) }
 
+    // Tracks whether Settings was opened specifically from this flow (not the Start flow's own
+    // PermanentlyDenied branch) — rememberSaveable so it survives the process death that opening
+    // Settings can trigger. Only this flag may ever cause a refresh-location intent on resume.
+    var openedSettingsForPreciseLocation by rememberSaveable { mutableStateOf(false) }
+
     val preciseLocationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -115,11 +127,18 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
         scope.launch { results.keys.forEach { viewModel.markPermissionRequested(it) } }
 
         when (PreciseLocationUpgradeEvaluator.evaluate(fineLocation)) {
-            PreciseLocationUpgradeOutcome.Granted -> viewModel.refreshLocationForPreciseUpgrade()
+            PreciseLocationUpgradeOutcome.Granted ->
+                if (uiState.microphoneActive) {
+                    context.startService(MonitoringService.refreshLocationIntent(context))
+                }
             // Still PreciseLocationRequired; the user can tap "Enable location" again.
             PreciseLocationUpgradeOutcome.Denied -> Unit
             PreciseLocationUpgradeOutcome.PermanentlyDenied -> scope.launch {
-                showOpenSettingsSnackbar(context, snackbarHostState)
+                showOpenSettingsSnackbar(
+                    context = context,
+                    snackbarHostState = snackbarHostState,
+                    onOpenSettings = { openedSettingsForPreciseLocation = true }
+                )
             }
         }
     }
@@ -129,6 +148,32 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
             upgradeFineRequestedBefore = viewModel.hasRequestedPermissionBefore(Manifest.permission.ACCESS_FINE_LOCATION)
             preciseLocationLauncher.launch(MonitoringPermissionRequestPlan.preciseLocationUpgradePermissions())
         }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) {
+                return@LifecycleEventObserver
+            }
+            val fineGranted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (shouldSendPreciseLocationRefreshOnResume(
+                    openedSettingsForPreciseLocation = openedSettingsForPreciseLocation,
+                    monitoringActive = uiState.microphoneActive,
+                    fineLocationGranted = fineGranted
+                )
+            ) {
+                openedSettingsForPreciseLocation = false
+                context.startService(MonitoringService.refreshLocationIntent(context))
+            } else if (openedSettingsForPreciseLocation) {
+                openedSettingsForPreciseLocation = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(uiState.errorEventId) {
@@ -146,13 +191,18 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     }
 }
 
-private suspend fun showOpenSettingsSnackbar(context: Context, snackbarHostState: SnackbarHostState) {
+private suspend fun showOpenSettingsSnackbar(
+    context: Context,
+    snackbarHostState: SnackbarHostState,
+    onOpenSettings: () -> Unit = {}
+) {
     val result = snackbarHostState.showSnackbar(
         message = context.getString(R.string.permission_permanently_denied_message),
         actionLabel = context.getString(R.string.action_open_settings),
         duration = SnackbarDuration.Long
     )
     if (result == SnackbarResult.ActionPerformed) {
+        onOpenSettings()
         openAppSettings(context)
     }
 }

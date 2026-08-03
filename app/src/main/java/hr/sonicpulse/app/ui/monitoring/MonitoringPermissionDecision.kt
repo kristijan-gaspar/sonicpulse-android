@@ -119,3 +119,16 @@ object PreciseLocationUpgradeEvaluator {
         SinglePermissionDecision.PERMANENTLY_DENIED -> PreciseLocationUpgradeOutcome.PermanentlyDenied
     }
 }
+
+/**
+ * Decides whether returning to the app (ON_RESUME) after opening system Settings for the
+ * precise-location upgrade should send exactly one refresh-location intent. Pure and
+ * plain-JVM-testable so the Composable's DisposableEffect only has to call it, never branch on
+ * these conditions itself. An ordinary resume (the flag false — e.g. switching apps, or Settings
+ * opened for an unrelated reason) must never send a refresh.
+ */
+fun shouldSendPreciseLocationRefreshOnResume(
+    openedSettingsForPreciseLocation: Boolean,
+    monitoringActive: Boolean,
+    fineLocationGranted: Boolean
+): Boolean = openedSettingsForPreciseLocation && monitoringActive && fineLocationGranted
