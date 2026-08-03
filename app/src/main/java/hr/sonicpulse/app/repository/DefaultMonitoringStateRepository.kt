@@ -2,8 +2,10 @@ package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +19,6 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     private companion object {
         // ~13 Hz: within the plan's 10-15 UI updates/second budget for high-frequency block metrics.
         const val METRICS_THROTTLE_INTERVAL_MILLIS = 75L
-        const val MAX_SESSION_DETECTIONS = 100
     }
 
     private val throttle = MetricsThrottle(METRICS_THROTTLE_INTERVAL_MILLIS)
@@ -55,8 +56,18 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     }
 
     override fun localDetectionOccurred(detection: SessionDetection) {
-        _state.update {
-            it.copy(sessionDetections = (it.sessionDetections + detection).takeLast(MAX_SESSION_DETECTIONS))
-        }
+        _state.update { it.copy(sessionDetections = SessionDetectionRetention.append(it.sessionDetections, detection)) }
+    }
+
+    override fun submissionSucceeded(localEventId: UUID) {
+        _state.update { SubmissionTransitions.applySuccess(it, localEventId) }
+    }
+
+    override fun submissionFailed(localEventId: UUID, reason: SubmissionFailureReason) {
+        _state.update { SubmissionTransitions.applyFailure(it, localEventId, reason) }
+    }
+
+    override fun cancelPendingSubmissions() {
+        _state.update { SubmissionTransitions.cancelPending(it) }
     }
 }

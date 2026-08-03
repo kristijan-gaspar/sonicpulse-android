@@ -2,6 +2,7 @@ package hr.sonicpulse.app.ui.monitoring
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.repository.SubmissionCounters
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.DetectionState
 
@@ -16,5 +17,7 @@ data class MonitoringUiState(
     val engineState: DetectionState = DetectionState.IDLE,
     val sessionDetections: List<SessionDetection> = emptyList(),
     val captureError: AudioCaptureError? = null,
-    val startupError: MonitoringStartupFailure? = null
+    val startupError: MonitoringStartupFailure? = null,
+    val submissionCounters: SubmissionCounters = SubmissionCounters(),
+    val serverConfigurationError: Boolean = false
 )

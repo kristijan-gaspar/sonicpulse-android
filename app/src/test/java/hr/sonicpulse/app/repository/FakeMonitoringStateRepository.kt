@@ -2,8 +2,10 @@ package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,7 +48,19 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
 
     override fun localDetectionOccurred(detection: SessionDetection) {
         occurredDetections += detection
-        _state.update { it.copy(sessionDetections = it.sessionDetections + detection) }
+        _state.update { it.copy(sessionDetections = SessionDetectionRetention.append(it.sessionDetections, detection)) }
+    }
+
+    override fun submissionSucceeded(localEventId: UUID) {
+        _state.update { SubmissionTransitions.applySuccess(it, localEventId) }
+    }
+
+    override fun submissionFailed(localEventId: UUID, reason: SubmissionFailureReason) {
+        _state.update { SubmissionTransitions.applyFailure(it, localEventId, reason) }
+    }
+
+    override fun cancelPendingSubmissions() {
+        _state.update { SubmissionTransitions.cancelPending(it) }
     }
 
     fun setState(state: MonitoringState) {

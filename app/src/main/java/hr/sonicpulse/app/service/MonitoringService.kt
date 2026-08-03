@@ -23,6 +23,7 @@ import hr.sonicpulse.app.data.audio.AudioRecorder
 import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
+import hr.sonicpulse.app.data.remote.DetectionSubmitter
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
@@ -51,7 +52,8 @@ import kotlinx.coroutines.launch
  * the classification as it stood then, before handing the rest of the work to this service's own
  * coroutine scope.
  *
- * No backend submission yet in this branch.
+ * Submission (§2.9) runs on [serviceScope] after the location snapshot: the audio thread never
+ * waits on it, only publishes the local detection and moves on to the next block.
  *
  * Must only be started (via [startIntent]) from a visible user action (e.g. a Start button on
  * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO, location) to
@@ -69,6 +71,9 @@ class MonitoringService : Service() {
 
     @Inject
     lateinit var locationProvider: LocationProvider
+
+    @Inject
+    lateinit var detectionSubmitter: DetectionSubmitter
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val engineConfig = EngineConfig()
@@ -95,6 +100,10 @@ class MonitoringService : Service() {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
         }
+        // Normal teardown only (§2.9's scope of guarantee) — gives every still-Pending detection
+        // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
+        // Idempotent: a no-op if nothing is retained and Pending.
+        monitoringStateRepository.cancelPendingSubmissions()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -214,15 +223,19 @@ class MonitoringService : Service() {
             // arrive first and misrepresent what was actually known when this detection occurred.
             val locationSnapshot = locationProvider.currentSnapshot
             val localEventId = UUID.randomUUID()
+            val sessionDetection = SessionDetection(
+                localEventId = localEventId,
+                peakDbfs = event.peakDbfs,
+                peakTimeClient = peakTimeClient,
+                location = locationSnapshot
+            )
+            // Published synchronously (MutableStateFlow.update is thread-safe) so the detection is
+            // visibly Pending before any submission attempt is even scheduled — insertion and
+            // submission are deliberately not both inside the launched coroutine below, so a
+            // cancelled/never-started submission coroutine can never leave the detection unlisted.
+            monitoringStateRepository.localDetectionOccurred(sessionDetection)
             serviceScope.launch {
-                monitoringStateRepository.localDetectionOccurred(
-                    SessionDetection(
-                        localEventId = localEventId,
-                        peakDbfs = event.peakDbfs,
-                        peakTimeClient = peakTimeClient,
-                        location = locationSnapshot
-                    )
-                )
+                detectionSubmitter.submit(sessionDetection)
             }
         }
     }
@@ -251,6 +264,12 @@ class MonitoringService : Service() {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
         }
+        // Capture/location are stopped above first, so the audio thread cannot publish another
+        // detection after this point — only then is it safe to give every still-Pending detection
+        // a terminal Failed(Cancelled) result. Outside the StopSession branch (and thus independent
+        // of it) and idempotent, so repeated or stale Stop handling stays safe; onDestroy() below
+        // still calls this too, as a defensive fallback for teardown paths that don't go through here.
+        monitoringStateRepository.cancelPendingSubmissions()
         stopForegroundCompat()
         stopSelf()
     }
