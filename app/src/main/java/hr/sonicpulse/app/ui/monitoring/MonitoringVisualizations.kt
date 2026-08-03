@@ -45,7 +45,7 @@ private const val RING_MAX_DBFS = 0f
 private const val RING_START_ANGLE = -225f
 private const val RING_SWEEP_ANGLE = 270f
 
-/** dBFS ring (design spec §5.1A) — a 270° arc gauge with a pulsing glow while monitoring is active. */
+/** dBFS ring — a 270° arc gauge with a pulsing glow while monitoring is active. */
 @Composable
 fun DbfsRing(currentDbfs: Float, active: Boolean, modifier: Modifier = Modifier) {
     // No infiniteRepeatable at all while inactive — an idle ring must not keep an animation (and
@@ -121,7 +121,7 @@ private const val CHART_POINT_COUNT = 100
 private const val CHART_MIN_DBFS = -60f
 private const val CHART_MAX_DBFS = 0f
 
-/** Live dBFS history chart (design spec §5.1E) — a pure renderer, does not animate or drive itself. */
+/** Live dBFS history chart — a pure renderer, does not animate or drive itself. */
 @Composable
 fun LiveDbfsChart(currentDbfs: Float, dbfsHistory: List<Float>, modifier: Modifier = Modifier) {
     AppCard(modifier = modifier) {

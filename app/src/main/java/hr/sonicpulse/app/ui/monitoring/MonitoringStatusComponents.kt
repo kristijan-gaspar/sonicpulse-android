@@ -45,7 +45,7 @@ import hr.sonicpulse.app.ui.theme.AppShapes
 import hr.sonicpulse.app.ui.theme.SemanticColors
 import hr.sonicpulse.app.ui.theme.Spacing
 
-/** Status pill (design spec §5.1B) — reflects [MonitoringPhase]. */
+/** Status pill — reflects [MonitoringPhase]. */
 @Composable
 fun StatusPill(phase: MonitoringPhase, modifier: Modifier = Modifier) {
     val (background, contentColor, textRes, blinking) = when (phase) {
@@ -103,7 +103,6 @@ private fun StatusDot(color: Color, blinking: Boolean) {
     )
 }
 
-/** Hint text (design spec §5.1C). */
 @Composable
 fun MonitoringHintText(phase: MonitoringPhase, modifier: Modifier = Modifier) {
     val textRes = when (phase) {
@@ -121,7 +120,6 @@ fun MonitoringHintText(phase: MonitoringPhase, modifier: Modifier = Modifier) {
     )
 }
 
-/** Start/Stop button (design spec §5.1D). */
 @Composable
 fun MonitoringActionButton(
     phase: MonitoringPhase,
@@ -150,7 +148,7 @@ fun MonitoringActionButton(
             Text(stringResource(R.string.action_stop), modifier = Modifier.padding(start = Spacing.sm))
         }
 
-        // Monitoring is still active here (§2.8) — the enable-location action must not be the
+        // Monitoring is still active here — the enable-location action must not be the
         // only control on screen, or there would be no way to stop monitoring from this state.
         MonitoringPhase.PreciseLocationRequired -> Column(
             modifier = modifier.fillMaxWidth(),
@@ -177,7 +175,7 @@ fun MonitoringActionButton(
     }
 }
 
-/** Location status row (design spec §5.1F) — Mikrofon / Lokacija / Pozadina mini-cards. */
+/** Location status row — Mikrofon / Lokacija / Pozadina mini-cards. */
 @Composable
 fun LocationStatusRow(
     microphoneActive: Boolean,
@@ -250,7 +248,7 @@ private fun MiniStatusCard(
 }
 
 /**
- * Persistent server-configuration warning (plan §2.9's `serverConfigurationError`). Shown for the
+ * Persistent server-configuration warning, backed by `serverConfigurationError`. Shown for the
  * rest of the monitoring session after a 401/403 — every subsequent submission will keep failing
  * until the API key/backend configuration is fixed, so this must stay visible independent of
  * whatever the last individual detection's send-result banner currently shows.

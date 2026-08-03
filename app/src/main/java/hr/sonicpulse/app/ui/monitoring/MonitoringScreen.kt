@@ -75,7 +75,7 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
                 coarseLocation = decisions.getValue(Manifest.permission.ACCESS_COARSE_LOCATION)
             )
         ) {
-            // Enough to start (§2.8) — the service's own MonitoringStartupGate re-validates and
+            // Enough to start — the service's own MonitoringStartupGate re-validates and
             // reports a specific MonitoringStartupFailure if something is still actually missing,
             // so no duplicate handling is needed here for either branch.
             MonitoringPermissionOutcome.Granted, MonitoringPermissionOutcome.ApproximateLocationOnly ->
@@ -103,7 +103,7 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     }
 
     // POST_NOTIFICATIONS (API 33+) governs only whether the mandatory persistent notification is
-    // actually *visible* (plan §2.3) — it is never a prerequisite for starting the service, so
+    // actually *visible* — it is never a prerequisite for starting the service, so
     // its result (granted, denied, or not applicable pre-33) is deliberately ignored here.
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()

@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import hr.sonicpulse.app.ui.theme.AppShapes
 
-/** Bordered, unelevated container used throughout the app (design spec §4.1). */
+/** Bordered, unelevated container used throughout the app. */
 @Composable
 fun AppCard(
     modifier: Modifier = Modifier,

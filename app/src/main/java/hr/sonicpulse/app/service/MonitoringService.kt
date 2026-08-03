@@ -41,22 +41,22 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Owns the active monitoring process (§2.6/§2.11): audio capture and engine processing run
- * synchronously on AudioRecorder's own capture thread (no separate executor here, per the
- * threading contract) — this service only coordinates lifecycle and publishes state. Location
- * updates run alongside audio capture (foregroundServiceType "microphone|location"), started
- * asynchronously via LocationProvider.start() — AudioRecorder only starts once that reports
- * LocationStartResult.Started. [MonitoringLifecycleCoordinator] guards this asynchronous startup
- * with a generation token, so a location result that arrives after its attempt was invalidated
- * (e.g. by a Stop) can never resurrect state or start audio capture.
+ * Owns the active monitoring process: audio capture and engine processing run synchronously on
+ * AudioRecorder's own capture thread (no separate executor here, per the threading contract) —
+ * this service only coordinates lifecycle and publishes state. Location updates run alongside
+ * audio capture (foregroundServiceType "microphone|location"), started asynchronously via
+ * LocationProvider.start() — AudioRecorder only starts once that reports LocationStartResult.Started.
+ * [MonitoringLifecycleCoordinator] guards this asynchronous startup with a generation token, so a
+ * location result that arrives after its attempt was invalidated (e.g. by a Stop) can never
+ * resurrect state or start audio capture.
  *
  * The audio thread itself never touches LocationProvider except reading [LocationProvider.currentSnapshot]
  * (a cheap volatile-field read, not I/O) at the exact moment a detection is handed off — capturing
  * the classification as it stood then, before handing the rest of the work to this service's own
  * coroutine scope.
  *
- * Submission (§2.9) runs on [serviceScope] after the location snapshot: the audio thread never
- * waits on it, only publishes the local detection and moves on to the next block.
+ * Submission runs on [serviceScope] after the location snapshot: the audio thread never waits on
+ * it, only publishes the local detection and moves on to the next block.
  *
  * Must only be started (via [startIntent]) from a visible user action (e.g. a Start button on
  * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO, location) to
@@ -104,7 +104,7 @@ class MonitoringService : Service() {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
         }
-        // Normal teardown only (§2.9's scope of guarantee) — gives every still-Pending detection
+        // Normal teardown only — gives every still-Pending detection
         // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
         // Idempotent: a no-op if nothing is retained and Pending.
         monitoringStateRepository.cancelPendingSubmissions()
@@ -217,9 +217,9 @@ class MonitoringService : Service() {
             return
         }
 
-        // The audio thread only reads currentSnapshot at the instant of a detection (§2.7); this
-        // is the separate, continuous feed the Monitoring screen needs for its live status pill
-        // and location card (§2.8) regardless of whether any detection ever occurs.
+        // The audio thread only reads currentSnapshot at the instant of a detection; this is the
+        // separate, continuous feed the Monitoring screen needs for its live status pill and
+        // location card, regardless of whether any detection ever occurs.
         locationPollingJob = serviceScope.launch {
             while (isActive) {
                 monitoringStateRepository.updateLocationStatus(

@@ -8,7 +8,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import hr.sonicpulse.app.R
 
-/** The 4 bottom-navigation destinations (design spec §2). */
+/** The 4 bottom-navigation destinations. */
 enum class SonicPulseDestination(val route: String, val labelRes: Int, val icon: ImageVector) {
     Monitoring("monitoring", R.string.nav_monitoring, Icons.Filled.GraphicEq),
     Detections("detections", R.string.nav_detections, Icons.AutoMirrored.Filled.List),

@@ -3,9 +3,9 @@ package hr.sonicpulse.app.ui.monitoring
 import androidx.annotation.StringRes
 
 /**
- * Fully display-shaped state for the Monitoring screen (design spec §5.1) — colors and layout
- * decisions still live in the Composable, but every value here is already the thing to render,
- * never a raw domain/repository type. The Composable only renders what it receives.
+ * Fully display-shaped state for the Monitoring screen — colors and layout decisions still live
+ * in the Composable, but every value here is already the thing to render, never a raw
+ * domain/repository type. The Composable only renders what it receives.
  */
 data class MonitoringUiState(
     val phase: MonitoringPhase = MonitoringPhase.Idle,
@@ -15,8 +15,8 @@ data class MonitoringUiState(
     val currentDbfs: Float = -120f,
     val dbfsHistory: List<Float> = emptyList(),
     val lastDetection: DetectionUiModel? = null,
-    /** Persistent for the rest of the session after a 401/403 (plan §2.9) — stays true even
-     * after a later successful submission, until monitoringStarted() resets the next session. */
+    /** Persistent for the rest of the session after a 401/403 — stays true even after a later
+     * successful submission, until monitoringStarted() resets the next session. */
     val serverConfigurationError: Boolean = false,
     @StringRes val errorMessageRes: Int? = null,
     /** Changes on every reported failure, even repeats of the same errorMessageRes — lets the

@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.update
 class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRepository {
 
     private companion object {
-        // 10 Hz: matches the Monitoring screen's live dBFS chart (design spec §5.1E, ~10s of history).
+        // 10 Hz: matches the Monitoring screen's live dBFS chart, giving ~10s of history at 100 samples.
         const val METRICS_THROTTLE_INTERVAL_MILLIS = 100L
         const val MAX_DBFS_HISTORY = 100
     }

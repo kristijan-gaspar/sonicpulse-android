@@ -6,7 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
 
-/** All-caps, dim, wide-tracking label used to head a card or a settings section (design spec §4.2). */
+/** All-caps, dim, wide-tracking label used to head a card or a settings section. */
 @Composable
 fun SectionHeader(text: String, modifier: Modifier = Modifier) {
     Text(

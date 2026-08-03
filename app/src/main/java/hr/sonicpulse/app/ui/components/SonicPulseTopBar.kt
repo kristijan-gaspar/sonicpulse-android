@@ -15,7 +15,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Present on all 4 top-level screens (design spec §3) — the "Sonic"/"Pulse" wordmark, no actions. */
+/** Present on all 4 top-level screens — the "Sonic"/"Pulse" wordmark, no actions. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SonicPulseTopBar() {

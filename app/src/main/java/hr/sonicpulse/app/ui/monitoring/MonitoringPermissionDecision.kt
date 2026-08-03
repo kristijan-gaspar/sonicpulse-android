@@ -27,8 +27,8 @@ sealed interface MonitoringPermissionOutcome {
     /** Microphone granted, and precise (fine) location granted. */
     data object Granted : MonitoringPermissionOutcome
 
-    /** Microphone granted, only coarse location granted — enough to start (§2.8), but every fix
-     * will be inaccurate; the already-built [MonitoringPhase.PreciseLocationRequired] state
+    /** Microphone granted, only coarse location granted — enough to start monitoring, but every
+     * fix will be inaccurate; the already-built [MonitoringPhase.PreciseLocationRequired] state
      * surfaces this once monitoring is running, so no separate blocking dialog is needed here. */
     data object ApproximateLocationOnly : MonitoringPermissionOutcome
 

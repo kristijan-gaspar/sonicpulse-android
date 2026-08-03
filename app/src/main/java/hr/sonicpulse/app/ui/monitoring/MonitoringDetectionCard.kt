@@ -38,7 +38,7 @@ import hr.sonicpulse.app.ui.theme.MonospaceValueStyle
 import hr.sonicpulse.app.ui.theme.SemanticColors
 import hr.sonicpulse.app.ui.theme.Spacing
 
-/** Last detection + send status card (design spec §5.1G). */
+/** Last detection + send status card. */
 @Composable
 fun LastDetectionCard(lastDetection: DetectionUiModel?, modifier: Modifier = Modifier) {
     val accentColor = MaterialTheme.colorScheme.primary

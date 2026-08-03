@@ -92,8 +92,8 @@ private fun computeLocationDisplayState(state: MonitoringState): LocationDisplay
 
 /**
  * With approximate-only permission, every fix genuinely will exceed [hr.sonicpulse.app.data.location.LocationPolicy]'s
- * accuracy threshold (plan §2.8) — a single Inaccurate reading combined with COARSE permission is
- * therefore a reliable signal on its own, not a guess that would need a running history of fixes.
+ * accuracy threshold — a single Inaccurate reading combined with COARSE permission is therefore
+ * a reliable signal on its own, not a guess that would need a running history of fixes.
  */
 private fun isPreciseLocationRequired(state: MonitoringState): Boolean =
     state.locationPermissionLevel == LocationPermissionLevel.COARSE &&
@@ -138,7 +138,7 @@ private fun sendResultOf(status: SubmissionStatus): SendResult = when (status) {
     is SubmissionStatus.Failed -> sendResultForFailure(status.reason)
 }
 
-/** Preserves the plan §2.9 distinctions the UI must show, without leaking raw HTTP codes,
+/** Preserves the distinctions the UI must show, without leaking raw HTTP codes,
  * exceptions or other protocol/diagnostic detail — those stay in the repository's counters. */
 private fun sendResultForFailure(reason: SubmissionFailureReason): SendResult = when (reason) {
     SubmissionFailureReason.NoLocation,

@@ -23,7 +23,7 @@ interface MonitoringStateRepository {
     fun submissionFailed(localEventId: UUID, reason: SubmissionFailureReason)
     fun cancelPendingSubmissions()
 
-    /** Continuously refreshed while monitoring is active (§2.8) — independent of any single detection. */
+    /** Continuously refreshed while monitoring is active — independent of any single detection. */
     fun updateLocationStatus(
         snapshot: LocationSnapshot,
         permissionLevel: LocationPermissionLevel,
