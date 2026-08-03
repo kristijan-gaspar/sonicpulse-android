@@ -12,5 +12,7 @@ data class MonitoringState(
     val engineState: DetectionState = DetectionState.IDLE,
     val sessionDetections: List<SessionDetection> = emptyList(),
     val captureError: AudioCaptureError? = null,
-    val startupError: MonitoringStartupFailure? = null
+    val startupError: MonitoringStartupFailure? = null,
+    val submissionCounters: SubmissionCounters = SubmissionCounters(),
+    val serverConfigurationError: Boolean = false
 )

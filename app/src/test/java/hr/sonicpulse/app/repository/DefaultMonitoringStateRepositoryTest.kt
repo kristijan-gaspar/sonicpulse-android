@@ -3,6 +3,8 @@ package hr.sonicpulse.app.repository
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.domain.model.SubmissionFailureReason
+import hr.sonicpulse.app.domain.model.SubmissionStatus
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import hr.sonicpulse.engine.DetectionState
@@ -221,5 +223,100 @@ class DefaultMonitoringStateRepositoryTest {
         assertEquals(100, detections.size)
         assertEquals(1.0, detections.first().peakDbfs, 0.0)
         assertEquals(100.0, detections.last().peakDbfs, 0.0)
+    }
+
+    @Test
+    fun `submissionSucceeded marks the matching detection as Sent and increments the counter`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        val other = detection()
+        repository.localDetectionOccurred(other)
+        repository.localDetectionOccurred(target)
+
+        repository.submissionSucceeded(target.localEventId)
+
+        val state = repository.state.value
+        assertEquals(SubmissionStatus.Sent, state.sessionDetections.first { it.localEventId == target.localEventId }.submissionStatus)
+        assertEquals(SubmissionStatus.Local, state.sessionDetections.first { it.localEventId == other.localEventId }.submissionStatus)
+        assertEquals(1, state.submissionCounters.submissionSucceeded)
+    }
+
+    @Test
+    fun `submissionFailed marks the matching detection as Failed with the given reason`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NETWORK_ERROR)
+
+        val state = repository.state.value
+        assertEquals(
+            SubmissionStatus.Failed(SubmissionFailureReason.NETWORK_ERROR),
+            state.sessionDetections.first { it.localEventId == target.localEventId }.submissionStatus
+        )
+    }
+
+    @Test
+    fun `submissionFailed increments the counter matching each failure reason`() {
+        val expectedCounter = mapOf(
+            SubmissionFailureReason.NO_LOCATION to SubmissionCounters(droppedNoLocation = 1),
+            SubmissionFailureReason.STALE_LOCATION to SubmissionCounters(droppedStaleLocation = 1),
+            SubmissionFailureReason.INACCURATE_LOCATION to SubmissionCounters(droppedInaccurateLocation = 1),
+            SubmissionFailureReason.NETWORK_ERROR to SubmissionCounters(droppedNetwork = 1),
+            SubmissionFailureReason.BAD_REQUEST to SubmissionCounters(submissionFailedBadRequest = 1),
+            SubmissionFailureReason.UNAUTHORIZED to SubmissionCounters(submissionFailedUnauthorized = 1),
+            SubmissionFailureReason.RATE_LIMITED to SubmissionCounters(submissionRateLimited = 1),
+            SubmissionFailureReason.CLIENT_ERROR to SubmissionCounters(submissionFailedClient = 1),
+            SubmissionFailureReason.SERVER_ERROR to SubmissionCounters(submissionFailedServer = 1)
+        )
+
+        expectedCounter.forEach { (reason, expected) ->
+            val repository = DefaultMonitoringStateRepository()
+            val target = detection()
+            repository.localDetectionOccurred(target)
+
+            repository.submissionFailed(target.localEventId, reason)
+
+            assertEquals("reason $reason", expected, repository.state.value.submissionCounters)
+        }
+    }
+
+    @Test
+    fun `submissionFailed with UNAUTHORIZED sets a persistent serverConfigurationError`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.UNAUTHORIZED)
+
+        assertTrue(repository.state.value.serverConfigurationError)
+    }
+
+    @Test
+    fun `serverConfigurationError stays true after a later successful submission`() {
+        val repository = DefaultMonitoringStateRepository()
+        val first = detection()
+        val second = detection()
+        repository.localDetectionOccurred(first)
+        repository.localDetectionOccurred(second)
+        repository.submissionFailed(first.localEventId, SubmissionFailureReason.UNAUTHORIZED)
+
+        repository.submissionSucceeded(second.localEventId)
+
+        assertTrue(repository.state.value.serverConfigurationError)
+    }
+
+    @Test
+    fun `monitoringStarted resets submission counters and serverConfigurationError from a previous session`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.UNAUTHORIZED)
+
+        repository.monitoringStarted()
+
+        val state = repository.state.value
+        assertEquals(SubmissionCounters(), state.submissionCounters)
+        assertFalse(state.serverConfigurationError)
     }
 }

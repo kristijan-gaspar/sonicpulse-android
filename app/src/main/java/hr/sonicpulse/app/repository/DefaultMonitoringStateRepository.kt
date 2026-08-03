@@ -2,8 +2,11 @@ package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.domain.model.SubmissionFailureReason
+import hr.sonicpulse.app.domain.model.SubmissionStatus
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,4 +62,50 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
             it.copy(sessionDetections = (it.sessionDetections + detection).takeLast(MAX_SESSION_DETECTIONS))
         }
     }
+
+    override fun submissionSucceeded(localEventId: UUID) {
+        _state.update { state ->
+            state.copy(
+                sessionDetections = updateStatus(state.sessionDetections, localEventId, SubmissionStatus.Sent),
+                submissionCounters = state.submissionCounters.copy(
+                    submissionSucceeded = state.submissionCounters.submissionSucceeded + 1
+                )
+            )
+        }
+    }
+
+    override fun submissionFailed(localEventId: UUID, reason: SubmissionFailureReason) {
+        _state.update { state ->
+            state.copy(
+                sessionDetections = updateStatus(state.sessionDetections, localEventId, SubmissionStatus.Failed(reason)),
+                submissionCounters = incrementCounter(state.submissionCounters, reason),
+                serverConfigurationError = state.serverConfigurationError ||
+                    reason == SubmissionFailureReason.UNAUTHORIZED
+            )
+        }
+    }
+
+    private fun updateStatus(
+        detections: List<SessionDetection>,
+        localEventId: UUID,
+        status: SubmissionStatus
+    ): List<SessionDetection> = detections.map {
+        if (it.localEventId == localEventId) it.copy(submissionStatus = status) else it
+    }
+
+    private fun incrementCounter(counters: SubmissionCounters, reason: SubmissionFailureReason): SubmissionCounters =
+        when (reason) {
+            SubmissionFailureReason.NO_LOCATION -> counters.copy(droppedNoLocation = counters.droppedNoLocation + 1)
+            SubmissionFailureReason.STALE_LOCATION -> counters.copy(droppedStaleLocation = counters.droppedStaleLocation + 1)
+            SubmissionFailureReason.INACCURATE_LOCATION ->
+                counters.copy(droppedInaccurateLocation = counters.droppedInaccurateLocation + 1)
+            SubmissionFailureReason.NETWORK_ERROR -> counters.copy(droppedNetwork = counters.droppedNetwork + 1)
+            SubmissionFailureReason.BAD_REQUEST ->
+                counters.copy(submissionFailedBadRequest = counters.submissionFailedBadRequest + 1)
+            SubmissionFailureReason.UNAUTHORIZED ->
+                counters.copy(submissionFailedUnauthorized = counters.submissionFailedUnauthorized + 1)
+            SubmissionFailureReason.RATE_LIMITED -> counters.copy(submissionRateLimited = counters.submissionRateLimited + 1)
+            SubmissionFailureReason.CLIENT_ERROR -> counters.copy(submissionFailedClient = counters.submissionFailedClient + 1)
+            SubmissionFailureReason.SERVER_ERROR -> counters.copy(submissionFailedServer = counters.submissionFailedServer + 1)
+        }
 }

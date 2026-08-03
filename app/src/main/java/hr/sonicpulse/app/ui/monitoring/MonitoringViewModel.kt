@@ -36,5 +36,7 @@ private fun MonitoringState.toUiState(): MonitoringUiState = MonitoringUiState(
     engineState = engineState,
     sessionDetections = sessionDetections,
     captureError = captureError,
-    startupError = startupError
+    startupError = startupError,
+    submissionCounters = submissionCounters,
+    serverConfigurationError = serverConfigurationError
 )

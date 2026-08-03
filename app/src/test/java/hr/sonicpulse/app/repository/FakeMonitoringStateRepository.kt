@@ -2,8 +2,11 @@ package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.domain.model.SubmissionFailureReason
+import hr.sonicpulse.app.domain.model.SubmissionStatus
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +51,48 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
         occurredDetections += detection
         _state.update { it.copy(sessionDetections = it.sessionDetections + detection) }
     }
+
+    override fun submissionSucceeded(localEventId: UUID) {
+        _state.update { state ->
+            state.copy(
+                sessionDetections = state.sessionDetections.map {
+                    if (it.localEventId == localEventId) it.copy(submissionStatus = SubmissionStatus.Sent) else it
+                },
+                submissionCounters = state.submissionCounters.copy(
+                    submissionSucceeded = state.submissionCounters.submissionSucceeded + 1
+                )
+            )
+        }
+    }
+
+    override fun submissionFailed(localEventId: UUID, reason: SubmissionFailureReason) {
+        _state.update { state ->
+            state.copy(
+                sessionDetections = state.sessionDetections.map {
+                    if (it.localEventId == localEventId) it.copy(submissionStatus = SubmissionStatus.Failed(reason)) else it
+                },
+                submissionCounters = incrementCounter(state.submissionCounters, reason),
+                serverConfigurationError = state.serverConfigurationError ||
+                    reason == SubmissionFailureReason.UNAUTHORIZED
+            )
+        }
+    }
+
+    private fun incrementCounter(counters: SubmissionCounters, reason: SubmissionFailureReason): SubmissionCounters =
+        when (reason) {
+            SubmissionFailureReason.NO_LOCATION -> counters.copy(droppedNoLocation = counters.droppedNoLocation + 1)
+            SubmissionFailureReason.STALE_LOCATION -> counters.copy(droppedStaleLocation = counters.droppedStaleLocation + 1)
+            SubmissionFailureReason.INACCURATE_LOCATION ->
+                counters.copy(droppedInaccurateLocation = counters.droppedInaccurateLocation + 1)
+            SubmissionFailureReason.NETWORK_ERROR -> counters.copy(droppedNetwork = counters.droppedNetwork + 1)
+            SubmissionFailureReason.BAD_REQUEST ->
+                counters.copy(submissionFailedBadRequest = counters.submissionFailedBadRequest + 1)
+            SubmissionFailureReason.UNAUTHORIZED ->
+                counters.copy(submissionFailedUnauthorized = counters.submissionFailedUnauthorized + 1)
+            SubmissionFailureReason.RATE_LIMITED -> counters.copy(submissionRateLimited = counters.submissionRateLimited + 1)
+            SubmissionFailureReason.CLIENT_ERROR -> counters.copy(submissionFailedClient = counters.submissionFailedClient + 1)
+            SubmissionFailureReason.SERVER_ERROR -> counters.copy(submissionFailedServer = counters.submissionFailedServer + 1)
+        }
 
     fun setState(state: MonitoringState) {
         _state.value = state

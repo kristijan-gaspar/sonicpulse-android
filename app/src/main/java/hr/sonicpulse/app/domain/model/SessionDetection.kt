@@ -8,5 +8,6 @@ data class SessionDetection(
     val localEventId: UUID,
     val peakDbfs: Double,
     val peakTimeClient: Instant,
-    val location: LocationSnapshot
+    val location: LocationSnapshot,
+    val submissionStatus: SubmissionStatus = SubmissionStatus.Local
 )
