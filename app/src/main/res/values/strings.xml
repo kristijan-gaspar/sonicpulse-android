@@ -72,4 +72,31 @@
     <!-- Monitoring — runtime permission flow -->
     <string name="permission_permanently_denied_message">Permission permanently denied. Open app settings to enable it.</string>
     <string name="action_open_settings">Open settings</string>
+
+    <!-- Detections — filters (A) -->
+    <string name="filter_all">All</string>
+    <string name="filter_today">Today</string>
+    <string name="filter_grouped">Grouped</string>
+    <string name="filter_ungrouped">Ungrouped</string>
+    <string name="action_refresh">Refresh</string>
+
+    <!-- Detections — status badge -->
+    <string name="status_grouped">Grouped</string>
+    <string name="status_ungrouped">Not grouped</string>
+
+    <!-- Detections — list (B) -->
+    <string name="section_today">Today</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_load_more">Load more</string>
+    <string name="detections_empty_no_history">No detections yet</string>
+    <string name="detections_empty_no_matches">No detections match this filter</string>
+    <string name="detections_empty_no_matches_more_available">No matches on this page — more may be available</string>
+    <string name="detections_error_initial_load">Couldn\'t load detections</string>
+    <string name="detections_error_paging">Couldn\'t load more detections</string>
+
+    <!-- Detections — detail bottom sheet (C) -->
+    <string name="detection_detail_title">Detection details</string>
+    <string name="detail_label_timestamp">Timestamp</string>
+    <string name="detail_label_coordinates">Coordinates</string>
+    <string name="action_close">Close</string>
 </resources>
