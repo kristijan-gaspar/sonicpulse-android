@@ -12,7 +12,8 @@ import java.util.UUID
 private fun previewItem(peakDbfs: Double, grouped: Boolean) = DetectionHistoryItemUiModel(
     id = UUID.randomUUID(),
     peakDbfs = peakDbfs,
-    timestampText = "14:32:07",
+    listTimestampText = "14:32:07",
+    detailTimestampText = "August 3, 2026 14:32:07",
     coordinatesText = "45.80000, 16.00000",
     grouped = grouped
 )
@@ -91,6 +92,57 @@ private fun DetectionsContentEmptyMoreAvailablePreview() {
                 selectedFilter = DetectionsFilter.Grouped,
                 canLoadMore = true,
                 emptyState = DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable
+            ),
+            onSelectFilter = { }, onLoadNextPage = { }, onRefresh = { }
+        )
+    }
+}
+
+@Preview(name = "Filtered empty — loading next page", showBackground = true)
+@Composable
+private fun DetectionsContentEmptyMoreAvailableLoadingPreview() {
+    SonicPulseTheme {
+        DetectionsContent(
+            uiState = DetectionsUiState(
+                isInitialLoading = false,
+                selectedFilter = DetectionsFilter.Grouped,
+                canLoadMore = true,
+                isLoadingNextPage = true,
+                emptyState = DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable
+            ),
+            onSelectFilter = { }, onLoadNextPage = { }, onRefresh = { }
+        )
+    }
+}
+
+@Preview(name = "Filtered empty — paging error", showBackground = true)
+@Composable
+private fun DetectionsContentEmptyMoreAvailableErrorPreview() {
+    SonicPulseTheme {
+        DetectionsContent(
+            uiState = DetectionsUiState(
+                isInitialLoading = false,
+                selectedFilter = DetectionsFilter.Grouped,
+                canLoadMore = true,
+                pagingError = true,
+                emptyState = DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable
+            ),
+            onSelectFilter = { }, onLoadNextPage = { }, onRefresh = { }
+        )
+    }
+}
+
+@Preview(name = "Manual refresh failed, old list preserved", showBackground = true)
+@Composable
+private fun DetectionsContentRefreshErrorPreview() {
+    SonicPulseTheme {
+        DetectionsContent(
+            uiState = DetectionsUiState(
+                isInitialLoading = false,
+                refreshError = true,
+                sections = listOf(
+                    DetectionDateSection(date = LocalDate.now(), items = listOf(previewItem(-9.4, grouped = true)))
+                )
             ),
             onSelectFilter = { }, onLoadNextPage = { }, onRefresh = { }
         )

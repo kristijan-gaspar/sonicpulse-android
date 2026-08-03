@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -41,7 +40,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -63,13 +61,21 @@ import hr.sonicpulse.app.ui.theme.SemanticColors
 import hr.sonicpulse.app.ui.theme.Spacing
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 import java.util.Locale
 
 @Composable
 fun DetectionsScreen(viewModel: DetectionsViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // The one and only screen-entry trigger — DetectionsViewModel itself never auto-loads (see its
+    // KDoc). Unit never changes, so this fires exactly once per composition of this screen; since
+    // NavHost disposes/recomposes a destination's content on each visit, leaving the Detections tab
+    // and returning to it re-runs this effect and fetches a fresh first page, even though the
+    // ViewModel instance itself (and its state) can survive the round trip via saved nav state.
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+    }
+
     DetectionsContent(
         uiState = uiState,
         onSelectFilter = viewModel::selectFilter,
@@ -116,18 +122,25 @@ internal fun DetectionsContent(
                 onClick = onRefresh,
                 enabled = !uiState.isInitialLoading && !uiState.isRefreshing
             ) {
-                Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                if (uiState.isRefreshing) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                }
             }
+        }
+
+        if (uiState.refreshError) {
+            RefreshErrorBanner(onRetry = onRefresh)
         }
 
         when {
             uiState.isInitialLoading -> FullScreenLoading()
             uiState.initialError -> FullScreenError(onRetry = onRefresh)
-            // Checked before emptyState: items are cleared eagerly on refresh, so without this
-            // branch a manual refresh would flash "no detections" for a moment every time.
-            uiState.isRefreshing -> FullScreenLoading()
             uiState.emptyState != null -> DetectionsEmptyView(
                 emptyState = uiState.emptyState,
+                isLoadingNextPage = uiState.isLoadingNextPage,
+                pagingError = uiState.pagingError,
                 onLoadMore = onLoadNextPage
             )
             else -> DetectionsList(
@@ -146,6 +159,22 @@ internal fun DetectionsContent(
     }
 }
 
+@Composable
+private fun RefreshErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.xs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = stringResource(R.string.detections_error_refresh),
+            style = MaterialTheme.typography.bodySmall,
+            color = SemanticColors.Warning
+        )
+        TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetectionsList(
@@ -157,27 +186,11 @@ private fun DetectionsList(
     onItemClick: (DetectionHistoryItemUiModel) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val listState = rememberLazyListState()
-
-    // Scroll-triggered pagination: request the next page once the user nears the end of what's
-    // currently loaded. Guarded by canLoadMore/loadNextPage's own isLoadingNextPage check, so this
-    // can fire repeatedly during a scroll without stacking up duplicate requests.
-    LaunchedEffect(listState, canLoadMore) {
-        if (!canLoadMore) return@LaunchedEffect
-        snapshotFlow { listState.layoutInfo }.collect { layoutInfo ->
-            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val total = layoutInfo.totalItemsCount
-            if (total > 0 && lastVisible >= total - 3) {
-                onLoadNextPage()
-            }
-        }
-    }
-
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(Spacing.lg)
-    ) {
+    // Paging is exclusively an explicit user action (the footer's Load more/Retry) — no
+    // scroll-position-triggered auto-fetch. That avoids retrying a failed page merely because the
+    // footer relayouts near the end of the list, and avoids silently walking the entire remaining
+    // history while a restrictive filter leaves only a handful of rows visible per page.
+    LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(Spacing.lg)) {
         sections.forEach { section ->
             stickyHeader { DateSectionHeader(section.date) }
             items(section.items, key = { it.id.toString() }) { item ->
@@ -189,20 +202,47 @@ private fun DetectionsList(
             }
         }
         item {
-            when {
-                isLoadingNextPage -> LoadingFooter()
-                pagingError -> PagingErrorFooter(onRetry = onLoadNextPage)
-            }
+            PagingFooter(
+                isLoadingNextPage = isLoadingNextPage,
+                pagingError = pagingError,
+                canLoadMore = canLoadMore,
+                onLoadNextPage = onLoadNextPage
+            )
         }
+    }
+}
+
+/** One deterministic footer: exactly one of loading / error / load-more / nothing, per current
+ * state — never more than one of these at once, and never a retry that fires automatically. */
+@Composable
+private fun PagingFooter(
+    isLoadingNextPage: Boolean,
+    pagingError: Boolean,
+    canLoadMore: Boolean,
+    onLoadNextPage: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    when {
+        isLoadingNextPage -> LoadingFooter(modifier)
+        pagingError -> PagingErrorFooter(onRetry = onLoadNextPage, modifier = modifier)
+        canLoadMore -> LoadMoreFooter(onClick = onLoadNextPage, modifier = modifier)
+    }
+}
+
+@Composable
+private fun LoadMoreFooter(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxWidth().padding(Spacing.md), contentAlignment = Alignment.Center) {
+        TextButton(onClick = onClick) { Text(stringResource(R.string.action_load_more)) }
     }
 }
 
 @Composable
 private fun DateSectionHeader(date: LocalDate, modifier: Modifier = Modifier) {
-    val text = if (date == LocalDate.now(ZoneId.systemDefault())) {
-        stringResource(R.string.section_today)
-    } else {
-        DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG).withLocale(Locale.getDefault()).format(date)
+    val today = LocalDate.now(ZoneId.systemDefault())
+    val headerDate = sectionHeaderDateFor(date, today, Locale.getDefault())
+    val text = when (headerDate) {
+        is SectionHeaderDate.Today -> stringResource(R.string.section_today_with_date, headerDate.shortDate)
+        is SectionHeaderDate.OtherDate -> headerDate.longDate
     }
     Surface(modifier = modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.background) {
         SectionHeader(text = text, modifier = Modifier.padding(vertical = Spacing.sm))
@@ -236,7 +276,7 @@ private fun DetectionListItem(
                         style = MonospaceValueStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     )
                     Text(
-                        text = item.timestampText,
+                        text = item.listTimestampText,
                         style = MonospaceValueStyle.copy(fontSize = 11.sp),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                     )
@@ -267,6 +307,8 @@ private fun DetectionListItem(
 @Composable
 private fun DetectionsEmptyView(
     emptyState: DetectionsEmptyState,
+    isLoadingNextPage: Boolean,
+    pagingError: Boolean,
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -288,7 +330,18 @@ private fun DetectionsEmptyView(
         )
         if (emptyState is DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable) {
             Spacer(modifier = Modifier.height(Spacing.md))
-            TextButton(onClick = onLoadMore) { Text(stringResource(R.string.action_load_more)) }
+            when {
+                isLoadingNextPage -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                pagingError -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = stringResource(R.string.detections_error_paging),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    TextButton(onClick = onLoadMore) { Text(stringResource(R.string.action_retry)) }
+                }
+                else -> TextButton(onClick = onLoadMore) { Text(stringResource(R.string.action_load_more)) }
+            }
         }
     }
 }
@@ -373,7 +426,7 @@ private fun DetectionDetailBottomSheet(
                 )
             }
             Spacer(modifier = Modifier.height(Spacing.md))
-            DetailRow(label = stringResource(R.string.detail_label_timestamp), value = detection.timestampText)
+            DetailRow(label = stringResource(R.string.detail_label_timestamp), value = detection.detailTimestampText)
             DetailRow(label = stringResource(R.string.detail_label_coordinates), value = detection.coordinatesText)
         }
     }

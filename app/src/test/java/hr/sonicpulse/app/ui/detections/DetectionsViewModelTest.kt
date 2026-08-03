@@ -7,6 +7,7 @@ import hr.sonicpulse.app.repository.FakeDetectionsRepository
 import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -43,7 +45,8 @@ class DetectionsViewModelTest {
         sequenceNumber: Long = 1L,
         peakDbfs: Double = -10.0,
         hotspotId: UUID? = null,
-        receivedAtUtc: Instant = Instant.parse("2026-08-03T10:00:00Z")
+        receivedAtUtc: Instant = Instant.parse("2026-08-03T10:00:00Z"),
+        peakTimeClient: Instant? = null
     ) = Detection(
         id = id,
         sequenceNumber = sequenceNumber,
@@ -53,38 +56,64 @@ class DetectionsViewModelTest {
         longitude = 16.0,
         gpsAccuracy = 8.0,
         receivedAtUtc = receivedAtUtc,
-        peakTimeClient = null,
+        peakTimeClient = peakTimeClient,
         hotspotId = hotspotId
     )
 
-    // --- Single initial-load trigger ---
+    // --- Initial loading ---
 
     @Test
-    fun `init triggers exactly one initial load`() = runTest(testDispatcher) {
+    fun `constructing the ViewModel does not automatically issue a request`() = runTest(testDispatcher) {
         val repository = FakeDetectionsRepository()
 
         DetectionsViewModel(repository)
+        advanceUntilIdle()
+
+        assertTrue(repository.requestedCursors.isEmpty())
+    }
+
+    @Test
+    fun `an explicit refresh call issues exactly one first-page request`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
         advanceUntilIdle()
 
         assertEquals(listOf(null), repository.requestedCursors)
     }
 
     @Test
-    fun `isInitialLoading is true before the first page resolves`() = runTest(testDispatcher) {
+    fun `isInitialLoading is true immediately after refresh, before the first page resolves`() = runTest(testDispatcher) {
         val repository = FakeDetectionsRepository()
-
         val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
 
         assertTrue(viewModel.uiState.value.isInitialLoading)
     }
 
     @Test
-    fun `a successful initial load populates sections and clears isInitialLoading`() = runTest(testDispatcher) {
+    fun `a failed initial load produces initialError`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply { throwOnGetPage = IOException("boom") }
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.initialError)
+        assertFalse(viewModel.uiState.value.isInitialLoading)
+        assertFalse(viewModel.uiState.value.refreshError)
+    }
+
+    @Test
+    fun `a successful initial load replaces the loading state with data`() = runTest(testDispatcher) {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
         }
-
         val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
@@ -92,48 +121,366 @@ class DetectionsViewModelTest {
         assertEquals(1, state.sections.single().items.size)
     }
 
-    // --- refresh() ---
-
     @Test
-    fun `refresh clears previous items, cursor and errors before applying page 1`() = runTest(testDispatcher) {
-        val repository = FakeDetectionsRepository().apply {
-            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 5L))
-        }
+    fun `a retry after a failed initial load is still treated as an initial load, not a refresh`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply { throwOnGetPage = IOException("boom") }
         val viewModel = DetectionsViewModel(repository)
+        viewModel.refresh()
         advanceUntilIdle()
-        check(viewModel.uiState.value.sections.isNotEmpty())
+        check(viewModel.uiState.value.initialError)
 
+        repository.throwOnGetPage = null
+        repository.pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
         viewModel.refresh()
 
-        // Asserted synchronously, before the new coroutine has a chance to run.
-        assertTrue(viewModel.uiState.value.sections.isEmpty())
-        assertTrue(viewModel.uiState.value.isRefreshing)
-        assertFalse(viewModel.uiState.value.canLoadMore)
+        assertTrue(viewModel.uiState.value.isInitialLoading)
+        assertFalse(viewModel.uiState.value.isRefreshing)
+    }
+
+    // --- Manual refresh (after a successful load) ---
+
+    private fun viewModelWithInitialRefresh(repository: FakeDetectionsRepository): DetectionsViewModel {
+        val viewModel = DetectionsViewModel(repository)
+        viewModel.refresh()
+        return viewModel
     }
 
     @Test
-    fun `a failed initial load sets initialError and does not mark the initial load complete`() =
-        runTest(testDispatcher) {
-            val repository = FakeDetectionsRepository().apply { throwOnGetPage = IOException("boom") }
+    fun `a manual refresh preserves loaded items, cursor and canLoadMore while it is running`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 5L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        check(viewModel.uiState.value.sections.isNotEmpty())
+        check(viewModel.uiState.value.canLoadMore)
 
-            val viewModel = DetectionsViewModel(repository)
+        viewModel.refresh()
+
+        // Asserted synchronously, before the second refresh's coroutine has a chance to run.
+        val state = viewModel.uiState.value
+        assertTrue(state.sections.isNotEmpty())
+        assertTrue(state.canLoadMore)
+        assertTrue(state.isRefreshing)
+        assertFalse(state.isInitialLoading)
+    }
+
+    @Test
+    fun `a manual refresh preserves the selected filter while it is running`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = UUID.randomUUID())), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        viewModel.selectFilter(DetectionsFilter.Grouped)
+        check(viewModel.uiState.value.selectedFilter == DetectionsFilter.Grouped)
+
+        viewModel.refresh()
+
+        assertEquals(DetectionsFilter.Grouped, viewModel.uiState.value.selectedFilter)
+    }
+
+    @Test
+    fun `a failed manual refresh preserves loaded items, cursor, canLoadMore and filter`() = runTest(testDispatcher) {
+        val original = detection(peakDbfs = -1.0)
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(original), nextCursor = 5L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        viewModel.selectFilter(DetectionsFilter.Ungrouped)
+        check(viewModel.uiState.value.canLoadMore)
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf(-1.0), state.sections.flatMap { it.items }.map { it.peakDbfs })
+        assertTrue(state.canLoadMore)
+        assertEquals(DetectionsFilter.Ungrouped, state.selectedFilter)
+    }
+
+    @Test
+    fun `a failed manual refresh does not set initialError`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.initialError)
+    }
+
+    @Test
+    fun `a failed manual refresh exposes refreshError`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.refreshError)
+    }
+
+    @Test
+    fun `a successful retry after a failed manual refresh replaces the old list and applies the new cursor`() =
+        runTest(testDispatcher) {
+            val old = detection(peakDbfs = -1.0)
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(null to DetectionPage(items = listOf(old), nextCursor = 5L))
+            }
+            val viewModel = viewModelWithInitialRefresh(repository)
             advanceUntilIdle()
 
-            assertTrue(viewModel.uiState.value.initialError)
-            assertFalse(viewModel.uiState.value.isInitialLoading)
-
-            // A retry after a failed initial load is still treated as an initial load, not a refresh.
-            repository.throwOnGetPage = null
-            repository.pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
+            repository.throwOnGetPage = IOException("boom")
             viewModel.refresh()
-            assertTrue(viewModel.uiState.value.isInitialLoading)
-            assertFalse(viewModel.uiState.value.isRefreshing)
+            advanceUntilIdle()
+            check(viewModel.uiState.value.refreshError)
+
+            val replacement = detection(peakDbfs = -2.0)
+            repository.throwOnGetPage = null
+            repository.pages = mapOf(null to DetectionPage(items = listOf(replacement), nextCursor = 9L))
+            viewModel.refresh()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertEquals(listOf(-2.0), state.sections.flatMap { it.items }.map { it.peakDbfs })
+            assertFalse(state.refreshError)
+
+            // The new cursor (9L) is what a following loadNextPage() would use.
+            viewModel.loadNextPage()
+            advanceUntilIdle()
+            assertEquals(listOf(null, null, null, 9L), repository.requestedCursors)
         }
+
+    @Test
+    fun `an older in-flight refresh result cannot overwrite a newer refresh result`() = runTest(testDispatcher) {
+        val repository = ControllableDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+        viewModel.refresh()
+        advanceUntilIdle()
+        val older = repository.deferredQueue.single()
+
+        viewModel.refresh()
+        advanceUntilIdle()
+        val newer = repository.deferredQueue.last()
+
+        // Out-of-order resolution: the newer request's result arrives first...
+        newer.complete(DetectionPage(items = listOf(detection(peakDbfs = -99.0)), nextCursor = null))
+        advanceUntilIdle()
+        // ...then the stale older request finally resolves too.
+        older.complete(DetectionPage(items = listOf(detection(peakDbfs = -1.0)), nextCursor = null))
+        advanceUntilIdle()
+
+        val finalItems = viewModel.uiState.value.sections.flatMap { it.items }
+        assertEquals(listOf(-99.0), finalItems.map { it.peakDbfs })
+    }
+
+    // --- Refresh clears obsolete paging state (item 13) ---
+
+    @Test
+    fun `starting a refresh while loadNextPage is active immediately clears paging loading and error state`() =
+        runTest(testDispatcher) {
+            val repository = ControllableDetectionsRepository()
+            val viewModel = DetectionsViewModel(repository)
+            viewModel.refresh()
+            advanceUntilIdle()
+            repository.deferredQueue[0].complete(DetectionPage(items = listOf(detection(peakDbfs = -1.0)), nextCursor = 1L))
+            advanceUntilIdle()
+
+            viewModel.loadNextPage()
+            advanceUntilIdle()
+            check(viewModel.uiState.value.isLoadingNextPage)
+
+            viewModel.refresh()
+
+            // Asserted synchronously, before the new refresh's own coroutine resolves.
+            assertFalse(viewModel.uiState.value.isLoadingNextPage)
+            assertFalse(viewModel.uiState.value.pagingError)
+        }
+
+    @Test
+    fun `a stale loadNextPage result arriving after a refresh started has no effect`() = runTest(testDispatcher) {
+        val repository = ControllableDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+        viewModel.refresh()
+        advanceUntilIdle()
+        repository.deferredQueue[0].complete(DetectionPage(items = listOf(detection(peakDbfs = -1.0)), nextCursor = 1L))
+        advanceUntilIdle()
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+        val stalePagingDeferred = repository.deferredQueue[1]
+
+        viewModel.refresh()
+        advanceUntilIdle()
+        val newRefreshDeferred = repository.deferredQueue[2]
+
+        // The stale next-page result resolves first...
+        stalePagingDeferred.complete(DetectionPage(items = listOf(detection(peakDbfs = -2.0)), nextCursor = null))
+        advanceUntilIdle()
+        // ...then the new refresh's own result.
+        newRefreshDeferred.complete(DetectionPage(items = listOf(detection(peakDbfs = -3.0)), nextCursor = null))
+        advanceUntilIdle()
+
+        val finalPeaks = viewModel.uiState.value.sections.flatMap { it.items }.map { it.peakDbfs }
+        assertEquals(listOf(-3.0), finalPeaks)
+    }
 
     // --- Paging correctness ---
 
     @Test
-    fun `duplicate detection ids from a later page are not added twice`() = runTest(testDispatcher) {
+    fun `one loadNextPage call produces exactly one request`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(listOf(null, 1L), repository.requestedCursors)
+    }
+
+    @Test
+    fun `concurrent duplicate loadNextPage calls are ignored`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        viewModel.loadNextPage()
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(listOf(null, 1L), repository.requestedCursors)
+    }
+
+    @Test
+    fun `a failed next-page request preserves already loaded items`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        val itemsBefore = viewModel.uiState.value.sections.flatMap { it.items }
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(itemsBefore, viewModel.uiState.value.sections.flatMap { it.items })
+        assertTrue(viewModel.uiState.value.pagingError)
+    }
+
+    @Test
+    fun `retry after a failed next-page request uses the same cursor`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        repository.throwOnGetPage = null
+        repository.pages = repository.pages + (1L to DetectionPage(items = listOf(detection()), nextCursor = null))
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(listOf(null, 1L, 1L), repository.requestedCursors)
+    }
+
+    @Test
+    fun `nextCursor null disables further paging until refresh`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        check(!viewModel.uiState.value.canLoadMore)
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(listOf(null), repository.requestedCursors)
+    }
+
+    @Test
+    fun `paging error remains exposed when the current filter has zero matches`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = null)), nextCursor = 1L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        viewModel.selectFilter(DetectionsFilter.Grouped)
+        check(viewModel.uiState.value.emptyState == DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable)
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.pagingError)
+        assertEquals(DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable, state.emptyState)
+    }
+
+    // --- Deduplication ---
+
+    @Test
+    fun `duplicate ids inside the first page are removed, keeping the first occurrence`() = runTest(testDispatcher) {
+        val id = UUID.randomUUID()
+        val first = detection(id = id, peakDbfs = -1.0)
+        val duplicate = detection(id = id, peakDbfs = -2.0)
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(first, duplicate), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        val items = viewModel.uiState.value.sections.flatMap { it.items }
+        assertEquals(1, items.size)
+        assertEquals(-1.0, items.single().peakDbfs, 0.0)
+    }
+
+    @Test
+    fun `duplicate ids inside a later page are removed, keeping the first occurrence`() = runTest(testDispatcher) {
+        val dupId = UUID.randomUUID()
+        val firstInPage2 = detection(id = dupId, peakDbfs = -2.0)
+        val duplicateInPage2 = detection(id = dupId, peakDbfs = -3.0)
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(
+                null to DetectionPage(items = listOf(detection(peakDbfs = -1.0)), nextCursor = 1L),
+                1L to DetectionPage(items = listOf(firstInPage2, duplicateInPage2), nextCursor = null)
+            )
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        val items = viewModel.uiState.value.sections.flatMap { it.items }
+        assertEquals(2, items.size)
+        assertEquals(1, items.count { it.id == dupId })
+        assertEquals(-2.0, items.single { it.id == dupId }.peakDbfs, 0.0)
+    }
+
+    @Test
+    fun `ids shared between an already-loaded page and a later page are removed`() = runTest(testDispatcher) {
         val shared = detection(peakDbfs = -1.0)
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(
@@ -141,7 +488,7 @@ class DetectionsViewModelTest {
                 1L to DetectionPage(items = listOf(shared, detection(peakDbfs = -2.0)), nextCursor = null)
             )
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.loadNextPage()
@@ -164,7 +511,7 @@ class DetectionsViewModelTest {
                 1L to DetectionPage(items = listOf(oldest), nextCursor = null)
             )
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.loadNextPage()
@@ -172,95 +519,6 @@ class DetectionsViewModelTest {
 
         val order = viewModel.uiState.value.sections.flatMap { it.items }.map { it.peakDbfs }
         assertEquals(listOf(-1.0, -2.0, -3.0), order)
-    }
-
-    @Test
-    fun `concurrent duplicate loadNextPage calls are ignored`() = runTest(testDispatcher) {
-        val repository = FakeDetectionsRepository().apply {
-            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
-        }
-        val viewModel = DetectionsViewModel(repository)
-        advanceUntilIdle()
-
-        viewModel.loadNextPage()
-        viewModel.loadNextPage()
-        advanceUntilIdle()
-
-        assertEquals(listOf(null, 1L), repository.requestedCursors)
-    }
-
-    @Test
-    fun `a failed next-page request preserves already loaded items`() = runTest(testDispatcher) {
-        val repository = FakeDetectionsRepository().apply {
-            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
-        }
-        val viewModel = DetectionsViewModel(repository)
-        advanceUntilIdle()
-        val itemsBefore = viewModel.uiState.value.sections.flatMap { it.items }
-
-        repository.throwOnGetPage = IOException("boom")
-        viewModel.loadNextPage()
-        advanceUntilIdle()
-
-        assertEquals(itemsBefore, viewModel.uiState.value.sections.flatMap { it.items })
-        assertTrue(viewModel.uiState.value.pagingError)
-    }
-
-    @Test
-    fun `retry after a failed next-page request uses the same cursor`() = runTest(testDispatcher) {
-        val repository = FakeDetectionsRepository().apply {
-            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
-        }
-        val viewModel = DetectionsViewModel(repository)
-        advanceUntilIdle()
-
-        repository.throwOnGetPage = IOException("boom")
-        viewModel.loadNextPage()
-        advanceUntilIdle()
-
-        repository.throwOnGetPage = null
-        repository.pages = repository.pages + (1L to DetectionPage(items = listOf(detection()), nextCursor = null))
-        viewModel.loadNextPage()
-        advanceUntilIdle()
-
-        assertEquals(listOf(null, 1L, 1L), repository.requestedCursors)
-    }
-
-    @Test
-    fun `nextCursor null disables further paging until refresh`() = runTest(testDispatcher) {
-        val repository = FakeDetectionsRepository().apply {
-            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
-        }
-        val viewModel = DetectionsViewModel(repository)
-        advanceUntilIdle()
-        check(!viewModel.uiState.value.canLoadMore)
-
-        viewModel.loadNextPage()
-        advanceUntilIdle()
-
-        assertEquals(listOf(null), repository.requestedCursors)
-    }
-
-    @Test
-    fun `an older in-flight refresh result cannot overwrite a newer refresh result`() = runTest(testDispatcher) {
-        val repository = ControllableDetectionsRepository()
-        val viewModel = DetectionsViewModel(repository)
-        advanceUntilIdle()
-        val older = repository.deferredQueue.single()
-
-        viewModel.refresh()
-        advanceUntilIdle()
-        val newer = repository.deferredQueue.last()
-
-        // Out-of-order resolution: the newer request's result arrives first...
-        newer.complete(DetectionPage(items = listOf(detection(peakDbfs = -99.0)), nextCursor = null))
-        advanceUntilIdle()
-        // ...then the stale older request finally resolves too.
-        older.complete(DetectionPage(items = listOf(detection(peakDbfs = -1.0)), nextCursor = null))
-        advanceUntilIdle()
-
-        val finalItems = viewModel.uiState.value.sections.flatMap { it.items }
-        assertEquals(listOf(-99.0), finalItems.map { it.peakDbfs })
     }
 
     // --- Filters ---
@@ -277,7 +535,7 @@ class DetectionsViewModelTest {
                 )
             )
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.selectFilter(DetectionsFilter.Today)
@@ -293,7 +551,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(grouped, ungrouped), nextCursor = null))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.selectFilter(DetectionsFilter.Grouped)
@@ -308,7 +566,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(grouped, ungrouped), nextCursor = null))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.selectFilter(DetectionsFilter.Ungrouped)
@@ -321,7 +579,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = null)), nextCursor = 1L))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.selectFilter(DetectionsFilter.Grouped)
@@ -334,7 +592,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.selectFilter(DetectionsFilter.Grouped)
@@ -350,7 +608,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = emptyList(), nextCursor = null))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         assertEquals(DetectionsEmptyState.NoDetectionsAtAll, viewModel.uiState.value.emptyState)
@@ -361,7 +619,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = null)), nextCursor = null))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         viewModel.selectFilter(DetectionsFilter.Grouped)
@@ -375,7 +633,7 @@ class DetectionsViewModelTest {
             val repository = FakeDetectionsRepository().apply {
                 pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = null)), nextCursor = 1L))
             }
-            val viewModel = DetectionsViewModel(repository)
+            val viewModel = viewModelWithInitialRefresh(repository)
             advanceUntilIdle()
 
             viewModel.selectFilter(DetectionsFilter.Grouped)
@@ -392,7 +650,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = UUID.randomUUID())), nextCursor = null))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.sections.single().items.single().grouped)
@@ -403,7 +661,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = null)), nextCursor = null))
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         assertFalse(viewModel.uiState.value.sections.single().items.single().grouped)
@@ -424,7 +682,7 @@ class DetectionsViewModelTest {
                 )
             )
         }
-        val viewModel = DetectionsViewModel(repository)
+        val viewModel = viewModelWithInitialRefresh(repository)
         advanceUntilIdle()
 
         val sectionDates = viewModel.uiState.value.sections.map { it.date }
@@ -432,6 +690,30 @@ class DetectionsViewModelTest {
             listOf(day1.atZone(zone).toLocalDate(), day2.atZone(zone).toLocalDate()),
             sectionDates
         )
+    }
+
+    // --- Timestamp presentation ---
+
+    @Test
+    fun `list and detail timestamps are derived from receivedAtUtc, never peakTimeClient`() = runTest(testDispatcher) {
+        val receivedAt = Instant.parse("2026-08-03T10:00:00Z")
+        val unrelatedPeakTimeClient = Instant.parse("2020-01-01T00:00:00Z")
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(
+                null to DetectionPage(
+                    items = listOf(detection(receivedAtUtc = receivedAt, peakTimeClient = unrelatedPeakTimeClient)),
+                    nextCursor = null
+                )
+            )
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        val item = viewModel.uiState.value.sections.single().items.single()
+        val zone = ZoneId.systemDefault()
+        val locale = Locale.getDefault()
+        assertEquals(listTimestampTextFor(receivedAt, zone, locale), item.listTimestampText)
+        assertEquals(detailTimestampTextFor(receivedAt, zone, locale), item.detailTimestampText)
     }
 }
 

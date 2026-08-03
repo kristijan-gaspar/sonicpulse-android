@@ -8,7 +8,10 @@ import java.util.UUID
 data class DetectionHistoryItemUiModel(
     val id: UUID,
     val peakDbfs: Double,
-    val timestampText: String,
+    /** Short local time for the list row, e.g. "14:32:07". */
+    val listTimestampText: String,
+    /** Localized full local date + the same 24-hour time, for the detail bottom sheet only. */
+    val detailTimestampText: String,
     val coordinatesText: String,
     /** True renders "Grupirano"/"Grouped", false renders "Nije grupirano"/"Not grouped" — string
      * resource lookup happens in the Composable layer, not here. No confidence value: that's

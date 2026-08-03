@@ -11,6 +11,10 @@ data class DetectionsUiState(
     val canLoadMore: Boolean = false,
     /** The very first load failed — full-screen error, nothing to show yet. */
     val initialError: Boolean = false,
+    /** A manual refresh (after at least one page already loaded) failed — the previously loaded
+     * detections, cursor, canLoadMore and selected filter are all preserved unchanged; retry is
+     * just calling refresh() again. Never set together with [initialError]. */
+    val refreshError: Boolean = false,
     /** A loadNextPage() attempt failed — already-loaded items are preserved; a retry reuses the
      * same cursor (loadNextPage() never advances the cursor on failure). */
     val pagingError: Boolean = false,

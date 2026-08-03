@@ -85,13 +85,14 @@
     <string name="status_ungrouped">Not grouped</string>
 
     <!-- Detections — list (B) -->
-    <string name="section_today">Today</string>
+    <string name="section_today_with_date">Today — %1$s</string>
     <string name="action_retry">Retry</string>
     <string name="action_load_more">Load more</string>
     <string name="detections_empty_no_history">No detections yet</string>
     <string name="detections_empty_no_matches">No detections match this filter</string>
     <string name="detections_empty_no_matches_more_available">No matches on this page — more may be available</string>
     <string name="detections_error_initial_load">Couldn\'t load detections</string>
+    <string name="detections_error_refresh">Couldn\'t refresh detections. Showing previously loaded results.</string>
     <string name="detections_error_paging">Couldn\'t load more detections</string>
 
     <!-- Detections — detail bottom sheet (C) -->

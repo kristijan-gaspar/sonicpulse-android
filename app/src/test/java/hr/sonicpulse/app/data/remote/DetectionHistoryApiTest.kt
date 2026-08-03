@@ -10,9 +10,11 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import retrofit2.HttpException
 import retrofit2.Retrofit
 
 private const val DEVICE_ID = "11111111-1111-1111-1111-111111111111"
@@ -171,5 +173,34 @@ class DetectionHistoryApiTest {
         val item = page.items.single()
         assertNull(item.peakTimeClient)
         assertNull(item.hotspotId)
+    }
+
+    @Test
+    fun `HTTP 401 propagates as a failure, never as a successful empty page`() {
+        server.enqueue(MockResponse().setResponseCode(401))
+
+        val exception = assertThrows(HttpException::class.java) {
+            runBlocking { api.getDetectionHistory(deviceId = DEVICE_ID, cursor = null, limit = 50) }
+        }
+        assertEquals(401, exception.code())
+    }
+
+    @Test
+    fun `HTTP 500 propagates as a failure, never as a successful empty page`() {
+        server.enqueue(MockResponse().setResponseCode(500))
+
+        val exception = assertThrows(HttpException::class.java) {
+            runBlocking { api.getDetectionHistory(deviceId = DEVICE_ID, cursor = null, limit = 50) }
+        }
+        assertEquals(500, exception.code())
+    }
+
+    @Test
+    fun `malformed JSON propagates as a failure, never as a successful empty page`() {
+        server.enqueue(MockResponse().setBody("{ this is not valid json"))
+
+        assertThrows(Exception::class.java) {
+            runBlocking { api.getDetectionHistory(deviceId = DEVICE_ID, cursor = null, limit = 50) }
+        }
     }
 }
