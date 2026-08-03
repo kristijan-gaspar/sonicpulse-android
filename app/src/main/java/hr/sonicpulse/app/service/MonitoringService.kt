@@ -23,6 +23,7 @@ import hr.sonicpulse.app.data.audio.AudioRecorder
 import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
+import hr.sonicpulse.app.data.remote.DetectionSubmitter
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
@@ -51,7 +52,8 @@ import kotlinx.coroutines.launch
  * the classification as it stood then, before handing the rest of the work to this service's own
  * coroutine scope.
  *
- * No backend submission yet in this branch.
+ * Submission (§2.9) runs on [serviceScope] after the location snapshot: the audio thread never
+ * waits on it, only publishes the local detection and moves on to the next block.
  *
  * Must only be started (via [startIntent]) from a visible user action (e.g. a Start button on
  * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO, location) to
@@ -69,6 +71,9 @@ class MonitoringService : Service() {
 
     @Inject
     lateinit var locationProvider: LocationProvider
+
+    @Inject
+    lateinit var detectionSubmitter: DetectionSubmitter
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val engineConfig = EngineConfig()
@@ -214,15 +219,15 @@ class MonitoringService : Service() {
             // arrive first and misrepresent what was actually known when this detection occurred.
             val locationSnapshot = locationProvider.currentSnapshot
             val localEventId = UUID.randomUUID()
+            val sessionDetection = SessionDetection(
+                localEventId = localEventId,
+                peakDbfs = event.peakDbfs,
+                peakTimeClient = peakTimeClient,
+                location = locationSnapshot
+            )
             serviceScope.launch {
-                monitoringStateRepository.localDetectionOccurred(
-                    SessionDetection(
-                        localEventId = localEventId,
-                        peakDbfs = event.peakDbfs,
-                        peakTimeClient = peakTimeClient,
-                        location = locationSnapshot
-                    )
-                )
+                monitoringStateRepository.localDetectionOccurred(sessionDetection)
+                detectionSubmitter.submit(sessionDetection)
             }
         }
     }
