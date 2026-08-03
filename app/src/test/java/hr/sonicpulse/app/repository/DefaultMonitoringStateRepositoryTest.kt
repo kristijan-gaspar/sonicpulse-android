@@ -484,6 +484,32 @@ class DefaultMonitoringStateRepositoryTest {
         repository.cancelPendingSubmissions()
         repository.cancelPendingSubmissions()
 
+        assertEquals(
+            SubmissionStatus.Failed(SubmissionFailureReason.Cancelled),
+            repository.state.value.sessionDetections.single().submissionStatus
+        )
         assertEquals(1, repository.state.value.submissionCounters.cancelled)
+    }
+
+    @Test
+    fun `cancelPendingSubmissions called twice, mirroring explicit Stop then onDestroy, does not touch an already-terminal detection`() {
+        val repository = DefaultMonitoringStateRepository()
+        val sent = detection()
+        val failed = detection()
+        repository.localDetectionOccurred(sent)
+        repository.localDetectionOccurred(failed)
+        repository.submissionSucceeded(sent.localEventId)
+        repository.submissionFailed(failed.localEventId, SubmissionFailureReason.NetworkError)
+
+        repository.cancelPendingSubmissions()
+        repository.cancelPendingSubmissions()
+
+        val state = repository.state.value
+        assertEquals(SubmissionStatus.Sent, state.sessionDetections.first { it.localEventId == sent.localEventId }.submissionStatus)
+        assertEquals(
+            SubmissionStatus.Failed(SubmissionFailureReason.NetworkError),
+            state.sessionDetections.first { it.localEventId == failed.localEventId }.submissionStatus
+        )
+        assertEquals(0, state.submissionCounters.cancelled)
     }
 }

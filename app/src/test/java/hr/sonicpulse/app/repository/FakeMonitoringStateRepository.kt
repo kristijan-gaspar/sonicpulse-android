@@ -48,7 +48,7 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
 
     override fun localDetectionOccurred(detection: SessionDetection) {
         occurredDetections += detection
-        _state.update { it.copy(sessionDetections = it.sessionDetections + detection) }
+        _state.update { it.copy(sessionDetections = SessionDetectionRetention.append(it.sessionDetections, detection)) }
     }
 
     override fun submissionSucceeded(localEventId: UUID) {

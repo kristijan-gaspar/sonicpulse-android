@@ -264,6 +264,12 @@ class MonitoringService : Service() {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
         }
+        // Capture/location are stopped above first, so the audio thread cannot publish another
+        // detection after this point — only then is it safe to give every still-Pending detection
+        // a terminal Failed(Cancelled) result. Outside the StopSession branch (and thus independent
+        // of it) and idempotent, so repeated or stale Stop handling stays safe; onDestroy() below
+        // still calls this too, as a defensive fallback for teardown paths that don't go through here.
+        monitoringStateRepository.cancelPendingSubmissions()
         stopForegroundCompat()
         stopSelf()
     }
