@@ -36,7 +36,7 @@ private class DetectionSubmitterFixture(
 
 class DetectionSubmitterTest {
 
-    private fun detection(location: LocationSnapshot) = SessionDetection(
+    private fun detection(location: LocationSnapshot.Valid) = SessionDetection(
         localEventId = UUID.randomUUID(),
         peakDbfs = -8.0,
         peakTimeClient = Instant.parse("2026-08-03T10:00:00Z"),
@@ -81,54 +81,18 @@ class DetectionSubmitterTest {
     }
 
     @Test
-    fun `NoFixYet location drops before attempting network`() = runTest {
-        val f = fixture(FakeDetectionApi())
-        val target = detection(LocationSnapshot.NoFixYet)
+    fun `every submitted DTO carries latitude, longitude and strictly positive gpsAccuracy`() = runTest {
+        val api = FakeDetectionApi { fakeHttpResponse(201) }
+        val f = fixture(api)
+        val target = detection(LocationSnapshot.Valid(latitude = 45.8, longitude = 16.0, accuracyMeters = 8.0f))
         f.stateRepository.localDetectionOccurred(target)
 
         f.submitter.submit(target)
 
-        assertTrue(f.api.requests.isEmpty())
-        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.NoLocation), f.statusOf(target))
-        assertTrue(f.logger.events.isEmpty())
-    }
-
-    @Test
-    fun `Invalid location drops before attempting network as NoLocation`() = runTest {
-        val f = fixture(FakeDetectionApi())
-        val target = detection(LocationSnapshot.Invalid)
-        f.stateRepository.localDetectionOccurred(target)
-
-        f.submitter.submit(target)
-
-        assertTrue(f.api.requests.isEmpty())
-        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.NoLocation), f.statusOf(target))
-    }
-
-    @Test
-    fun `Stale location drops before attempting network`() = runTest {
-        val f = fixture(FakeDetectionApi())
-        val target = detection(LocationSnapshot.Stale(ageMillis = 999_999))
-        f.stateRepository.localDetectionOccurred(target)
-
-        f.submitter.submit(target)
-
-        assertTrue(f.api.requests.isEmpty())
-        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.StaleLocation), f.statusOf(target))
-        assertEquals(1, f.stateRepository.state.value.submissionCounters.droppedStaleLocation)
-    }
-
-    @Test
-    fun `Inaccurate location drops before attempting network`() = runTest {
-        val f = fixture(FakeDetectionApi())
-        val target = detection(LocationSnapshot.Inaccurate(accuracyMeters = 500f))
-        f.stateRepository.localDetectionOccurred(target)
-
-        f.submitter.submit(target)
-
-        assertTrue(f.api.requests.isEmpty())
-        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.InaccurateLocation), f.statusOf(target))
-        assertEquals(1, f.stateRepository.state.value.submissionCounters.droppedInaccurateLocation)
+        val sentRequest = api.requests.single()
+        assertEquals(45.8, sentRequest.latitude, 0.0)
+        assertEquals(16.0, sentRequest.longitude, 0.0)
+        assertTrue(sentRequest.gpsAccuracy > 0.0)
     }
 
     @Test

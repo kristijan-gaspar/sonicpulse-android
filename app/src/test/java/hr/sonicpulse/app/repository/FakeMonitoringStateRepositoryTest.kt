@@ -14,7 +14,7 @@ class FakeMonitoringStateRepositoryTest {
         localEventId = UUID.randomUUID(),
         peakDbfs = peakDbfs,
         peakTimeClient = Instant.EPOCH,
-        location = LocationSnapshot.NoFixYet
+        location = LocationSnapshot.Valid(45.8, 16.0, 8.0f)
     )
 
     @Test

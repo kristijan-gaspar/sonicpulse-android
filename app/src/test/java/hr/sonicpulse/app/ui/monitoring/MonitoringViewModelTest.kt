@@ -61,7 +61,7 @@ class MonitoringViewModelTest {
         DateTimeFormatter.ofPattern("HH:mm:ss", Locale.getDefault()).withZone(ZoneId.systemDefault()).format(instant)
 
     private fun detection(
-        location: LocationSnapshot = LocationSnapshot.NoFixYet,
+        location: LocationSnapshot.Valid = LocationSnapshot.Valid(45.8, 16.0, 8.0f),
         peakTimeClient: Instant = Instant.parse("2026-08-03T14:32:07Z")
     ) = SessionDetection(
         localEventId = UUID.randomUUID(),
@@ -224,10 +224,10 @@ class MonitoringViewModelTest {
     }
 
     @Test
-    fun `a detection with no location fix has null coordinatesText and Sending status`() = runTest(testDispatcher) {
+    fun `a detection maps peakDbfs, timestamp, coordinatesText and Sending status`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
         val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
-        val target = detection(location = LocationSnapshot.NoFixYet)
+        val target = detection(location = LocationSnapshot.Valid(45.8, 16.0, 8.0f))
 
         repository.localDetectionOccurred(target)
         advanceUntilIdle()
@@ -236,20 +236,8 @@ class MonitoringViewModelTest {
         requireNotNull(last)
         assertEquals(-10.0, last.peakDbfs, 0.0)
         assertEquals(expectedTimestampText(target.peakTimeClient), last.timestampText)
-        assertNull(last.coordinatesText)
+        assertEquals("45.80000, 16.00000", last.coordinatesText)
         assertEquals(SendResult.Sending, last.sendResult)
-    }
-
-    @Test
-    fun `a detection with a valid location fix formats coordinatesText`() = runTest(testDispatcher) {
-        val repository = FakeMonitoringStateRepository()
-        val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
-        val target = detection(location = LocationSnapshot.Valid(45.8, 16.0, 8.0f))
-
-        repository.localDetectionOccurred(target)
-        advanceUntilIdle()
-
-        assertEquals("45.80000, 16.00000", viewModel.uiState.value.lastDetection?.coordinatesText)
     }
 
     @Test

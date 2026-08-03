@@ -93,7 +93,7 @@ class MonitoringServiceRefreshRaceTest {
         val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
         val repository = FakeMonitoringStateRepository()
         repository.monitoringStarted()
-        val target = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH, LocationSnapshot.NoFixYet)
+        val target = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH, LocationSnapshot.Valid(45.8, 16.0, 8.0f))
         repository.localDetectionOccurred(target)
 
         refreshLocation(lifecycleCoordinator, refreshCoordinator, locationProvider, repository)
@@ -294,7 +294,7 @@ class MonitoringServiceRefreshRaceTest {
         val (lifecycleCoordinator, refreshCoordinator, locationProvider) = activeSetup()
         val repository = FakeMonitoringStateRepository()
         repository.monitoringStarted()
-        val target = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH, LocationSnapshot.NoFixYet)
+        val target = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH, LocationSnapshot.Valid(45.8, 16.0, 8.0f))
         repository.localDetectionOccurred(target)
         repository.submissionSucceeded(target.localEventId)
 

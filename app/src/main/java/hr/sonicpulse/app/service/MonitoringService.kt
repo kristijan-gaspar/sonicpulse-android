@@ -24,12 +24,10 @@ import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
-import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
 import hr.sonicpulse.engine.EngineConfig
 import java.time.Instant
-import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -252,20 +250,16 @@ class MonitoringService : Service() {
             // the coroutine below, whose scheduling could otherwise let a newer location update
             // arrive first and misrepresent what was actually known when this detection occurred.
             val locationSnapshot = locationProvider.currentSnapshot
-            val localEventId = UUID.randomUUID()
-            val sessionDetection = SessionDetection(
-                localEventId = localEventId,
-                peakDbfs = event.peakDbfs,
-                peakTimeClient = peakTimeClient,
-                location = locationSnapshot
-            )
-            // Published synchronously (MutableStateFlow.update is thread-safe) so the detection is
-            // visibly Pending before any submission attempt is even scheduled — insertion and
-            // submission are deliberately not both inside the launched coroutine below, so a
-            // cancelled/never-started submission coroutine can never leave the detection unlisted.
-            monitoringStateRepository.localDetectionOccurred(sessionDetection)
-            serviceScope.launch {
-                detectionSubmitter.submit(sessionDetection)
+            val sessionDetection = sessionDetectionFor(event.peakDbfs, peakTimeClient, locationSnapshot)
+            if (sessionDetection != null) {
+                // Published synchronously (MutableStateFlow.update is thread-safe) so the detection
+                // is visibly Pending before any submission attempt is even scheduled — insertion and
+                // submission are deliberately not both inside the launched coroutine below, so a
+                // cancelled/never-started submission coroutine can never leave the detection unlisted.
+                monitoringStateRepository.localDetectionOccurred(sessionDetection)
+                serviceScope.launch {
+                    detectionSubmitter.submit(sessionDetection)
+                }
             }
         }
     }
