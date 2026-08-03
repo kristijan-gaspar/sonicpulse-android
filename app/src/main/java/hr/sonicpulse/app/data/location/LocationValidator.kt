@@ -22,6 +22,12 @@ object LocationValidator {
         if (ageNanos < 0L) {
             return LocationSnapshot.Invalid
         }
+        // Zero accuracy passes RawLocationFix's own (non-negative) check but can never satisfy
+        // LocationSnapshot.Valid's strictly-positive invariant — caught here, before Valid is ever
+        // constructed, rather than letting that constructor throw.
+        if (!fix.accuracyMeters.isFinite() || fix.accuracyMeters <= 0f) {
+            return LocationSnapshot.Invalid
+        }
 
         val maxAgeNanos = policy.maxLocationAgeMillis * 1_000_000L
         if (ageNanos > maxAgeNanos) {

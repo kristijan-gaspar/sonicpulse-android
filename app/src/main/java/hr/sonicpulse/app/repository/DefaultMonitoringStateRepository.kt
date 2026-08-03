@@ -1,8 +1,11 @@
 package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
+import hr.sonicpulse.app.data.location.LocationPermissionLevel
+import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
+import hr.sonicpulse.app.service.LocationRefreshFailure
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import java.util.UUID
@@ -17,8 +20,9 @@ import kotlinx.coroutines.flow.update
 class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRepository {
 
     private companion object {
-        // ~13 Hz: within the plan's 10-15 UI updates/second budget for high-frequency block metrics.
-        const val METRICS_THROTTLE_INTERVAL_MILLIS = 75L
+        // 10 Hz: matches the Monitoring screen's live dBFS chart, giving ~10s of history at 100 samples.
+        const val METRICS_THROTTLE_INTERVAL_MILLIS = 100L
+        const val MAX_DBFS_HISTORY = 100
     }
 
     private val throttle = MetricsThrottle(METRICS_THROTTLE_INTERVAL_MILLIS)
@@ -35,11 +39,15 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     }
 
     override fun monitoringFailed(error: AudioCaptureError) {
-        _state.update { it.copy(isMonitoring = false, captureError = error, startupError = null) }
+        _state.update {
+            it.copy(isMonitoring = false, captureError = error, startupError = null, errorEventId = it.errorEventId + 1)
+        }
     }
 
     override fun monitoringStartupFailed(failure: MonitoringStartupFailure) {
-        _state.update { it.copy(isMonitoring = false, startupError = failure, captureError = null) }
+        _state.update {
+            it.copy(isMonitoring = false, startupError = failure, captureError = null, errorEventId = it.errorEventId + 1)
+        }
     }
 
     override fun publishMetrics(metrics: BlockMetrics) {
@@ -50,6 +58,7 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
             it.copy(
                 liveDbfs = metrics.dbfs,
                 liveBaseline = metrics.baseline,
+                dbfsHistory = (it.dbfsHistory + metrics.dbfs).takeLast(MAX_DBFS_HISTORY),
                 engineState = metrics.state
             )
         }
@@ -69,5 +78,27 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
 
     override fun cancelPendingSubmissions() {
         _state.update { SubmissionTransitions.cancelPending(it) }
+    }
+
+    override fun locationRefreshFailed(failure: LocationRefreshFailure) {
+        _state.update { it.copy(locationRefreshError = failure, errorEventId = it.errorEventId + 1) }
+    }
+
+    override fun locationRefreshSucceeded() {
+        _state.update { it.copy(locationRefreshError = null) }
+    }
+
+    override fun updateLocationStatus(
+        snapshot: LocationSnapshot,
+        permissionLevel: LocationPermissionLevel,
+        servicesEnabled: Boolean
+    ) {
+        _state.update {
+            it.copy(
+                currentLocationSnapshot = snapshot,
+                locationPermissionLevel = permissionLevel,
+                locationServicesEnabled = servicesEnabled
+            )
+        }
     }
 }

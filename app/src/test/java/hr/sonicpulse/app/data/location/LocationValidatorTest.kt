@@ -86,6 +86,17 @@ class LocationValidatorTest {
     }
 
     @Test
+    fun `a fix with zero accuracy is invalid, never attempting to construct Valid`() {
+        val result = LocationValidator.evaluate(
+            fix(elapsedRealtimeNanos = now, accuracyMeters = 0.0f),
+            policy,
+            now
+        )
+
+        assertEquals(LocationSnapshot.Invalid, result)
+    }
+
+    @Test
     fun `a fix that is both stale and inaccurate is classified as stale`() {
         val maxAgeNanos = policy.maxLocationAgeMillis * 1_000_000L
         val elapsedRealtimeNanos = now - maxAgeNanos - 1

@@ -1,23 +1,26 @@
 package hr.sonicpulse.app.ui.monitoring
 
-import hr.sonicpulse.app.data.audio.AudioCaptureError
-import hr.sonicpulse.app.domain.model.SessionDetection
-import hr.sonicpulse.app.repository.SubmissionCounters
-import hr.sonicpulse.app.service.MonitoringStartupFailure
-import hr.sonicpulse.engine.DetectionState
+import androidx.annotation.StringRes
 
 /**
- * Plain data mapped from MonitoringState — no colors, formatted strings, or other visual
- * decisions. Those are added when the Monitoring screen itself is built (design-system pass).
+ * Fully display-shaped state for the Monitoring screen — colors and layout decisions still live
+ * in the Composable, but every value here is already the thing to render, never a raw
+ * domain/repository type. The Composable only renders what it receives.
  */
 data class MonitoringUiState(
-    val isMonitoring: Boolean = false,
-    val liveDbfs: Double = -120.0,
-    val liveBaseline: Double = -120.0,
-    val engineState: DetectionState = DetectionState.IDLE,
-    val sessionDetections: List<SessionDetection> = emptyList(),
-    val captureError: AudioCaptureError? = null,
-    val startupError: MonitoringStartupFailure? = null,
-    val submissionCounters: SubmissionCounters = SubmissionCounters(),
-    val serverConfigurationError: Boolean = false
+    val phase: MonitoringPhase = MonitoringPhase.Idle,
+    val locationDisplayState: LocationDisplayState = LocationDisplayState.Unavailable,
+    val microphoneActive: Boolean = false,
+    val backgroundActive: Boolean = false,
+    val currentDbfs: Float = -120f,
+    val dbfsHistory: List<Float> = emptyList(),
+    val lastDetection: DetectionUiModel? = null,
+    /** Persistent for the rest of the session after a 401/403 — stays true even after a later
+     * successful submission, until monitoringStarted() resets the next session. */
+    val serverConfigurationError: Boolean = false,
+    @StringRes val errorMessageRes: Int? = null,
+    /** Changes on every reported failure, even repeats of the same errorMessageRes — lets the
+     * Composable key a one-shot Snackbar on this instead of on errorMessageRes, which wouldn't
+     * change (and so wouldn't re-trigger) for two identical failures in a row. */
+    val errorEventId: Int = 0
 )

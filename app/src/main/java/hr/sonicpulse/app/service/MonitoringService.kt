@@ -24,36 +24,37 @@ import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
-import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
 import hr.sonicpulse.engine.EngineConfig
 import java.time.Instant
-import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Owns the active monitoring process (§2.6/§2.11): audio capture and engine processing run
- * synchronously on AudioRecorder's own capture thread (no separate executor here, per the
- * threading contract) — this service only coordinates lifecycle and publishes state. Location
- * updates run alongside audio capture (foregroundServiceType "microphone|location"), started
- * asynchronously via LocationProvider.start() — AudioRecorder only starts once that reports
- * LocationStartResult.Started. [MonitoringLifecycleCoordinator] guards this asynchronous startup
- * with a generation token, so a location result that arrives after its attempt was invalidated
- * (e.g. by a Stop) can never resurrect state or start audio capture.
+ * Owns the active monitoring process: audio capture and engine processing run synchronously on
+ * AudioRecorder's own capture thread (no separate executor here, per the threading contract) —
+ * this service only coordinates lifecycle and publishes state. Location updates run alongside
+ * audio capture (foregroundServiceType "microphone|location"), started asynchronously via
+ * LocationProvider.start() — AudioRecorder only starts once that reports LocationStartResult.Started.
+ * [MonitoringLifecycleCoordinator] guards this asynchronous startup with a generation token, so a
+ * location result that arrives after its attempt was invalidated (e.g. by a Stop) can never
+ * resurrect state or start audio capture.
  *
  * The audio thread itself never touches LocationProvider except reading [LocationProvider.currentSnapshot]
  * (a cheap volatile-field read, not I/O) at the exact moment a detection is handed off — capturing
  * the classification as it stood then, before handing the rest of the work to this service's own
  * coroutine scope.
  *
- * Submission (§2.9) runs on [serviceScope] after the location snapshot: the audio thread never
- * waits on it, only publishes the local detection and moves on to the next block.
+ * Submission runs on [serviceScope] after the location snapshot: the audio thread never waits on
+ * it, only publishes the local detection and moves on to the next block.
  *
  * Must only be started (via [startIntent]) from a visible user action (e.g. a Start button on
  * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO, location) to
@@ -79,9 +80,11 @@ class MonitoringService : Service() {
     private val engineConfig = EngineConfig()
     private val sessionCoordinator by lazy { MonitoringSessionCoordinator(monitoringStateRepository) }
     private val lifecycleCoordinator = MonitoringLifecycleCoordinator()
+    private val refreshCoordinator = MonitoringRefreshCoordinator()
 
     private var audioRecorder: AudioRecorder? = null
     private var firstBlockInstant: Instant? = null
+    private var locationPollingJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -89,6 +92,7 @@ class MonitoringService : Service() {
         when (intent?.action) {
             ACTION_START -> startMonitoringIfNeeded()
             ACTION_STOP -> stopMonitoringAndService()
+            ACTION_REFRESH_LOCATION -> refreshLocation()
             else -> stopSelf()
         }
         return START_NOT_STICKY
@@ -96,11 +100,12 @@ class MonitoringService : Service() {
 
     override fun onDestroy() {
         val effect = lifecycleCoordinator.onStopOrDestroy()
+        refreshCoordinator.invalidate()
         if (effect is MonitoringLifecycleEffect.StopSession) {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
         }
-        // Normal teardown only (§2.9's scope of guarantee) — gives every still-Pending detection
+        // Normal teardown only — gives every still-Pending detection
         // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
         // Idempotent: a no-op if nothing is retained and Pending.
         monitoringStateRepository.cancelPendingSubmissions()
@@ -203,6 +208,29 @@ class MonitoringService : Service() {
             onBlock = { block -> handleBlock(engine, block) },
             onCaptureError = { error -> serviceScope.launch { handleCaptureError(error) } }
         )
+
+        // serviceScope uses Dispatchers.Main.immediate, so a synchronous capture failure (recorder
+        // calling onError before recorder.start() itself returns) runs handleCaptureError() inline
+        // — including tearDownCaptureAndLocation() — before this line, while locationPollingJob is
+        // still null (it's assigned below). That teardown can therefore never cancel a job that
+        // doesn't exist yet: only start polling if the session is genuinely still ACTIVE here.
+        if (lifecycleCoordinator.state != MonitoringLifecycleState.ACTIVE) {
+            return
+        }
+
+        // The audio thread only reads currentSnapshot at the instant of a detection; this is the
+        // separate, continuous feed the Monitoring screen needs for its live status pill and
+        // location card, regardless of whether any detection ever occurs.
+        locationPollingJob = serviceScope.launch {
+            while (isActive) {
+                monitoringStateRepository.updateLocationStatus(
+                    snapshot = locationProvider.currentSnapshot,
+                    permissionLevel = locationProvider.permissionLevel(),
+                    servicesEnabled = locationProvider.areLocationServicesEnabled()
+                )
+                delay(LOCATION_POLL_INTERVAL_MILLIS)
+            }
+        }
     }
 
     private fun handleBlock(engine: DetectionEngine, block: ShortArray) {
@@ -222,20 +250,16 @@ class MonitoringService : Service() {
             // the coroutine below, whose scheduling could otherwise let a newer location update
             // arrive first and misrepresent what was actually known when this detection occurred.
             val locationSnapshot = locationProvider.currentSnapshot
-            val localEventId = UUID.randomUUID()
-            val sessionDetection = SessionDetection(
-                localEventId = localEventId,
-                peakDbfs = event.peakDbfs,
-                peakTimeClient = peakTimeClient,
-                location = locationSnapshot
-            )
-            // Published synchronously (MutableStateFlow.update is thread-safe) so the detection is
-            // visibly Pending before any submission attempt is even scheduled — insertion and
-            // submission are deliberately not both inside the launched coroutine below, so a
-            // cancelled/never-started submission coroutine can never leave the detection unlisted.
-            monitoringStateRepository.localDetectionOccurred(sessionDetection)
-            serviceScope.launch {
-                detectionSubmitter.submit(sessionDetection)
+            val sessionDetection = sessionDetectionFor(event.peakDbfs, peakTimeClient, locationSnapshot)
+            if (sessionDetection != null) {
+                // Published synchronously (MutableStateFlow.update is thread-safe) so the detection
+                // is visibly Pending before any submission attempt is even scheduled — insertion and
+                // submission are deliberately not both inside the launched coroutine below, so a
+                // cancelled/never-started submission coroutine can never leave the detection unlisted.
+                monitoringStateRepository.localDetectionOccurred(sessionDetection)
+                serviceScope.launch {
+                    detectionSubmitter.submit(sessionDetection)
+                }
             }
         }
     }
@@ -258,8 +282,66 @@ class MonitoringService : Service() {
         stopSelf()
     }
 
+    /**
+     * Location-only refresh for the precise-location upgrade flow: never touches audio capture,
+     * DetectionEngine, the session, or the foreground notification — only the location subscription
+     * is stopped and restarted, since [LocationProvider.start] is itself a no-op while already
+     * active and Android does not auto-upgrade an active subscription to precise fixes on its own.
+     * [locationPollingJob] is left running throughout and simply observes whatever
+     * [LocationProvider.currentSnapshot] becomes once the fresh subscription resolves.
+     *
+     * Guarded on [MonitoringLifecycleCoordinator.state] being ACTIVE via [refreshCoordinator]: a
+     * stale intent reaching an instance where nothing is running must do no monitoring work and
+     * stop that instance, not silently no-op and leave it dangling.
+     */
+    private fun refreshLocation() {
+        val effect = refreshCoordinator.onRefreshRequested(lifecycleCoordinator.state)
+        val generation = (effect as? MonitoringRefreshEffect.Begin)?.generation
+        if (generation == null) {
+            stopSelf()
+            return
+        }
+        locationProvider.stop()
+        locationProvider.start { result ->
+            serviceScope.launch { handleRefreshResult(generation, result) }
+        }
+    }
+
+    private fun handleRefreshResult(generation: Long, result: LocationStartResult) {
+        if (!refreshCoordinator.isCurrent(generation, lifecycleCoordinator.state)) {
+            // Superseded by a newer refresh, or monitoring already stopped/destroyed — including
+            // the ordinary case where this Cancelled came from our own stop() above.
+            return
+        }
+        when (result) {
+            // The existing location-polling job already observes the fresh subscription — clear
+            // any error from a previous refresh attempt, since this one succeeded.
+            LocationStartResult.Started -> monitoringStateRepository.locationRefreshSucceeded()
+            // Reaching this branch at all means the guard above already confirmed we're current
+            // and still ACTIVE — our own stop() (superseded/Stop/destroy) would never get here,
+            // since that always changes generation and/or lifecycle state first. A Cancelled that
+            // DOES reach this point is therefore a genuine failure: the refreshed location request
+            // never resolved and no subscription is active — nonfatal, same as the other branches.
+            LocationStartResult.Cancelled ->
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.Failed)
+            LocationStartResult.PermissionDenied ->
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.PermissionDenied)
+            LocationStartResult.LocationServicesDisabled -> {
+                monitoringStateRepository.updateLocationStatus(
+                    snapshot = locationProvider.currentSnapshot,
+                    permissionLevel = locationProvider.permissionLevel(),
+                    servicesEnabled = false
+                )
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.LocationServicesDisabled)
+            }
+            is LocationStartResult.Failed ->
+                monitoringStateRepository.locationRefreshFailed(LocationRefreshFailure.Failed)
+        }
+    }
+
     private fun stopMonitoringAndService() {
         val effect = lifecycleCoordinator.onStopOrDestroy()
+        refreshCoordinator.invalidate()
         if (effect is MonitoringLifecycleEffect.StopSession) {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
@@ -275,6 +357,8 @@ class MonitoringService : Service() {
     }
 
     private fun tearDownCaptureAndLocation() {
+        locationPollingJob?.cancel()
+        locationPollingJob = null
         locationProvider.stop()
         audioRecorder?.close()
         audioRecorder = null
@@ -317,11 +401,18 @@ class MonitoringService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_START = "hr.sonicpulse.app.action.START_MONITORING"
         private const val ACTION_STOP = "hr.sonicpulse.app.action.STOP_MONITORING"
+        private const val ACTION_REFRESH_LOCATION = "hr.sonicpulse.app.action.REFRESH_LOCATION"
+        private const val LOCATION_POLL_INTERVAL_MILLIS = 1_000L
 
         fun startIntent(context: Context): Intent =
             Intent(context, MonitoringService::class.java).setAction(ACTION_START)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, MonitoringService::class.java).setAction(ACTION_STOP)
+
+        /** Sent via startService() (never startForegroundService() — monitoring must already be
+         * ACTIVE and foreground for this to do anything). */
+        fun refreshLocationIntent(context: Context): Intent =
+            Intent(context, MonitoringService::class.java).setAction(ACTION_REFRESH_LOCATION)
     }
 }

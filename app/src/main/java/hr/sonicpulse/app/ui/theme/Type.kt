@@ -6,29 +6,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Set of Material typography styles to start with
-val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
-)
+/** Default Material typography, overridden ad hoc per-component rather than as a global scheme change. */
+val Typography = Typography()
+
+/** Numeric/data values: dBFS readings, timestamps, coordinates. */
+val MonospaceValueStyle = TextStyle(fontFamily = FontFamily.Monospace)
+
+/** "SonicPulse" wordmark: "Sonic" in onSurface + "Pulse" in primary. */
+val AppNameStyle = TextStyle(fontWeight = FontWeight.Bold, fontSize = 18.sp)

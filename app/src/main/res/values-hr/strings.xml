@@ -1,0 +1,73 @@
+<resources>
+    <string name="notif_monitoring_active">Monitoring je aktivan</string>
+    <string name="action_stop">Zaustavi</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_monitoring">Monitoring</string>
+    <string name="nav_detections">Detekcije</string>
+    <string name="nav_map">Karta</string>
+    <string name="nav_settings">Postavke</string>
+    <string name="placeholder_coming_soon">Uskoro dostupno</string>
+
+    <!-- Monitoring — status pill (B) -->
+    <string name="state_idle">Neaktivno</string>
+    <string name="state_acquiring_location">Traženje lokacije</string>
+    <string name="state_listening">Slušanje</string>
+    <string name="state_precise_location_required">Potrebna precizna lokacija</string>
+
+    <!-- Monitoring — hint text (C) -->
+    <string name="hint_idle">Tapni za početak praćenja</string>
+    <string name="hint_acquiring_location">Traženje GPS lokacije…</string>
+    <string name="hint_listening">Monitoring je aktivan u pozadini</string>
+    <string name="hint_precise_location_required">Potrebna je precizna lokacija</string>
+
+    <!-- Monitoring — start/stop button (D) -->
+    <string name="action_start">Započni</string>
+    <string name="action_enable_location">Omogući lokaciju</string>
+
+    <!-- Monitoring — live dBFS chart (E) -->
+    <string name="section_live_dbfs">Live dBFS</string>
+    <string name="unit_dbfs">dBFS</string>
+    <string name="chart_axis_10s_ago">-10s</string>
+    <string name="chart_axis_5s_ago">-5s</string>
+    <string name="chart_axis_now">sada</string>
+
+    <!-- Monitoring — location status row (F) -->
+    <string name="label_microphone">Mikrofon</string>
+    <string name="label_location">Lokacija</string>
+    <string name="label_background">Pozadina</string>
+    <string name="location_status_active">Aktivno</string>
+    <string name="location_status_inactive">Neaktivno</string>
+    <string name="location_status_unavailable">Nedostupno</string>
+    <string name="location_status_searching">Traži se</string>
+    <string name="location_status_precise_required">Nije precizno</string>
+    <string name="location_status_gps">GPS</string>
+
+    <!-- Monitoring — last detection + send status (G) -->
+    <string name="section_last_detection">Zadnja detekcija</string>
+    <string name="no_detections_yet">Još nema detekcija u ovoj sesiji</string>
+    <string name="coordinates_unavailable">Koordinate nedostupne</string>
+    <string name="send_success">Poslano</string>
+    <string name="send_failed">Slanje nije uspjelo</string>
+    <string name="send_in_progress">Šalje se…</string>
+    <string name="send_failed_no_location">Nije poslano — nema lokacije</string>
+    <string name="send_failed_network">Nije poslano — mrežna pogreška</string>
+    <string name="send_failed_server_config">Nije poslano — konfiguracija servera</string>
+    <string name="send_failed_other">Nije poslano — pogreška</string>
+
+    <!-- Monitoring — transient error snackbar -->
+    <string name="error_capture_generic">Snimanje zvuka je prekinuto</string>
+    <string name="error_startup_microphone_denied">Dozvola za mikrofon nije odobrena</string>
+    <string name="error_startup_location_denied">Dozvola za lokaciju nije odobrena</string>
+    <string name="error_startup_location_services_disabled">Lokacijske usluge su isključene</string>
+    <string name="error_startup_location_start_failed">Pokretanje lokacije nije uspjelo</string>
+    <string name="error_startup_foreground_failed">Pokretanje praćenja nije uspjelo</string>
+    <string name="error_location_refresh_failed">Osvježavanje lokacije nije uspjelo. Praćenje se nastavlja.</string>
+
+    <!-- Monitoring — persistent server configuration warning -->
+    <string name="error_server_configuration">Problem s konfiguracijom poslužitelja — provjerite API ključ</string>
+
+    <!-- Monitoring — runtime permission flow -->
+    <string name="permission_permanently_denied_message">Dozvola je trajno odbijena. Otvorite postavke aplikacije da je omogućite.</string>
+    <string name="action_open_settings">Otvori postavke</string>
+</resources>
