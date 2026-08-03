@@ -8,6 +8,8 @@ import hr.sonicpulse.app.data.datastore.DefaultInstallationIdRepository
 import hr.sonicpulse.app.data.datastore.InstallationIdRepository
 import hr.sonicpulse.app.data.location.DefaultLocationProvider
 import hr.sonicpulse.app.data.location.LocationProvider
+import hr.sonicpulse.app.data.remote.AndroidSubmissionLogger
+import hr.sonicpulse.app.data.remote.SubmissionLogger
 import hr.sonicpulse.app.repository.DefaultMonitoringStateRepository
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 
@@ -29,4 +31,9 @@ abstract class AppModule {
     abstract fun bindInstallationIdRepository(
         impl: DefaultInstallationIdRepository
     ): InstallationIdRepository
+
+    @Binds
+    abstract fun bindSubmissionLogger(
+        impl: AndroidSubmissionLogger
+    ): SubmissionLogger
 }

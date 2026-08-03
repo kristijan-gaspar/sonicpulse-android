@@ -100,6 +100,10 @@ class MonitoringService : Service() {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
         }
+        // Normal teardown only (§2.9's scope of guarantee) — gives every still-Pending detection
+        // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
+        // Idempotent: a no-op if nothing is retained and Pending.
+        monitoringStateRepository.cancelPendingSubmissions()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -225,8 +229,12 @@ class MonitoringService : Service() {
                 peakTimeClient = peakTimeClient,
                 location = locationSnapshot
             )
+            // Published synchronously (MutableStateFlow.update is thread-safe) so the detection is
+            // visibly Pending before any submission attempt is even scheduled — insertion and
+            // submission are deliberately not both inside the launched coroutine below, so a
+            // cancelled/never-started submission coroutine can never leave the detection unlisted.
+            monitoringStateRepository.localDetectionOccurred(sessionDetection)
             serviceScope.launch {
-                monitoringStateRepository.localDetectionOccurred(sessionDetection)
                 detectionSubmitter.submit(sessionDetection)
             }
         }

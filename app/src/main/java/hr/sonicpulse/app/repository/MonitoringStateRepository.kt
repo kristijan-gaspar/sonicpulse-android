@@ -19,4 +19,5 @@ interface MonitoringStateRepository {
     fun localDetectionOccurred(detection: SessionDetection)
     fun submissionSucceeded(localEventId: UUID)
     fun submissionFailed(localEventId: UUID, reason: SubmissionFailureReason)
+    fun cancelPendingSubmissions()
 }

@@ -6,8 +6,14 @@ import org.junit.Test
 class SubmissionOutcomeMapperTest {
 
     @Test
-    fun `201 maps to Success`() {
-        assertEquals(SubmissionOutcome.Success, SubmissionOutcomeMapper.map(201, retryAfterHeader = null))
+    fun `every 2xx code maps to Success`() {
+        listOf(200, 201, 202, 204).forEach { code ->
+            assertEquals(
+                "code $code",
+                SubmissionOutcome.Success,
+                SubmissionOutcomeMapper.map(code, retryAfterHeader = null)
+            )
+        }
     }
 
     @Test
@@ -16,8 +22,14 @@ class SubmissionOutcomeMapperTest {
     }
 
     @Test
-    fun `401 maps to Unauthorized`() {
-        assertEquals(SubmissionOutcome.Unauthorized, SubmissionOutcomeMapper.map(401, retryAfterHeader = null))
+    fun `401 and 403 both map to Unauthorized`() {
+        listOf(401, 403).forEach { code ->
+            assertEquals(
+                "code $code",
+                SubmissionOutcome.Unauthorized,
+                SubmissionOutcomeMapper.map(code, retryAfterHeader = null)
+            )
+        }
     }
 
     @Test
@@ -37,7 +49,7 @@ class SubmissionOutcomeMapperTest {
     }
 
     @Test
-    fun `429 with non-numeric Retry-After maps to RateLimited with null seconds`() {
+    fun `429 with non-numeric HTTP-date Retry-After maps to RateLimited with null seconds`() {
         assertEquals(
             SubmissionOutcome.RateLimited(retryAfterSeconds = null),
             SubmissionOutcomeMapper.map(429, retryAfterHeader = "Wed, 21 Oct 2026 07:28:00 GMT")
@@ -45,8 +57,16 @@ class SubmissionOutcomeMapperTest {
     }
 
     @Test
+    fun `429 with a negative Retry-After maps to RateLimited with null seconds`() {
+        assertEquals(
+            SubmissionOutcome.RateLimited(retryAfterSeconds = null),
+            SubmissionOutcomeMapper.map(429, retryAfterHeader = "-5")
+        )
+    }
+
+    @Test
     fun `other 4xx codes map to ClientError carrying the http code`() {
-        listOf(403, 404, 409, 422, 418).forEach { code ->
+        listOf(402, 404, 409, 422, 418).forEach { code ->
             assertEquals(
                 "code $code",
                 SubmissionOutcome.ClientError(code),
@@ -61,6 +81,17 @@ class SubmissionOutcomeMapperTest {
             assertEquals(
                 "code $code",
                 SubmissionOutcome.ServerError(code),
+                SubmissionOutcomeMapper.map(code, retryAfterHeader = null)
+            )
+        }
+    }
+
+    @Test
+    fun `1xx and 3xx codes map to UnexpectedHttpStatus carrying the http code`() {
+        listOf(100, 101, 302).forEach { code ->
+            assertEquals(
+                "code $code",
+                SubmissionOutcome.UnexpectedHttpStatus(code),
                 SubmissionOutcomeMapper.map(code, retryAfterHeader = null)
             )
         }

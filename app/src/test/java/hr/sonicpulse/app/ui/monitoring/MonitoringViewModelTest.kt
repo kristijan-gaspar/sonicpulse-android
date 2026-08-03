@@ -127,7 +127,7 @@ class MonitoringViewModelTest {
         val detection = SessionDetection(UUID.randomUUID(), -10.0, Instant.EPOCH, LocationSnapshot.NoFixYet)
         repository.localDetectionOccurred(detection)
 
-        repository.submissionFailed(detection.localEventId, hr.sonicpulse.app.domain.model.SubmissionFailureReason.UNAUTHORIZED)
+        repository.submissionFailed(detection.localEventId, hr.sonicpulse.app.domain.model.SubmissionFailureReason.Unauthorized)
         advanceUntilIdle()
 
         val state = viewModel.uiState.value

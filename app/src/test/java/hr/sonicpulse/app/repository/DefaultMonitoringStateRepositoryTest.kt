@@ -225,6 +225,14 @@ class DefaultMonitoringStateRepositoryTest {
         assertEquals(100.0, detections.last().peakDbfs, 0.0)
     }
 
+    private fun statusOf(repository: DefaultMonitoringStateRepository, id: UUID) =
+        repository.state.value.sessionDetections.first { it.localEventId == id }.submissionStatus
+
+    @Test
+    fun `newly created SessionDetection defaults to Pending`() {
+        assertEquals(SubmissionStatus.Pending, detection().submissionStatus)
+    }
+
     @Test
     fun `submissionSucceeded marks the matching detection as Sent and increments the counter`() {
         val repository = DefaultMonitoringStateRepository()
@@ -235,10 +243,9 @@ class DefaultMonitoringStateRepositoryTest {
 
         repository.submissionSucceeded(target.localEventId)
 
-        val state = repository.state.value
-        assertEquals(SubmissionStatus.Sent, state.sessionDetections.first { it.localEventId == target.localEventId }.submissionStatus)
-        assertEquals(SubmissionStatus.Local, state.sessionDetections.first { it.localEventId == other.localEventId }.submissionStatus)
-        assertEquals(1, state.submissionCounters.submissionSucceeded)
+        assertEquals(SubmissionStatus.Sent, statusOf(repository, target.localEventId))
+        assertEquals(SubmissionStatus.Pending, statusOf(repository, other.localEventId))
+        assertEquals(1, repository.state.value.submissionCounters.submissionSucceeded)
     }
 
     @Test
@@ -247,27 +254,26 @@ class DefaultMonitoringStateRepositoryTest {
         val target = detection()
         repository.localDetectionOccurred(target)
 
-        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NETWORK_ERROR)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
 
-        val state = repository.state.value
-        assertEquals(
-            SubmissionStatus.Failed(SubmissionFailureReason.NETWORK_ERROR),
-            state.sessionDetections.first { it.localEventId == target.localEventId }.submissionStatus
-        )
+        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.NetworkError), statusOf(repository, target.localEventId))
     }
 
     @Test
     fun `submissionFailed increments the counter matching each failure reason`() {
         val expectedCounter = mapOf(
-            SubmissionFailureReason.NO_LOCATION to SubmissionCounters(droppedNoLocation = 1),
-            SubmissionFailureReason.STALE_LOCATION to SubmissionCounters(droppedStaleLocation = 1),
-            SubmissionFailureReason.INACCURATE_LOCATION to SubmissionCounters(droppedInaccurateLocation = 1),
-            SubmissionFailureReason.NETWORK_ERROR to SubmissionCounters(droppedNetwork = 1),
-            SubmissionFailureReason.BAD_REQUEST to SubmissionCounters(submissionFailedBadRequest = 1),
-            SubmissionFailureReason.UNAUTHORIZED to SubmissionCounters(submissionFailedUnauthorized = 1),
-            SubmissionFailureReason.RATE_LIMITED to SubmissionCounters(submissionRateLimited = 1),
-            SubmissionFailureReason.CLIENT_ERROR to SubmissionCounters(submissionFailedClient = 1),
-            SubmissionFailureReason.SERVER_ERROR to SubmissionCounters(submissionFailedServer = 1)
+            SubmissionFailureReason.NoLocation to SubmissionCounters(droppedNoLocation = 1),
+            SubmissionFailureReason.StaleLocation to SubmissionCounters(droppedStaleLocation = 1),
+            SubmissionFailureReason.InaccurateLocation to SubmissionCounters(droppedInaccurateLocation = 1),
+            SubmissionFailureReason.LocalStorageError to SubmissionCounters(droppedLocalStorage = 1),
+            SubmissionFailureReason.NetworkError to SubmissionCounters(droppedNetwork = 1),
+            SubmissionFailureReason.Cancelled to SubmissionCounters(cancelled = 1),
+            SubmissionFailureReason.BadRequest to SubmissionCounters(submissionFailedBadRequest = 1),
+            SubmissionFailureReason.Unauthorized to SubmissionCounters(submissionFailedUnauthorized = 1),
+            SubmissionFailureReason.RateLimited(30L) to SubmissionCounters(submissionRateLimited = 1),
+            SubmissionFailureReason.ClientError(404) to SubmissionCounters(submissionFailedClient = 1),
+            SubmissionFailureReason.ServerError(500) to SubmissionCounters(submissionFailedServer = 1),
+            SubmissionFailureReason.UnexpectedHttpStatus(302) to SubmissionCounters(submissionFailedUnexpected = 1)
         )
 
         expectedCounter.forEach { (reason, expected) ->
@@ -282,12 +288,12 @@ class DefaultMonitoringStateRepositoryTest {
     }
 
     @Test
-    fun `submissionFailed with UNAUTHORIZED sets a persistent serverConfigurationError`() {
+    fun `submissionFailed with Unauthorized sets a persistent serverConfigurationError for the rest of the session`() {
         val repository = DefaultMonitoringStateRepository()
         val target = detection()
         repository.localDetectionOccurred(target)
 
-        repository.submissionFailed(target.localEventId, SubmissionFailureReason.UNAUTHORIZED)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.Unauthorized)
 
         assertTrue(repository.state.value.serverConfigurationError)
     }
@@ -299,7 +305,7 @@ class DefaultMonitoringStateRepositoryTest {
         val second = detection()
         repository.localDetectionOccurred(first)
         repository.localDetectionOccurred(second)
-        repository.submissionFailed(first.localEventId, SubmissionFailureReason.UNAUTHORIZED)
+        repository.submissionFailed(first.localEventId, SubmissionFailureReason.Unauthorized)
 
         repository.submissionSucceeded(second.localEventId)
 
@@ -311,12 +317,173 @@ class DefaultMonitoringStateRepositoryTest {
         val repository = DefaultMonitoringStateRepository()
         val target = detection()
         repository.localDetectionOccurred(target)
-        repository.submissionFailed(target.localEventId, SubmissionFailureReason.UNAUTHORIZED)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.Unauthorized)
 
         repository.monitoringStarted()
 
         val state = repository.state.value
         assertEquals(SubmissionCounters(), state.submissionCounters)
         assertFalse(state.serverConfigurationError)
+    }
+
+    @Test
+    fun `submissionSucceeded for an unknown localEventId is a no-op`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionSucceeded(UUID.randomUUID())
+
+        assertEquals(SubmissionStatus.Pending, statusOf(repository, target.localEventId))
+        assertEquals(0, repository.state.value.submissionCounters.submissionSucceeded)
+    }
+
+    @Test
+    fun `submissionFailed for an unknown localEventId is a no-op`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repository.submissionFailed(UUID.randomUUID(), SubmissionFailureReason.NetworkError)
+
+        assertEquals(SubmissionCounters(), repository.state.value.submissionCounters)
+    }
+
+    @Test
+    fun `duplicate submissionSucceeded does not increment the counter twice`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionSucceeded(target.localEventId)
+        repository.submissionSucceeded(target.localEventId)
+
+        assertEquals(1, repository.state.value.submissionCounters.submissionSucceeded)
+    }
+
+    @Test
+    fun `duplicate submissionFailed does not increment the counter twice`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
+
+        assertEquals(1, repository.state.value.submissionCounters.droppedNetwork)
+    }
+
+    @Test
+    fun `success followed by failure remains Sent`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionSucceeded(target.localEventId)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
+
+        assertEquals(SubmissionStatus.Sent, statusOf(repository, target.localEventId))
+        assertEquals(0, repository.state.value.submissionCounters.droppedNetwork)
+    }
+
+    @Test
+    fun `failure followed by success remains the original Failed`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
+        repository.submissionSucceeded(target.localEventId)
+
+        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.NetworkError), statusOf(repository, target.localEventId))
+        assertEquals(0, repository.state.value.submissionCounters.submissionSucceeded)
+    }
+
+    @Test
+    fun `a result for a detection evicted by the 100-item retention limit is a no-op`() {
+        val repository = DefaultMonitoringStateRepository()
+        val evicted = detection()
+        repository.localDetectionOccurred(evicted)
+        repeat(100) { repository.localDetectionOccurred(detection(peakDbfs = it.toDouble())) }
+        check(repository.state.value.sessionDetections.none { it.localEventId == evicted.localEventId })
+
+        repository.submissionSucceeded(evicted.localEventId)
+
+        assertEquals(0, repository.state.value.submissionCounters.submissionSucceeded)
+    }
+
+    @Test
+    fun `an old-session result arriving after monitoringStarted resets state is a no-op`() {
+        val repository = DefaultMonitoringStateRepository()
+        val staleId = detection().localEventId
+
+        repository.monitoringStarted()
+        repository.submissionSucceeded(staleId)
+
+        assertTrue(repository.state.value.sessionDetections.isEmpty())
+        assertEquals(0, repository.state.value.submissionCounters.submissionSucceeded)
+    }
+
+    @Test
+    fun `cancelPendingSubmissions transitions a single Pending detection to Failed(Cancelled)`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.cancelPendingSubmissions()
+
+        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.Cancelled), statusOf(repository, target.localEventId))
+        assertEquals(1, repository.state.value.submissionCounters.cancelled)
+    }
+
+    @Test
+    fun `cancelPendingSubmissions transitions multiple Pending detections`() {
+        val repository = DefaultMonitoringStateRepository()
+        val first = detection()
+        val second = detection()
+        repository.localDetectionOccurred(first)
+        repository.localDetectionOccurred(second)
+
+        repository.cancelPendingSubmissions()
+
+        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.Cancelled), statusOf(repository, first.localEventId))
+        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.Cancelled), statusOf(repository, second.localEventId))
+        assertEquals(2, repository.state.value.submissionCounters.cancelled)
+    }
+
+    @Test
+    fun `cancelPendingSubmissions leaves an already-Sent detection unchanged`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+        repository.submissionSucceeded(target.localEventId)
+
+        repository.cancelPendingSubmissions()
+
+        assertEquals(SubmissionStatus.Sent, statusOf(repository, target.localEventId))
+        assertEquals(0, repository.state.value.submissionCounters.cancelled)
+    }
+
+    @Test
+    fun `cancelPendingSubmissions leaves an already-Failed detection unchanged`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
+
+        repository.cancelPendingSubmissions()
+
+        assertEquals(SubmissionStatus.Failed(SubmissionFailureReason.NetworkError), statusOf(repository, target.localEventId))
+        assertEquals(0, repository.state.value.submissionCounters.cancelled)
+    }
+
+    @Test
+    fun `repeated cancelPendingSubmissions does not double-count`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.cancelPendingSubmissions()
+        repository.cancelPendingSubmissions()
+
+        assertEquals(1, repository.state.value.submissionCounters.cancelled)
     }
 }

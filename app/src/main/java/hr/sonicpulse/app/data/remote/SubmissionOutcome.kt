@@ -1,6 +1,6 @@
 package hr.sonicpulse.app.data.remote
 
-/** Result of attempting to submit a detection to the backend (plan §2.9's outcome table). */
+/** Result of mapping an HTTP response to a classification (plan §2.9's outcome table). */
 sealed class SubmissionOutcome {
     data object Success : SubmissionOutcome()
     data object BadRequest : SubmissionOutcome()
@@ -8,5 +8,5 @@ sealed class SubmissionOutcome {
     data class RateLimited(val retryAfterSeconds: Long?) : SubmissionOutcome()
     data class ClientError(val httpCode: Int) : SubmissionOutcome()
     data class ServerError(val httpCode: Int) : SubmissionOutcome()
-    data object NetworkError : SubmissionOutcome()
+    data class UnexpectedHttpStatus(val httpCode: Int) : SubmissionOutcome()
 }

@@ -9,5 +9,5 @@ data class SessionDetection(
     val peakDbfs: Double,
     val peakTimeClient: Instant,
     val location: LocationSnapshot,
-    val submissionStatus: SubmissionStatus = SubmissionStatus.Local
+    val submissionStatus: SubmissionStatus = SubmissionStatus.Pending
 )

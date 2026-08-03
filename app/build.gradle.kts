@@ -15,6 +15,34 @@ val localProperties = Properties().apply {
     }
 }
 
+/** Escapes a raw string into a valid Kotlin/Java string literal (including the surrounding quotes). */
+fun String.toKotlinStringLiteral(): String {
+    val escaped = buildString {
+        this@toKotlinStringLiteral.forEach { c ->
+            when {
+                c == '\\' -> append("\\\\")
+                c == '"' -> append("\\\"")
+                c == '\n' -> append("\\n")
+                c == '\r' -> append("\\r")
+                c == '\t' -> append("\\t")
+                c == '\b' -> append("\\b")
+                c.code == 0x0C -> append("\\f")
+                else -> append(c)
+            }
+        }
+    }
+    return "\"$escaped\""
+}
+
+val apiBaseUrl = localProperties.getProperty("API_BASE_URL", "https://example.invalid/")
+require(apiBaseUrl.startsWith("http://") || apiBaseUrl.startsWith("https://")) {
+    "API_BASE_URL must start with http:// or https:// (was: $apiBaseUrl)"
+}
+require(apiBaseUrl.endsWith("/")) {
+    "API_BASE_URL must end with a trailing slash (was: $apiBaseUrl)"
+}
+val apiKey = localProperties.getProperty("API_KEY", "")
+
 android {
     namespace = "hr.sonicpulse.app"
     compileSdk {
@@ -32,16 +60,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField(
-            "String",
-            "API_BASE_URL",
-            "\"${localProperties.getProperty("API_BASE_URL", "http://localhost:5045/")}\""
-        )
-        buildConfigField(
-            "String",
-            "API_KEY",
-            "\"${localProperties.getProperty("API_KEY", "")}\""
-        )
+        buildConfigField("String", "API_BASE_URL", apiBaseUrl.toKotlinStringLiteral())
+        buildConfigField("String", "API_KEY", apiKey.toKotlinStringLiteral())
     }
 
     buildTypes {
@@ -58,10 +78,6 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-
-    testOptions {
-        unitTests.isReturnDefaultValues = true
     }
 }
 

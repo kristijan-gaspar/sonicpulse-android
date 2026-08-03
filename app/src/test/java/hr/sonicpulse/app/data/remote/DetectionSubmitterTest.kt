@@ -27,11 +27,13 @@ class DetectionSubmitterTest {
 
     private fun submitterWith(
         api: FakeDetectionApi,
-        stateRepository: DefaultMonitoringStateRepository = DefaultMonitoringStateRepository()
+        stateRepository: DefaultMonitoringStateRepository = DefaultMonitoringStateRepository(),
+        installationIdRepository: FakeInstallationIdRepository = FakeInstallationIdRepository(installationId)
     ) = DetectionSubmitter(
         detectionApi = api,
-        installationIdRepository = FakeInstallationIdRepository(installationId),
-        monitoringStateRepository = stateRepository
+        installationIdRepository = installationIdRepository,
+        monitoringStateRepository = stateRepository,
+        submissionLogger = FakeSubmissionLogger()
     ) to stateRepository
 
     @Test
@@ -63,13 +65,13 @@ class DetectionSubmitterTest {
 
         assertTrue(api.requests.isEmpty())
         assertEquals(
-            SubmissionFailureReason.NO_LOCATION,
+            SubmissionFailureReason.NoLocation,
             (stateRepository.state.value.sessionDetections.single().submissionStatus as SubmissionStatus.Failed).reason
         )
     }
 
     @Test
-    fun `Invalid location drops before attempting network as NO_LOCATION`() = runTest {
+    fun `Invalid location drops before attempting network as NoLocation`() = runTest {
         val api = FakeDetectionApi()
         val (submitter, stateRepository) = submitterWith(api)
         val target = detection(LocationSnapshot.Invalid)
@@ -79,7 +81,7 @@ class DetectionSubmitterTest {
 
         assertTrue(api.requests.isEmpty())
         assertEquals(
-            SubmissionFailureReason.NO_LOCATION,
+            SubmissionFailureReason.NoLocation,
             (stateRepository.state.value.sessionDetections.single().submissionStatus as SubmissionStatus.Failed).reason
         )
     }
@@ -111,7 +113,7 @@ class DetectionSubmitterTest {
     }
 
     @Test
-    fun `network failure maps to NETWORK_ERROR`() = runTest {
+    fun `a network IOException maps to NetworkError, distinct from a local-storage failure`() = runTest {
         val api = FakeDetectionApi().apply { throwOnSubmit = IOException("timeout") }
         val (submitter, stateRepository) = submitterWith(api)
         val target = detection(LocationSnapshot.Valid(45.8, 16.0, 8.0f))
@@ -120,18 +122,18 @@ class DetectionSubmitterTest {
         submitter.submit(target)
 
         assertEquals(1, stateRepository.state.value.submissionCounters.droppedNetwork)
+        assertEquals(0, stateRepository.state.value.submissionCounters.droppedLocalStorage)
+        assertEquals(1, api.requests.size)
     }
 
     @Test
-    fun `an IOException reading the installation id maps to NETWORK_ERROR instead of crashing`() = runTest {
+    fun `an IOException reading the installation id maps to LocalStorageError and performs no HTTP request`() = runTest {
         val api = FakeDetectionApi()
-        val stateRepository = DefaultMonitoringStateRepository()
-        val submitter = DetectionSubmitter(
-            detectionApi = api,
+        val (submitter, stateRepository) = submitterWith(
+            api = api,
             installationIdRepository = FakeInstallationIdRepository().apply {
                 throwOnGetOrCreate = IOException("corrupted preferences file")
-            },
-            monitoringStateRepository = stateRepository
+            }
         )
         val target = detection(LocationSnapshot.Valid(45.8, 16.0, 8.0f))
         stateRepository.localDetectionOccurred(target)
@@ -139,7 +141,8 @@ class DetectionSubmitterTest {
         submitter.submit(target)
 
         assertTrue(api.requests.isEmpty())
-        assertEquals(1, stateRepository.state.value.submissionCounters.droppedNetwork)
+        assertEquals(1, stateRepository.state.value.submissionCounters.droppedLocalStorage)
+        assertEquals(0, stateRepository.state.value.submissionCounters.droppedNetwork)
     }
 
     @Test
@@ -201,5 +204,46 @@ class DetectionSubmitterTest {
         submitter.submit(target)
 
         assertEquals(1, stateRepository.state.value.submissionCounters.submissionFailedServer)
+    }
+
+    @Test
+    fun `403 response also maps to Unauthorized`() = runTest {
+        val api = FakeDetectionApi { fakeHttpResponse(403) }
+        val (submitter, stateRepository) = submitterWith(api)
+        val target = detection(LocationSnapshot.Valid(45.8, 16.0, 8.0f))
+        stateRepository.localDetectionOccurred(target)
+
+        submitter.submit(target)
+
+        assertEquals(1, stateRepository.state.value.submissionCounters.submissionFailedUnauthorized)
+        assertTrue(stateRepository.state.value.serverConfigurationError)
+    }
+
+    @Test
+    fun `an unexpected 1xx or 3xx status maps to UnexpectedHttpStatus`() = runTest {
+        val api = FakeDetectionApi { fakeHttpResponse(302) }
+        val (submitter, stateRepository) = submitterWith(api)
+        val target = detection(LocationSnapshot.Valid(45.8, 16.0, 8.0f))
+        stateRepository.localDetectionOccurred(target)
+
+        submitter.submit(target)
+
+        assertEquals(
+            SubmissionStatus.Failed(SubmissionFailureReason.UnexpectedHttpStatus(302)),
+            stateRepository.state.value.sessionDetections.single().submissionStatus
+        )
+        assertEquals(1, stateRepository.state.value.submissionCounters.submissionFailedUnexpected)
+    }
+
+    @Test
+    fun `a 200 response is also successful, not only 201`() = runTest {
+        val api = FakeDetectionApi { fakeHttpResponse(200) }
+        val (submitter, stateRepository) = submitterWith(api)
+        val target = detection(LocationSnapshot.Valid(45.8, 16.0, 8.0f))
+        stateRepository.localDetectionOccurred(target)
+
+        submitter.submit(target)
+
+        assertEquals(1, stateRepository.state.value.submissionCounters.submissionSucceeded)
     }
 }
