@@ -1,6 +1,7 @@
 package hr.sonicpulse.app.repository
 
 import hr.sonicpulse.app.data.audio.AudioCaptureError
+import hr.sonicpulse.app.data.location.LocationPermissionLevel
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
@@ -93,6 +94,28 @@ class DefaultMonitoringStateRepositoryTest {
         val state = repository.state.value
         assertFalse(state.isMonitoring)
         assertEquals(AudioCaptureError.PermissionDenied, state.captureError)
+    }
+
+    @Test
+    fun `two identical consecutive capture failures still bump errorEventId each time`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+        val firstId = repository.state.value.errorEventId
+
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        assertEquals(firstId + 1, repository.state.value.errorEventId)
+    }
+
+    @Test
+    fun `two identical consecutive startup failures still bump errorEventId each time`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStartupFailed(MonitoringStartupFailure.LocationPermissionDenied)
+        val firstId = repository.state.value.errorEventId
+
+        repository.monitoringStartupFailed(MonitoringStartupFailure.LocationPermissionDenied)
+
+        assertEquals(firstId + 1, repository.state.value.errorEventId)
     }
 
     @Test
@@ -201,6 +224,58 @@ class DefaultMonitoringStateRepositoryTest {
         repository.publishMetrics(metrics(dbfs = -5.0))
 
         assertEquals(-25.0, repository.state.value.liveDbfs, 0.0)
+    }
+
+    @Test
+    fun `publishMetrics appends the dbfs value to dbfsHistory`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repository.publishMetrics(metrics(dbfs = -25.0))
+
+        assertEquals(listOf(-25.0), repository.state.value.dbfsHistory)
+    }
+
+    @Test
+    fun `a throttled publishMetrics call does not append to dbfsHistory`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repository.publishMetrics(metrics(dbfs = -25.0))
+        repository.publishMetrics(metrics(dbfs = -5.0))
+
+        assertEquals(listOf(-25.0), repository.state.value.dbfsHistory)
+    }
+
+    @Test
+    fun `updateLocationStatus updates the snapshot, permission level and services-enabled flag`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repository.updateLocationStatus(
+            snapshot = LocationSnapshot.Valid(latitude = 45.8, longitude = 16.0, accuracyMeters = 8.0f),
+            permissionLevel = LocationPermissionLevel.FINE,
+            servicesEnabled = true
+        )
+
+        val state = repository.state.value
+        assertEquals(LocationSnapshot.Valid(45.8, 16.0, 8.0f), state.currentLocationSnapshot)
+        assertEquals(LocationPermissionLevel.FINE, state.locationPermissionLevel)
+        assertTrue(state.locationServicesEnabled)
+    }
+
+    @Test
+    fun `monitoringStarted resets location status from a previous session`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.updateLocationStatus(
+            snapshot = LocationSnapshot.Valid(45.8, 16.0, 8.0f),
+            permissionLevel = LocationPermissionLevel.COARSE,
+            servicesEnabled = false
+        )
+
+        repository.monitoringStarted()
+
+        val state = repository.state.value
+        assertEquals(LocationSnapshot.NoFixYet, state.currentLocationSnapshot)
+        assertEquals(LocationPermissionLevel.NONE, state.locationPermissionLevel)
+        assertTrue(state.locationServicesEnabled)
     }
 
     @Test

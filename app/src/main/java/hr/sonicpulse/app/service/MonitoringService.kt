@@ -33,8 +33,11 @@ import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -82,6 +85,7 @@ class MonitoringService : Service() {
 
     private var audioRecorder: AudioRecorder? = null
     private var firstBlockInstant: Instant? = null
+    private var locationPollingJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -203,6 +207,20 @@ class MonitoringService : Service() {
             onBlock = { block -> handleBlock(engine, block) },
             onCaptureError = { error -> serviceScope.launch { handleCaptureError(error) } }
         )
+
+        // The audio thread only reads currentSnapshot at the instant of a detection (§2.7); this
+        // is the separate, continuous feed the Monitoring screen needs for its live status pill
+        // and location card (§2.8) regardless of whether any detection ever occurs.
+        locationPollingJob = serviceScope.launch {
+            while (isActive) {
+                monitoringStateRepository.updateLocationStatus(
+                    snapshot = locationProvider.currentSnapshot,
+                    permissionLevel = locationProvider.permissionLevel(),
+                    servicesEnabled = locationProvider.areLocationServicesEnabled()
+                )
+                delay(LOCATION_POLL_INTERVAL_MILLIS)
+            }
+        }
     }
 
     private fun handleBlock(engine: DetectionEngine, block: ShortArray) {
@@ -275,6 +293,8 @@ class MonitoringService : Service() {
     }
 
     private fun tearDownCaptureAndLocation() {
+        locationPollingJob?.cancel()
+        locationPollingJob = null
         locationProvider.stop()
         audioRecorder?.close()
         audioRecorder = null
@@ -317,6 +337,7 @@ class MonitoringService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_START = "hr.sonicpulse.app.action.START_MONITORING"
         private const val ACTION_STOP = "hr.sonicpulse.app.action.STOP_MONITORING"
+        private const val LOCATION_POLL_INTERVAL_MILLIS = 1_000L
 
         fun startIntent(context: Context): Intent =
             Intent(context, MonitoringService::class.java).setAction(ACTION_START)

@@ -1,6 +1,63 @@
 <resources>
     <string name="app_name">SonicPulse</string>
     <string name="monitoring_channel_name">Monitoring</string>
-    <string name="notif_monitoring_active">Monitoring je aktivan</string>
-    <string name="action_stop">Zaustavi</string>
+    <string name="notif_monitoring_active">Monitoring active</string>
+    <string name="action_stop">Stop</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_monitoring">Monitoring</string>
+    <string name="nav_detections">Detections</string>
+    <string name="nav_map">Map</string>
+    <string name="nav_settings">Settings</string>
+    <string name="placeholder_coming_soon">Coming soon</string>
+
+    <!-- Monitoring — status pill (B) -->
+    <string name="state_idle">Idle</string>
+    <string name="state_acquiring_location">Acquiring location</string>
+    <string name="state_listening">Listening</string>
+    <string name="state_precise_location_required">Precise location required</string>
+
+    <!-- Monitoring — hint text (C) -->
+    <string name="hint_idle">Tap to start monitoring</string>
+    <string name="hint_acquiring_location">Acquiring GPS location…</string>
+    <string name="hint_listening">Monitoring is active in the background</string>
+    <string name="hint_precise_location_required">Precise location is required</string>
+
+    <!-- Monitoring — start/stop button (D) -->
+    <string name="action_start">Start</string>
+    <string name="action_enable_location">Enable location</string>
+
+    <!-- Monitoring — live dBFS chart (E) -->
+    <string name="section_live_dbfs">Live dBFS</string>
+    <string name="unit_dbfs">dBFS</string>
+    <string name="chart_axis_10s_ago">-10s</string>
+    <string name="chart_axis_5s_ago">-5s</string>
+    <string name="chart_axis_now">now</string>
+
+    <!-- Monitoring — location status row (F) -->
+    <string name="label_microphone">Microphone</string>
+    <string name="label_location">Location</string>
+    <string name="label_background">Background</string>
+    <string name="location_status_active">Active</string>
+    <string name="location_status_inactive">Inactive</string>
+    <string name="location_status_unavailable">Unavailable</string>
+    <string name="location_status_searching">Searching</string>
+    <string name="location_status_precise_required">Not precise</string>
+    <string name="location_status_gps">GPS</string>
+
+    <!-- Monitoring — last detection + send status (G) -->
+    <string name="section_last_detection">Last detection</string>
+    <string name="no_detections_yet">No detections yet this session</string>
+    <string name="coordinates_unavailable">Coordinates unavailable</string>
+    <string name="send_success">Sent</string>
+    <string name="send_failed">Send failed</string>
+    <string name="send_in_progress">Sending…</string>
+
+    <!-- Monitoring — transient error snackbar -->
+    <string name="error_capture_generic">Audio capture stopped unexpectedly</string>
+    <string name="error_startup_microphone_denied">Microphone permission was not granted</string>
+    <string name="error_startup_location_denied">Location permission was not granted</string>
+    <string name="error_startup_location_services_disabled">Location services are turned off</string>
+    <string name="error_startup_location_start_failed">Could not start location</string>
+    <string name="error_startup_foreground_failed">Could not start monitoring</string>
 </resources>

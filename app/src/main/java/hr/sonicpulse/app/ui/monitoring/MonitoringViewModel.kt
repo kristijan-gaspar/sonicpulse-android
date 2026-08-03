@@ -1,10 +1,21 @@
 package hr.sonicpulse.app.ui.monitoring
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import hr.sonicpulse.app.R
+import hr.sonicpulse.app.data.audio.AudioCaptureError
+import hr.sonicpulse.app.data.location.LocationPermissionLevel
+import hr.sonicpulse.app.data.location.LocationSnapshot
+import hr.sonicpulse.app.domain.model.SessionDetection
+import hr.sonicpulse.app.domain.model.SubmissionStatus
 import hr.sonicpulse.app.repository.MonitoringState
 import hr.sonicpulse.app.repository.MonitoringStateRepository
+import hr.sonicpulse.app.service.MonitoringStartupFailure
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -29,14 +40,87 @@ class MonitoringViewModel @Inject constructor(
         )
 }
 
+private val TimestampFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("HH:mm:ss", Locale.getDefault()).withZone(ZoneId.systemDefault())
+
 private fun MonitoringState.toUiState(): MonitoringUiState = MonitoringUiState(
-    isMonitoring = isMonitoring,
-    liveDbfs = liveDbfs,
-    liveBaseline = liveBaseline,
-    engineState = engineState,
-    sessionDetections = sessionDetections,
-    captureError = captureError,
-    startupError = startupError,
-    submissionCounters = submissionCounters,
-    serverConfigurationError = serverConfigurationError
+    phase = computePhase(this),
+    locationDisplayState = computeLocationDisplayState(this),
+    microphoneActive = isMonitoring,
+    backgroundActive = isMonitoring,
+    currentDbfs = liveDbfs.toFloat(),
+    dbfsHistory = dbfsHistory.map { it.toFloat() },
+    lastDetection = sessionDetections.lastOrNull()?.toUiModel(),
+    errorMessageRes = errorMessageRes(this),
+    errorEventId = errorEventId
 )
+
+private fun computePhase(state: MonitoringState): MonitoringPhase {
+    if (!state.isMonitoring) return MonitoringPhase.Idle
+    // Mirrors computeLocationDisplayState's ordering: with services off, no fix can arrive and
+    // "precise location required" wouldn't make sense either — this must never fall through to
+    // Listening just because a fix from before the services were disabled is still cached.
+    if (!state.locationServicesEnabled) return MonitoringPhase.AcquiringLocation
+    if (isPreciseLocationRequired(state)) return MonitoringPhase.PreciseLocationRequired
+    return if (state.currentLocationSnapshot is LocationSnapshot.Valid) {
+        MonitoringPhase.Listening
+    } else {
+        MonitoringPhase.AcquiringLocation
+    }
+}
+
+private fun computeLocationDisplayState(state: MonitoringState): LocationDisplayState = when {
+    !state.isMonitoring -> LocationDisplayState.Unavailable
+    !state.locationServicesEnabled -> LocationDisplayState.Unavailable
+    isPreciseLocationRequired(state) -> LocationDisplayState.PreciseRequired
+    state.currentLocationSnapshot is LocationSnapshot.Valid -> LocationDisplayState.Gps
+    else -> LocationDisplayState.Searching
+}
+
+/**
+ * With approximate-only permission, every fix genuinely will exceed [hr.sonicpulse.app.data.location.LocationPolicy]'s
+ * accuracy threshold (plan §2.8) — a single Inaccurate reading combined with COARSE permission is
+ * therefore a reliable signal on its own, not a guess that would need a running history of fixes.
+ */
+private fun isPreciseLocationRequired(state: MonitoringState): Boolean =
+    state.locationPermissionLevel == LocationPermissionLevel.COARSE &&
+        state.currentLocationSnapshot is LocationSnapshot.Inaccurate
+
+private fun errorMessageRes(state: MonitoringState): Int? {
+    state.captureError?.let { return captureErrorMessageRes(it) }
+    state.startupError?.let { return startupErrorMessageRes(it) }
+    return null
+}
+
+private fun captureErrorMessageRes(error: AudioCaptureError): Int = when (error) {
+    AudioCaptureError.PermissionDenied -> R.string.error_startup_microphone_denied
+    AudioCaptureError.UnsupportedConfiguration,
+    is AudioCaptureError.ReadFailure,
+    is AudioCaptureError.Unexpected -> R.string.error_capture_generic
+}
+
+private fun startupErrorMessageRes(failure: MonitoringStartupFailure): Int = when (failure) {
+    MonitoringStartupFailure.MicrophonePermissionDenied -> R.string.error_startup_microphone_denied
+    MonitoringStartupFailure.LocationPermissionDenied -> R.string.error_startup_location_denied
+    MonitoringStartupFailure.LocationServicesDisabled -> R.string.error_startup_location_services_disabled
+    is MonitoringStartupFailure.LocationStartFailed -> R.string.error_startup_location_start_failed
+    is MonitoringStartupFailure.ForegroundStartFailed -> R.string.error_startup_foreground_failed
+}
+
+private fun SessionDetection.toUiModel(): DetectionUiModel = DetectionUiModel(
+    peakDbfs = peakDbfs,
+    timestampText = TimestampFormatter.format(peakTimeClient),
+    coordinatesText = coordinatesTextOf(location),
+    sendResult = sendResultOf(submissionStatus)
+)
+
+private fun coordinatesTextOf(location: LocationSnapshot): String? =
+    (location as? LocationSnapshot.Valid)?.let {
+        String.format(Locale.US, "%.5f, %.5f", it.latitude, it.longitude)
+    }
+
+private fun sendResultOf(status: SubmissionStatus): SendResult = when (status) {
+    SubmissionStatus.Pending -> SendResult.Sending
+    SubmissionStatus.Sent -> SendResult.Sent
+    is SubmissionStatus.Failed -> SendResult.Failed
+}
