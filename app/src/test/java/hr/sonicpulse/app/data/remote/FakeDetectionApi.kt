@@ -36,7 +36,13 @@ class FakeDetectionApi(
         return responseProvider(body)
     }
 
+    val historyRequests = mutableListOf<Triple<String, Long?, Int>>()
+    var historyResponse: DetectionHistoryPageDto = DetectionHistoryPageDto(items = emptyList(), nextCursor = null)
+    var throwOnGetHistory: Throwable? = null
+
     override suspend fun getDetectionHistory(deviceId: String, cursor: Long?, limit: Int): DetectionHistoryPageDto {
-        throw NotImplementedError("FakeDetectionApi does not yet fake getDetectionHistory — not used by any Chunk 1 test")
+        historyRequests += Triple(deviceId, cursor, limit)
+        throwOnGetHistory?.let { throw it }
+        return historyResponse
     }
 }
