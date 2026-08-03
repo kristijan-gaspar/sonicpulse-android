@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,12 +37,6 @@ import hr.sonicpulse.app.service.MonitoringService
 import hr.sonicpulse.app.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
-private val MonitoringPermissions = arrayOf(
-    Manifest.permission.RECORD_AUDIO,
-    Manifest.permission.ACCESS_FINE_LOCATION,
-    Manifest.permission.ACCESS_COARSE_LOCATION
-)
-
 @Composable
 fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -52,66 +45,89 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Captured fresh right before every launch(), from *before* this specific request — see
-    // requestPermissionsAndMaybeStart(). Consumed once the system dialog's result comes back.
-    var requestedBeforeSnapshot by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    // --- Start flow: one deterministic RequestMultiplePermissions launch, never two. ---
 
-    val permissionLauncher = rememberLauncherForActivityResult(
+    // Captured fresh right before each launch(), from *before* this specific request — consumed
+    // once the system dialog's result comes back, so a permanently-denied classification can never
+    // be confused with "never asked yet" (both look like shouldShowRationale == false).
+    var startRequestedBeforeSnapshot by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+
+    val startPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        val decisions = MonitoringPermissions.associateWith { permission ->
-            PermissionDecisionEvaluator.evaluate(
-                granted = results[permission] == true,
-                shouldShowRationale = activity.shouldShowRequestPermissionRationale(permission),
-                requestedBefore = requestedBeforeSnapshot[permission] == true
-            )
-        }
-        scope.launch { MonitoringPermissions.forEach { viewModel.markPermissionRequested(it) } }
+        // POST_NOTIFICATIONS may be present in `results` (API 33+) but is intentionally never
+        // looked up below — it must never influence whether monitoring is allowed to start.
+        val microphone = PermissionDecisionEvaluator.evaluate(
+            granted = results[Manifest.permission.RECORD_AUDIO] == true,
+            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO),
+            requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.RECORD_AUDIO] == true
+        )
+        val fineLocation = PermissionDecisionEvaluator.evaluate(
+            granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true,
+            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION),
+            requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        )
+        val coarseLocation = PermissionDecisionEvaluator.evaluate(
+            granted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true,
+            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION),
+            requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        )
+        // Only the permissions actually included in this request (results.keys) are marked —
+        // on API < 33 that's mic+fine+coarse only, POST_NOTIFICATIONS is simply never a key.
+        scope.launch { results.keys.forEach { viewModel.markPermissionRequested(it) } }
 
-        when (
-            MonitoringPermissionEvaluator.evaluate(
-                microphone = decisions.getValue(Manifest.permission.RECORD_AUDIO),
-                fineLocation = decisions.getValue(Manifest.permission.ACCESS_FINE_LOCATION),
-                coarseLocation = decisions.getValue(Manifest.permission.ACCESS_COARSE_LOCATION)
-            )
-        ) {
-            // Enough to start — the service's own MonitoringStartupGate re-validates and
-            // reports a specific MonitoringStartupFailure if something is still actually missing,
-            // so no duplicate handling is needed here for either branch.
+        when (MonitoringPermissionEvaluator.evaluate(microphone, fineLocation, coarseLocation)) {
+            // Enough to start — the service's own MonitoringStartupGate re-validates and reports
+            // a specific MonitoringStartupFailure if something is still actually missing, so no
+            // duplicate handling is needed here for either branch.
             MonitoringPermissionOutcome.Granted, MonitoringPermissionOutcome.ApproximateLocationOnly ->
                 startMonitoring(context)
             // Not enough to start, but the user can just tap Start again — nothing else to do.
             MonitoringPermissionOutcome.Denied -> Unit
             MonitoringPermissionOutcome.PermanentlyDenied -> scope.launch {
-                val result = snackbarHostState.showSnackbar(
-                    message = context.getString(R.string.permission_permanently_denied_message),
-                    actionLabel = context.getString(R.string.action_open_settings),
-                    duration = SnackbarDuration.Long
-                )
-                if (result == SnackbarResult.ActionPerformed) {
-                    openAppSettings(context)
-                }
+                showOpenSettingsSnackbar(context, snackbarHostState)
             }
         }
     }
 
-    fun requestPermissionsAndMaybeStart() {
+    fun requestStartPermissions() {
         scope.launch {
-            requestedBeforeSnapshot = MonitoringPermissions.associateWith { viewModel.hasRequestedPermissionBefore(it) }
-            permissionLauncher.launch(MonitoringPermissions)
+            val permissions = MonitoringPermissionRequestPlan.startPermissions()
+            startRequestedBeforeSnapshot = permissions.associateWith { viewModel.hasRequestedPermissionBefore(it) }
+            startPermissionLauncher.launch(permissions)
         }
     }
 
-    // POST_NOTIFICATIONS (API 33+) governs only whether the mandatory persistent notification is
-    // actually *visible* — it is never a prerequisite for starting the service, so
-    // its result (granted, denied, or not applicable pre-33) is deliberately ignored here.
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { }
+    // --- Precise-location upgrade flow: a separate request, never reuses the Start flow. ---
+    // Monitoring is already active in MonitoringPhase.PreciseLocationRequired — this must never
+    // request microphone or notifications again, and success must never re-send a Start intent.
 
-    fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    var upgradeFineRequestedBefore by remember { mutableStateOf(false) }
+
+    val preciseLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val fineLocation = PermissionDecisionEvaluator.evaluate(
+            granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true,
+            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION),
+            requestedBefore = upgradeFineRequestedBefore
+        )
+        scope.launch { results.keys.forEach { viewModel.markPermissionRequested(it) } }
+
+        when (PreciseLocationUpgradeEvaluator.evaluate(fineLocation)) {
+            PreciseLocationUpgradeOutcome.Granted -> viewModel.refreshLocationForPreciseUpgrade()
+            // Still PreciseLocationRequired; the user can tap "Enable location" again.
+            PreciseLocationUpgradeOutcome.Denied -> Unit
+            PreciseLocationUpgradeOutcome.PermanentlyDenied -> scope.launch {
+                showOpenSettingsSnackbar(context, snackbarHostState)
+            }
+        }
+    }
+
+    fun requestPreciseLocationUpgrade() {
+        scope.launch {
+            upgradeFineRequestedBefore = viewModel.hasRequestedPermissionBefore(Manifest.permission.ACCESS_FINE_LOCATION)
+            preciseLocationLauncher.launch(MonitoringPermissionRequestPlan.preciseLocationUpgradePermissions())
         }
     }
 
@@ -122,14 +138,22 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
         MonitoringContent(
             uiState = uiState,
-            onStart = {
-                requestNotificationPermissionIfNeeded()
-                requestPermissionsAndMaybeStart()
-            },
+            onStart = { requestStartPermissions() },
             onStop = { stopMonitoring(context) },
-            onEnableLocation = { requestPermissionsAndMaybeStart() },
+            onEnableLocation = { requestPreciseLocationUpgrade() },
             modifier = Modifier.padding(innerPadding)
         )
+    }
+}
+
+private suspend fun showOpenSettingsSnackbar(context: Context, snackbarHostState: SnackbarHostState) {
+    val result = snackbarHostState.showSnackbar(
+        message = context.getString(R.string.permission_permanently_denied_message),
+        actionLabel = context.getString(R.string.action_open_settings),
+        duration = SnackbarDuration.Long
+    )
+    if (result == SnackbarResult.ActionPerformed) {
+        openAppSettings(context)
     }
 }
 

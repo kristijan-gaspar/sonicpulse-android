@@ -1,5 +1,8 @@
 package hr.sonicpulse.app.ui.monitoring
 
+import android.Manifest
+import android.os.Build
+
 /** Per-permission result, disambiguating "can ask again" from "must go to system settings". */
 enum class SinglePermissionDecision { GRANTED, DENIED, PERMANENTLY_DENIED }
 
@@ -73,5 +76,46 @@ object MonitoringPermissionEvaluator {
             fineLocation == SinglePermissionDecision.PERMANENTLY_DENIED &&
             coarseLocation == SinglePermissionDecision.PERMANENTLY_DENIED
         return micBlocking || locationBlocking
+    }
+}
+
+/**
+ * The exact permission array to request for the Start action — one deterministic request, never
+ * two separate launches. [sdkInt] is a parameter (not read from [Build.VERSION.SDK_INT] directly)
+ * so this is plain-JVM testable without Robolectric.
+ */
+object MonitoringPermissionRequestPlan {
+    fun startPermissions(sdkInt: Int = Build.VERSION.SDK_INT): Array<String> = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
+        add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }.toTypedArray()
+
+    /** The precise-location upgrade never touches microphone or notifications — only asking
+     * again for what's actually missing (fine), paired with coarse per Android's combined dialog. */
+    fun preciseLocationUpgradePermissions(): Array<String> = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
+}
+
+/** Outcome of asking specifically for [Manifest.permission.ACCESS_FINE_LOCATION] while monitoring
+ * is already running on coarse-only access — distinct from [MonitoringPermissionOutcome], which
+ * governs whether the service may *start* at all (where coarse-only is already sufficient). */
+sealed interface PreciseLocationUpgradeOutcome {
+    data object Granted : PreciseLocationUpgradeOutcome
+    data object Denied : PreciseLocationUpgradeOutcome
+    data object PermanentlyDenied : PreciseLocationUpgradeOutcome
+}
+
+/** Success requires FINE specifically — a granted/re-granted COARSE alongside it is never enough. */
+object PreciseLocationUpgradeEvaluator {
+    fun evaluate(fineLocation: SinglePermissionDecision): PreciseLocationUpgradeOutcome = when (fineLocation) {
+        SinglePermissionDecision.GRANTED -> PreciseLocationUpgradeOutcome.Granted
+        SinglePermissionDecision.DENIED -> PreciseLocationUpgradeOutcome.Denied
+        SinglePermissionDecision.PERMANENTLY_DENIED -> PreciseLocationUpgradeOutcome.PermanentlyDenied
     }
 }

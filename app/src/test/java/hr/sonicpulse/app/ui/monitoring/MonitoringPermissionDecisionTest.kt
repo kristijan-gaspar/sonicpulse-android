@@ -1,6 +1,10 @@
 package hr.sonicpulse.app.ui.monitoring
 
+import android.Manifest
+import android.os.Build
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PermissionDecisionEvaluatorTest {
@@ -112,6 +116,69 @@ class MonitoringPermissionEvaluatorTest {
         assertEquals(
             MonitoringPermissionOutcome.PermanentlyDenied,
             MonitoringPermissionEvaluator.evaluate(permanentlyDenied(), denied(), denied())
+        )
+    }
+}
+
+class MonitoringPermissionRequestPlanTest {
+
+    @Test
+    fun `below API 33, the Start request excludes POST_NOTIFICATIONS`() {
+        val permissions = MonitoringPermissionRequestPlan.startPermissions(sdkInt = Build.VERSION_CODES.S)
+
+        assertTrue(permissions.contains(Manifest.permission.RECORD_AUDIO))
+        assertTrue(permissions.contains(Manifest.permission.ACCESS_FINE_LOCATION))
+        assertTrue(permissions.contains(Manifest.permission.ACCESS_COARSE_LOCATION))
+        assertFalse(permissions.contains(Manifest.permission.POST_NOTIFICATIONS))
+    }
+
+    @Test
+    fun `at API 33 and above, the Start request includes POST_NOTIFICATIONS`() {
+        val permissions = MonitoringPermissionRequestPlan.startPermissions(sdkInt = Build.VERSION_CODES.TIRAMISU)
+
+        assertTrue(permissions.contains(Manifest.permission.POST_NOTIFICATIONS))
+    }
+
+    @Test
+    fun `the Start request is a single array — one launch covers mic, location and notifications together`() {
+        val permissions = MonitoringPermissionRequestPlan.startPermissions(sdkInt = Build.VERSION_CODES.TIRAMISU)
+
+        assertEquals(4, permissions.size)
+    }
+
+    @Test
+    fun `the precise-location upgrade request asks only for fine and coarse location`() {
+        val permissions = MonitoringPermissionRequestPlan.preciseLocationUpgradePermissions()
+
+        assertEquals(setOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), permissions.toSet())
+        assertFalse(permissions.contains(Manifest.permission.RECORD_AUDIO))
+        assertFalse(permissions.contains(Manifest.permission.POST_NOTIFICATIONS))
+    }
+}
+
+class PreciseLocationUpgradeEvaluatorTest {
+
+    @Test
+    fun `fine granted is Granted`() {
+        assertEquals(
+            PreciseLocationUpgradeOutcome.Granted,
+            PreciseLocationUpgradeEvaluator.evaluate(SinglePermissionDecision.GRANTED)
+        )
+    }
+
+    @Test
+    fun `fine denied is Denied`() {
+        assertEquals(
+            PreciseLocationUpgradeOutcome.Denied,
+            PreciseLocationUpgradeEvaluator.evaluate(SinglePermissionDecision.DENIED)
+        )
+    }
+
+    @Test
+    fun `fine permanently denied is PermanentlyDenied`() {
+        assertEquals(
+            PreciseLocationUpgradeOutcome.PermanentlyDenied,
+            PreciseLocationUpgradeEvaluator.evaluate(SinglePermissionDecision.PERMANENTLY_DENIED)
         )
     }
 }

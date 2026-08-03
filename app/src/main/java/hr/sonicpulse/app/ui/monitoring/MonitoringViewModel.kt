@@ -8,6 +8,7 @@ import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.datastore.PermissionRequestHistory
 import hr.sonicpulse.app.data.location.LocationPermissionLevel
+import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
@@ -27,7 +28,8 @@ import kotlinx.coroutines.flow.stateIn
 @HiltViewModel
 class MonitoringViewModel @Inject constructor(
     monitoringStateRepository: MonitoringStateRepository,
-    private val permissionRequestHistory: PermissionRequestHistory
+    private val permissionRequestHistory: PermissionRequestHistory,
+    private val locationProvider: LocationProvider
 ) : ViewModel() {
 
     val uiState: StateFlow<MonitoringUiState> = monitoringStateRepository.state
@@ -49,6 +51,27 @@ class MonitoringViewModel @Inject constructor(
 
     suspend fun markPermissionRequested(permission: String) {
         permissionRequestHistory.markRequested(permission)
+    }
+
+    /**
+     * A location subscription already active on coarse-only access does not automatically start
+     * producing precise fixes just because ACCESS_FINE_LOCATION was granted afterwards — Android's
+     * own guidance for approximate/precise transitions is to stop and restart the location
+     * request, and [LocationProvider.start] is itself a no-op while already active, so simply
+     * calling start() again here would do nothing. Only the location subscription is touched:
+     * [locationProvider] is application-scoped (the same singleton MonitoringService uses), so
+     * this never restarts the service, audio capture, or the monitoring session.
+     *
+     * Guarded on the current phase so a stray call after monitoring has already stopped (e.g. a
+     * fast Stop tap racing this one) can't start an orphaned location subscription nothing would
+     * ever tear down.
+     */
+    fun refreshLocationForPreciseUpgrade() {
+        if (uiState.value.phase != MonitoringPhase.PreciseLocationRequired) {
+            return
+        }
+        locationProvider.stop()
+        locationProvider.start { }
     }
 }
 
