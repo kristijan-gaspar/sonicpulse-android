@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -151,6 +152,12 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
+    // DisposableEffect(lifecycleOwner) only (re)builds its observer when lifecycleOwner itself
+    // changes — never on every uiState update — so the observer's closure would otherwise keep
+    // whatever microphoneActive value was current when it was first created. rememberUpdatedState
+    // gives it a stable holder to read through instead, so ON_RESUME (which can fire long after
+    // that first composition, e.g. on returning from system Settings) always sees the current value.
+    val currentMonitoringActive = rememberUpdatedState(uiState.microphoneActive)
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event != Lifecycle.Event.ON_RESUME) {
@@ -162,7 +169,7 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
             ) == PackageManager.PERMISSION_GRANTED
             if (shouldSendPreciseLocationRefreshOnResume(
                     openedSettingsForPreciseLocation = openedSettingsForPreciseLocation,
-                    monitoringActive = uiState.microphoneActive,
+                    monitoringActive = currentMonitoringActive.value,
                     fineLocationGranted = fineGranted
                 )
             ) {
