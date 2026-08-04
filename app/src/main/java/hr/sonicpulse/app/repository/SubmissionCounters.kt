@@ -7,6 +7,12 @@ data class SubmissionCounters(
     val droppedStaleLocation: Int = 0,
     val droppedInaccurateLocation: Int = 0,
     val droppedLocalStorage: Int = 0,
+    /** Monitoring couldn't start, or a runtime location refresh failed, specifically because a
+     * required permission was missing — a real current-session diagnostic (Settings §D), never a
+     * hardcoded value. Not itself a dropped/failed *submission*: a startup permission failure means
+     * no detection was ever produced to submit in the first place. Distinct from the
+     * location-quality drops above, which assume permission was already granted. */
+    val permissionFailures: Int = 0,
     val submissionSucceeded: Int = 0,
     val submissionFailedBadRequest: Int = 0,
     val submissionFailedUnauthorized: Int = 0,

@@ -136,4 +136,49 @@
     <string name="duration_seconds">%1$d s</string>
     <string name="duration_minutes_seconds">%1$d min %2$d s</string>
     <string name="duration_hours_minutes">%1$d h %2$d min</string>
+
+    <!-- Settings — section A: Appearance -->
+    <string name="settings_section_appearance">Izgled</string>
+    <string name="settings_label_theme">Tema</string>
+    <string name="settings_label_language">Jezik</string>
+    <string name="theme_mode_dark">Tamna</string>
+    <string name="theme_mode_light">Svijetla</string>
+    <string name="theme_mode_system">Automatski</string>
+    <string name="language_option_hr">HR</string>
+    <string name="language_option_en">EN</string>
+
+    <!-- Settings — section B: Notifications -->
+    <string name="settings_section_notifications">Obavijesti</string>
+    <string name="settings_monitoring_notification_title">Obavijest o praćenju</string>
+    <string name="settings_monitoring_notification_description">Obavezno za praćenje u pozadini</string>
+    <string name="settings_always_enabled">Uvijek omogućeno</string>
+
+    <!-- Settings — section C: Permissions -->
+    <string name="settings_section_permissions">Dozvole</string>
+    <string name="settings_label_precise_location">Precizna lokacija</string>
+    <string name="permission_status_granted">Odobreno</string>
+    <string name="permission_status_denied">Odbijeno</string>
+    <string name="settings_action_open">Otvori</string>
+
+    <!-- Settings — section D: Diagnostics -->
+    <string name="settings_section_diagnostics">Dijagnostika</string>
+    <string name="diagnostics_successful_submissions">Uspješna slanja</string>
+    <string name="diagnostics_local_detections">Lokalne detekcije</string>
+    <string name="diagnostics_network_errors">Mrežne pogreške</string>
+    <string name="diagnostics_dropped_location">Odbačeno — lokacija</string>
+    <string name="diagnostics_permission_failures">Pogreške dozvola</string>
+
+    <!-- Settings — section E: Device ID -->
+    <string name="settings_section_device_id">ID uređaja</string>
+    <string name="settings_device_id_description">Identificira ovu instalaciju aplikacije</string>
+    <string name="action_copy">Kopiraj</string>
+    <string name="settings_device_id_copied">Kopirano</string>
+
+    <!-- Settings — section F: About -->
+    <string name="settings_section_about">O aplikaciji</string>
+    <string name="settings_label_version">Verzija</string>
+    <string name="settings_label_terms">Uvjeti korištenja</string>
+    <string name="settings_label_privacy">Pravila privatnosti</string>
+    <string name="settings_terms_content">SonicPulse je istraživački prototip razvijen u sklopu završnog rada. Aplikacija putem korisničkih uređaja prikuplja podatke o glasnim, impulzivnim zvukovima kako bi identificirala geografska žarišta. Korištenjem aplikacije pristajete da se podaci o detekciji (izvedene vrijednosti zvuka, lokacija, vrijeme i identifikator instalacije) šalju na pozadinski sustav projekta u tu svrhu. Aplikacija se pruža u trenutnom stanju, u istraživačke i demonstracijske svrhe, bez ikakvog jamstva.</string>
+    <string name="settings_privacy_content">SonicPulse u produkcijskim (release) inačicama nikad ne pohranjuje niti šalje sirovi zvučni zapis. Kada se detektira glasan zvuk, na poslužitelj se šalju samo izvedene vrijednosti — vršna razina zvuka, vaša lokacija, točnost GPS-a, vrijeme detekcije i identifikator ove instalacije aplikacije. Identifikator instalacije identificira instalaciju aplikacije, a ne autenticiranog fizičkog korisnika ili uređaj; generira se iznova ako obrišete podatke aplikacije ili je ponovno instalirate. SonicPulse radi isključivo online: ako se detekcija ne može poslati (npr. nema mreže), ne pohranjuje se u red čekanja niti se kasnije ponovno pokušava poslati.</string>
 </resources>

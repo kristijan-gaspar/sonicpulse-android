@@ -55,4 +55,14 @@ class FakeMonitoringStateRepositoryTest {
 
         assertEquals(0, repository.state.value.submissionCounters.droppedNetwork)
     }
+
+    @Test
+    fun `localDetectionCount stays uncapped while sessionDetections stays bounded to 100`() {
+        val repository = FakeMonitoringStateRepository()
+
+        repeat(105) { repository.localDetectionOccurred(detection(peakDbfs = it.toDouble())) }
+
+        assertEquals(105, repository.state.value.localDetectionCount)
+        assertEquals(100, repository.state.value.sessionDetections.size)
+    }
 }

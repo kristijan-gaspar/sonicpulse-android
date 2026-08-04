@@ -138,4 +138,49 @@
     <string name="duration_seconds">%1$d s</string>
     <string name="duration_minutes_seconds">%1$d min %2$d s</string>
     <string name="duration_hours_minutes">%1$d h %2$d min</string>
+
+    <!-- Settings — section A: Appearance -->
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_label_theme">Theme</string>
+    <string name="settings_label_language">Language</string>
+    <string name="theme_mode_dark">Dark</string>
+    <string name="theme_mode_light">Light</string>
+    <string name="theme_mode_system">Auto</string>
+    <string name="language_option_hr">HR</string>
+    <string name="language_option_en">EN</string>
+
+    <!-- Settings — section B: Notifications -->
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_monitoring_notification_title">Monitoring notification</string>
+    <string name="settings_monitoring_notification_description">Mandatory for background monitoring</string>
+    <string name="settings_always_enabled">Always enabled</string>
+
+    <!-- Settings — section C: Permissions -->
+    <string name="settings_section_permissions">Permissions</string>
+    <string name="settings_label_precise_location">Precise location</string>
+    <string name="permission_status_granted">Granted</string>
+    <string name="permission_status_denied">Denied</string>
+    <string name="settings_action_open">Open</string>
+
+    <!-- Settings — section D: Diagnostics -->
+    <string name="settings_section_diagnostics">Diagnostics</string>
+    <string name="diagnostics_successful_submissions">Successful submissions</string>
+    <string name="diagnostics_local_detections">Local detections</string>
+    <string name="diagnostics_network_errors">Network errors</string>
+    <string name="diagnostics_dropped_location">Dropped — location</string>
+    <string name="diagnostics_permission_failures">Permission failures</string>
+
+    <!-- Settings — section E: Device ID -->
+    <string name="settings_section_device_id">Device ID</string>
+    <string name="settings_device_id_description">Identifies this app installation</string>
+    <string name="action_copy">Copy</string>
+    <string name="settings_device_id_copied">Copied</string>
+
+    <!-- Settings — section F: About -->
+    <string name="settings_section_about">About</string>
+    <string name="settings_label_version">Version</string>
+    <string name="settings_label_terms">Terms of use</string>
+    <string name="settings_label_privacy">Privacy policy</string>
+    <string name="settings_terms_content">SonicPulse is a research prototype developed as part of a bachelor\'s thesis. It crowdsources detection of loud impulsive sounds to identify geographic hotspots. By using this app you agree that detection data (derived audio values, location, timestamp and installation identifier) may be submitted to the project\'s backend for this purpose. The app is provided as-is, for research and demonstration purposes, without warranty of any kind.</string>
+    <string name="settings_privacy_content">SonicPulse never stores or transmits raw audio in release builds. When a loud sound is detected, only derived values — its peak level, your location, GPS accuracy, the detection timestamp and this installation\'s identifier — are submitted to the backend. The installation ID identifies this app installation, not an authenticated physical device or person; it is regenerated if you clear app data or reinstall. SonicPulse is online-only: if a detection cannot be submitted (e.g. no network), it is not queued or retried later.</string>
 </resources>
