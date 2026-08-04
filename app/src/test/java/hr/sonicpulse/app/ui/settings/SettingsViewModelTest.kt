@@ -244,6 +244,47 @@ class SettingsViewModelTest {
         assertTrue(languageController.setLanguageCalls.isEmpty())
     }
 
+    /**
+     * Deliberately does NOT use the [viewModel] helper — it calls `advanceUntilIdle()` right after
+     * construction, which would let `combine()`'s first real emission run and mask exactly the bug
+     * this test exists to catch: `stateIn`'s own `initialValue` (read *before* any emission, on a
+     * [StandardTestDispatcher] where the eager collector hasn't run yet) must already carry the
+     * real effective language, not [SettingsUiState]'s own `AppLanguage.Croatian` default.
+     */
+    @Test
+    fun `the immediate initial uiState value is English when the controller reports English`() = runTest(testDispatcher) {
+        val languageController = FakeAppLanguageController(initial = AppLanguage.English)
+
+        val viewModel = SettingsViewModel(
+            FakeAppSettingsRepository(),
+            FakeMonitoringStateRepository(),
+            FakeInstallationIdRepository(fixedId = "fixed-id"),
+            FakePermissionChecker(),
+            languageController
+        )
+
+        assertEquals(AppLanguage.English, viewModel.uiState.value.language)
+        assertTrue(languageController.setLanguageCalls.isEmpty())
+    }
+
+    /** Same as above, mirrored for Croatian — proves both directions never show the other
+     * language's default even momentarily (§2). */
+    @Test
+    fun `the immediate initial uiState value is Croatian when the controller reports Croatian`() = runTest(testDispatcher) {
+        val languageController = FakeAppLanguageController(initial = AppLanguage.Croatian)
+
+        val viewModel = SettingsViewModel(
+            FakeAppSettingsRepository(),
+            FakeMonitoringStateRepository(),
+            FakeInstallationIdRepository(fixedId = "fixed-id"),
+            FakePermissionChecker(),
+            languageController
+        )
+
+        assertEquals(AppLanguage.Croatian, viewModel.uiState.value.language)
+        assertTrue(languageController.setLanguageCalls.isEmpty())
+    }
+
     @Test
     fun `refreshPermissionStatus re-reads permission status`() = runTest(testDispatcher) {
         val checker = FakePermissionChecker()

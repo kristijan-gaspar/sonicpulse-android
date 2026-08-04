@@ -39,11 +39,9 @@ class SettingsViewModel @Inject constructor(
 
     private val _permissionStatus = MutableStateFlow(currentPermissionStatus())
     private val _installationId = MutableStateFlow<String?>(null)
-    // Seeded from AppCompat's own current resolution (stored locale, or the effective system
-    // locale if none was ever stored) — never a synthetic AppSettings() default. AppLanguageController
-    // exposes no Flow of its own, so this is the ViewModel's locally-cached view of it, updated only
-    // by this ViewModel's own setLanguage() calls — nothing else in the app changes the language.
-    private val _language = MutableStateFlow(appLanguageController.currentLanguage())
+
+    private val initialLanguage = appLanguageController.currentLanguage()
+    private val _language = MutableStateFlow(initialLanguage)
 
     val uiState: StateFlow<SettingsUiState> = combine(
         appSettingsRepository.settings,
@@ -70,7 +68,7 @@ class SettingsViewModel @Inject constructor(
         // Eager, matching MonitoringViewModel: diagnostics/permission status must be correct the
         // instant the screen reads uiState.value, before any collector has actually subscribed.
         started = SharingStarted.Eagerly,
-        initialValue = SettingsUiState(versionName = BuildConfig.VERSION_NAME)
+        initialValue = SettingsUiState(language = initialLanguage, versionName = BuildConfig.VERSION_NAME)
     )
 
     init {
