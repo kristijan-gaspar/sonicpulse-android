@@ -12,7 +12,10 @@ data class DetectionHistoryItemUiModel(
     val listTimestampText: String,
     /** Localized full local date + the same 24-hour time, for the detail bottom sheet only. */
     val detailTimestampText: String,
-    val coordinatesText: String,
+    /** Pre-formatted numeric strings (fixed precision, dot decimal separator) — the Composable
+     * wraps them in the localized "Lat: … · Lon: …" template. */
+    val latitudeText: String,
+    val longitudeText: String,
     /** True renders "Grupirano"/"Grouped", false renders "Nije grupirano"/"Not grouped" — string
      * resource lookup happens in the Composable layer, not here. No confidence value: that's
      * Map-screen-only. */

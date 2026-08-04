@@ -10,10 +10,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import hr.sonicpulse.app.ui.theme.AppNameStyle
 
 /** Present on all 4 top-level screens — the "Sonic"/"Pulse" wordmark, no actions. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -24,10 +23,10 @@ fun SonicPulseTopBar() {
             title = {
                 Text(
                     text = buildAnnotatedString {
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 18.sp)) {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface, fontWeight = AppNameStyle.fontWeight, fontSize = AppNameStyle.fontSize)) {
                             append("Sonic")
                         }
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 18.sp)) {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = AppNameStyle.fontWeight, fontSize = AppNameStyle.fontSize)) {
                             append("Pulse")
                         }
                     }

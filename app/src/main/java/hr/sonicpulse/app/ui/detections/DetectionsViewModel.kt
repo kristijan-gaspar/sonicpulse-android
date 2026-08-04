@@ -259,7 +259,8 @@ private fun toUiModel(detection: Detection): DetectionHistoryItemUiModel {
         peakDbfs = detection.peakDbfs,
         listTimestampText = listTimestampTextFor(detection.receivedAtUtc, zone, locale),
         detailTimestampText = detailTimestampTextFor(detection.receivedAtUtc, zone, locale),
-        coordinatesText = String.format(Locale.US, "%.5f, %.5f", detection.latitude, detection.longitude),
+        latitudeText = String.format(Locale.US, "%.5f", detection.latitude),
+        longitudeText = String.format(Locale.US, "%.5f", detection.longitude),
         grouped = detection.hotspotId != null
     )
 }

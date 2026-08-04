@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,7 +36,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -64,6 +64,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -115,10 +117,38 @@ private val DefaultCameraPosition = CameraPosition(target = Position(longitude =
 /** A value between 10 and 15 s is acceptable per the plan; 15 s chosen and used consistently. */
 private const val LOCATION_FIX_TIMEOUT_MILLIS = 15_000L
 
-/** Vertical clearance reserved for bottom-aligned ornaments so attribution (bottom-end) never sits
- * under the current-location FAB (also bottom-end): the FAB's own diameter (56dp) + its outer
- * `Spacing.lg` padding from the screen edge + a small visual buffer. */
-private val CurrentLocationFabClearance = 56.dp + Spacing.lg + Spacing.sm
+// --- Bottom-edge layout for the map's native ornaments (logo/attribution) and the Compose
+// overlays that share that corner (current-location FAB, snackbar). ---
+//
+// org.maplibre.compose's OrnamentOptions exposes exactly one shared `padding: PaddingValues` for
+// every ornament, regardless of alignment (confirmed against the pinned maplibre-compose 0.13.0
+// sources — there is no per-corner padding override). Giving that single padding a large bottom
+// value to keep the bottom-end attribution clear of the FAB — as the previous version did via
+// CurrentLocationFabClearance — also pushes the unrelated bottom-*start* logo up by the same
+// amount, even though the logo and the FAB are in different corners and never collide. The fix is
+// the other direction: keep the shared ornament padding small (both logo and attribution sit close
+// to the true bottom edge), and instead give the FAB — a plain Compose composable we fully
+// control — enough of its own bottom padding to clear the attribution button.
+
+/** Small, uniform edge inset for every MapLibre ornament (logo, attribution, compass, scale bar). */
+private val MapOrnamentEdgeInset = Spacing.sm
+
+/** MapLibre's native attribution/logo row has no Compose-measurable size — the compose wrapper
+ * exposes no callback or handle for it (see OrnamentOptions, above). This is a deliberately
+ * generous estimate of its on-screen height (a small icon button plus MapLibre's own default
+ * internal margins — see `maplibre_four_dp`/`maplibre_eight_dp` in the native SDK's resources),
+ * used only to keep other Compose overlays comfortably clear of it. */
+private val AttributionApproxHeight = 32.dp
+
+/** Bottom padding for the current-location FAB (bottom-end, same corner as the attribution
+ * button): [MapOrnamentEdgeInset] to reach the attribution's own top edge, plus its estimated
+ * height, plus a small visual gap. */
+private val CurrentLocationFabBottomPadding = MapOrnamentEdgeInset + AttributionApproxHeight + Spacing.sm
+
+/** Bottom padding for the snackbar host: clear of the FAB itself (56dp, the standard
+ * [androidx.compose.material3.FloatingActionButton] size) sitting above the attribution row, plus
+ * a small gap — so a shown snackbar never covers the logo, the attribution button or the FAB. */
+private val SnackbarBottomPadding = CurrentLocationFabBottomPadding + 56.dp + Spacing.sm
 
 @Composable
 fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
@@ -341,18 +371,19 @@ internal fun MapContent(
     // than relying on default/undocumented MapLibre ornament positions (§1/§3). Every ornament
     // gets its own corner so none of them overlap each other: logo bottom-start, attribution
     // bottom-end, scale bar top-start, compass top-end. Top padding clears the measured top
-    // filter/legend controls (applies to both top-aligned ornaments); bottom padding clears the
-    // current-location FAB (applies to both bottom-aligned ornaments — including logo, which
-    // doesn't strictly need it, but a single shared PaddingValues is all OrnamentOptions exposes). ---
+    // filter/legend controls (applies to both top-aligned ornaments). Bottom padding is only the
+    // small shared MapOrnamentEdgeInset — see the comment on that constant above: the FAB clears
+    // the attribution button with its own padding instead, so the logo (which never overlaps the
+    // FAB) is no longer pushed up unnecessarily high. ---
     var topControlsHeightPx by remember { mutableIntStateOf(0) }
     val topControlsHeightDp = with(density) { topControlsHeightPx.toDp() }
     val ornamentOptions = remember(topControlsHeightDp) {
         OrnamentOptions(
             padding = PaddingValues(
-                start = Spacing.sm,
+                start = MapOrnamentEdgeInset,
                 top = topControlsHeightDp + Spacing.sm,
-                end = Spacing.sm,
-                bottom = CurrentLocationFabClearance
+                end = MapOrnamentEdgeInset,
+                bottom = MapOrnamentEdgeInset
             ),
             isLogoEnabled = true,
             logoAlignment = Alignment.BottomStart,
@@ -367,89 +398,98 @@ internal fun MapContent(
 
     val polygonsByBucket = remember(uiState.hotspots) { bucketPolygons(uiState.hotspots) }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
-        Box(modifier = modifier.fillMaxSize().padding(innerPadding)) {
-            key(mapInstanceKey) {
-                val instanceGeneration = remember(mapInstanceKey) { renderCoordinator.newInstance() }
-                MaplibreMap(
-                    modifier = Modifier.fillMaxSize(),
-                    baseStyle = BaseStyle.Uri(MAP_STYLE_URL),
-                    cameraState = cameraState,
-                    options = MapOptions(ornamentOptions = ornamentOptions),
-                    onMapClick = { position: Position, _ ->
-                        val hit = HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
-                        if (hit != null) {
-                            selectedHotspot = hit
-                            ClickResult.Consume
-                        } else {
-                            ClickResult.Pass
-                        }
-                    },
-                    onMapLoadFailed = { reason ->
-                        renderCoordinator.onLoadFailed(instanceGeneration, reason)
-                        renderVersion++
-                    },
-                    onMapLoadFinished = {
-                        renderCoordinator.onLoadFinished(instanceGeneration)
-                        renderVersion++
+    // No Scaffold here on purpose: the app-level Scaffold in SonicPulseApp already reserves the
+    // area between the top bar and the bottom navigation bar, and a nested Scaffold's own default
+    // window-insets handling would re-reserve part of that same space, shrinking the map viewport
+    // for no reason (§3) — filters/legend/FAB/snackbar are plain overlays inside this Box instead.
+    Box(modifier = modifier.fillMaxSize()) {
+        key(mapInstanceKey) {
+            val instanceGeneration = remember(mapInstanceKey) { renderCoordinator.newInstance() }
+            MaplibreMap(
+                modifier = Modifier.fillMaxSize(),
+                baseStyle = BaseStyle.Uri(MAP_STYLE_URL),
+                cameraState = cameraState,
+                options = MapOptions(ornamentOptions = ornamentOptions),
+                onMapClick = { position: Position, _ ->
+                    val hit = HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
+                    if (hit != null) {
+                        selectedHotspot = hit
+                        ClickResult.Consume
+                    } else {
+                        ClickResult.Pass
                     }
-                ) {
-                    polygonsByBucket.forEach { (bucket, polygons) ->
-                        if (polygons.isEmpty()) return@forEach
-                        val source = rememberGeoJsonSource(data = GeoJsonData.JsonString(HotspotGeoJson.featureCollection(polygons)))
-                        FillLayer(
-                            id = "hotspots-fill-${bucket.name}",
-                            source = source,
-                            color = const(bucket.color),
-                            opacity = const(0.25f)
-                        )
-                        LineLayer(
-                            id = "hotspots-outline-${bucket.name}",
-                            source = source,
-                            color = const(bucket.color),
-                            width = const(2.dp)
-                        )
-                    }
+                },
+                onMapLoadFailed = { reason ->
+                    renderCoordinator.onLoadFailed(instanceGeneration, reason)
+                    renderVersion++
+                },
+                onMapLoadFinished = {
+                    renderCoordinator.onLoadFinished(instanceGeneration)
+                    renderVersion++
+                }
+            ) {
+                polygonsByBucket.forEach { (bucket, polygons) ->
+                    if (polygons.isEmpty()) return@forEach
+                    val source = rememberGeoJsonSource(data = GeoJsonData.JsonString(HotspotGeoJson.featureCollection(polygons)))
+                    FillLayer(
+                        id = "hotspots-fill-${bucket.name}",
+                        source = source,
+                        color = const(bucket.color),
+                        opacity = const(0.25f)
+                    )
+                    LineLayer(
+                        id = "hotspots-outline-${bucket.name}",
+                        source = source,
+                        color = const(bucket.color),
+                        width = const(2.dp)
+                    )
+                }
 
-                    if (locationEnabled) {
-                        val locationProvider = rememberFusedLocationProvider()
-                        val userLocationState = rememberUserLocationState(locationProvider = locationProvider)
-                        val location = userLocationState.location
-                        if (location != null) {
-                            LocationPuck(idPrefix = "map-user-location", location = location, cameraState = cameraState)
-                        }
-                        LaunchedEffect(location, currentLocatingGeneration) {
-                            if (location != null && locatingCoordinator.complete(currentLocatingGeneration)) {
-                                locatingVersion++
-                                cameraState.animateTo(CameraPosition(target = location.position.value, zoom = 15.0))
-                            }
+                if (locationEnabled) {
+                    val locationProvider = rememberFusedLocationProvider()
+                    val userLocationState = rememberUserLocationState(locationProvider = locationProvider)
+                    val location = userLocationState.location
+                    if (location != null) {
+                        LocationPuck(idPrefix = "map-user-location", location = location, cameraState = cameraState)
+                    }
+                    LaunchedEffect(location, currentLocatingGeneration) {
+                        if (location != null && locatingCoordinator.complete(currentLocatingGeneration)) {
+                            locatingVersion++
+                            cameraState.animateTo(CameraPosition(target = location.position.value, zoom = 15.0))
                         }
                     }
                 }
             }
-
-            // §4 visual priority: map-render failure > map-render loading > hotspot states >
-            // normal controls — each tier is exclusive of the ones below it, not merely drawn on
-            // top of them. While the map itself hasn't finished loading, no hotspot-state overlay
-            // or normal control is composed at all (not just hidden), so nothing can be
-            // misleadingly interactive over a full-screen map failure or a bare loading map.
-            val currentRenderState = renderVersion.let { renderCoordinator.state }
-            when (currentRenderState) {
-                is MapRenderState.Failed -> MapLoadErrorOverlay(onRetry = {
-                    mapInstanceKey++
-                })
-                MapRenderState.Loading -> MapLoadingIndicator()
-                MapRenderState.Loaded -> HotspotControlsAndOverlays(
-                    uiState = uiState,
-                    onSelectRange = onSelectRange,
-                    onRefresh = onRefresh,
-                    onRetry = onRetry,
-                    onCurrentLocationClick = ::onCurrentLocationClick,
-                    isLocating = isLocating,
-                    onTopControlsMeasured = { topControlsHeightPx = it }
-                )
-            }
         }
+
+        // §4 visual priority: map-render failure > map-render loading > hotspot states >
+        // normal controls — each tier is exclusive of the ones below it, not merely drawn on
+        // top of them. While the map itself hasn't finished loading, no hotspot-state overlay
+        // or normal control is composed at all (not just hidden), so nothing can be
+        // misleadingly interactive over a full-screen map failure or a bare loading map.
+        val currentRenderState = renderVersion.let { renderCoordinator.state }
+        when (currentRenderState) {
+            is MapRenderState.Failed -> MapLoadErrorOverlay(onRetry = {
+                mapInstanceKey++
+            })
+            MapRenderState.Loading -> MapLoadingIndicator()
+            MapRenderState.Loaded -> HotspotControlsAndOverlays(
+                uiState = uiState,
+                onSelectRange = onSelectRange,
+                onRefresh = onRefresh,
+                onRetry = onRetry,
+                onCurrentLocationClick = ::onCurrentLocationClick,
+                isLocating = isLocating,
+                onTopControlsMeasured = { topControlsHeightPx = it }
+            )
+        }
+
+        // Cleared of the logo/attribution row and the current-location FAB — see
+        // SnackbarBottomPadding above — so a shown snackbar never covers any of them.
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = SnackbarBottomPadding)
+        )
     }
 
     selectedHotspot?.let { hotspot ->
@@ -507,11 +547,22 @@ private fun HotspotControlsAndOverlays(
             }
 
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
-                FloatingActionButton(onClick = onCurrentLocationClick, modifier = Modifier.padding(Spacing.lg)) {
+                val currentLocationLabel = stringResource(R.string.action_current_location)
+                // end/bottom are the only paddings that affect a BottomEnd-aligned child's final
+                // position; bottom clears the attribution button below it (CurrentLocationFabBottomPadding).
+                FloatingActionButton(
+                    onClick = onCurrentLocationClick,
+                    modifier = Modifier.padding(end = Spacing.lg, bottom = CurrentLocationFabBottomPadding)
+                ) {
                     if (isLocating) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        // Semantics kept identical to the Icon it replaces — without this, a screen
+                        // reader announces this button with no name at all while it is locating.
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp).semantics { contentDescription = currentLocationLabel },
+                            strokeWidth = 2.dp
+                        )
                     } else {
-                        Icon(Icons.Filled.MyLocation, contentDescription = stringResource(R.string.action_current_location))
+                        Icon(Icons.Filled.MyLocation, contentDescription = currentLocationLabel)
                     }
                 }
             }
@@ -595,11 +646,17 @@ private fun TimeRangeRow(
             loading = { it == pendingRange },
             modifier = Modifier.weight(1f)
         )
+        val refreshLabel = stringResource(R.string.action_refresh)
         IconButton(onClick = onRefresh, enabled = !requestActive) {
             if (isLoadingSubsequent && pendingRange == null) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                // Semantics kept identical to the Icon it replaces — without this, a screen reader
+                // announces this button with no name at all while it is loading.
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp).semantics { contentDescription = refreshLabel },
+                    strokeWidth = 2.dp
+                )
             } else {
-                Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                Icon(Icons.Filled.Refresh, contentDescription = refreshLabel)
             }
         }
     }
@@ -607,8 +664,17 @@ private fun TimeRangeRow(
 
 @Composable
 private fun MapLegend(modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, shape = AppShapes.Card, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)) {
-        Row(modifier = Modifier.padding(Spacing.sm), horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+    // FlowRow, not Row: a plain Row never wraps, so long translated labels (e.g. Croatian "4+
+    // uređaja") combined with a narrow screen or a larger system font size would overflow past the
+    // screen edge instead of moving to a second line. FlowRow only wraps when the 3 entries
+    // actually don't fit — on a normal-width screen at default font scale they still render on one
+    // line, identical to before. It needs a bounded width to know when to wrap, hence fillMaxWidth.
+    Surface(modifier = modifier.fillMaxWidth(), shape = AppShapes.Card, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)) {
+        FlowRow(
+            modifier = Modifier.padding(Spacing.sm).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+        ) {
             LegendEntry(SemanticColors.Yellow, stringResource(R.string.map_legend_2_devices))
             LegendEntry(SemanticColors.Warning, stringResource(R.string.map_legend_3_devices))
             LegendEntry(SemanticColors.Danger, stringResource(R.string.map_legend_4_plus_devices))

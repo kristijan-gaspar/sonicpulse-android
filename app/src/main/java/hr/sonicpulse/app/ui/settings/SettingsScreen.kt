@@ -53,7 +53,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -149,7 +148,6 @@ internal fun SettingsContent(
         AppearanceSection(uiState.themeMode, uiState.language, onThemeSelect, onLanguageSelect)
         NotificationsSection()
         PermissionsSection(uiState.microphonePermissionGranted, uiState.preciseLocationPermissionGranted, onOpenAppSettings)
-        DiagnosticsSection(uiState)
         DeviceIdSection(uiState.installationId, onCopyDeviceId)
         AboutSection(
             versionName = uiState.versionName,
@@ -326,38 +324,6 @@ private fun PermissionStatusBadge(granted: Boolean) {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 3.dp)
         )
-    }
-}
-
-// --- Section D: Diagnostics ---
-
-@Composable
-private fun DiagnosticsSection(uiState: SettingsUiState) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        SectionHeader(stringResource(R.string.settings_section_diagnostics))
-        AppCard {
-            DiagnosticRow(stringResource(R.string.diagnostics_successful_submissions), uiState.successfulSubmissions, SemanticColors.Success)
-            DiagnosticRow(stringResource(R.string.diagnostics_local_detections), uiState.localDetections, MaterialTheme.colorScheme.onSurface)
-            DiagnosticRow(stringResource(R.string.diagnostics_network_errors), uiState.networkErrors, SemanticColors.Danger)
-            DiagnosticRow(stringResource(R.string.diagnostics_dropped_location), uiState.droppedLocation, SemanticColors.Warning)
-            DiagnosticRow(stringResource(R.string.diagnostics_permission_failures), uiState.permissionFailures, SemanticColors.Warning)
-        }
-    }
-}
-
-@Composable
-private fun DiagnosticRow(label: String, value: Int, valueColor: Color) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-        )
-        Text(text = value.toString(), style = MonospaceValueStyle.copy(fontWeight = FontWeight.Bold), color = valueColor)
     }
 }
 

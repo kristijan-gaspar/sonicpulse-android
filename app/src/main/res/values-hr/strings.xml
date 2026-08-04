@@ -46,7 +46,13 @@
     <!-- Monitoring — last detection + send status (G) -->
     <string name="section_last_detection">Zadnja detekcija</string>
     <string name="no_detections_yet">Još nema detekcija u ovoj sesiji</string>
+    <!-- Vršna razina s jedinicom, npr. "-18.4 dBFS" — jedinica je namjerno ista u svim jezicima -->
+    <string name="peak_level_dbfs">%1$.1f dBFS</string>
     <string name="coordinates_unavailable">Koordinate nedostupne</string>
+    <!-- Označen par lat/lon, npr. "Lat: 45.81234 · Lon: 15.97654" — argumenti su već formatirani
+         brojčani nizovi (fiksna preciznost, decimalna točka bez obzira na jezik aplikacije), pa ovaj
+         predložak samo dodaje oznake; "Lat"/"Lon" su namjerno isti u svim jezicima. -->
+    <string name="coordinates_format">Lat: %1$s · Lon: %2$s</string>
     <string name="send_success">Poslano</string>
     <string name="send_failed">Slanje nije uspjelo</string>
     <string name="send_in_progress">Šalje se…</string>
@@ -159,14 +165,6 @@
     <string name="permission_status_granted">Odobreno</string>
     <string name="permission_status_denied">Odbijeno</string>
     <string name="settings_action_open">Otvori</string>
-
-    <!-- Settings — section D: Diagnostics -->
-    <string name="settings_section_diagnostics">Dijagnostika</string>
-    <string name="diagnostics_successful_submissions">Uspješna slanja</string>
-    <string name="diagnostics_local_detections">Lokalne detekcije</string>
-    <string name="diagnostics_network_errors">Mrežne pogreške</string>
-    <string name="diagnostics_dropped_location">Odbačeno — lokacija</string>
-    <string name="diagnostics_permission_failures">Pogreške dozvola</string>
 
     <!-- Settings — section E: Device ID -->
     <string name="settings_section_device_id">ID uređaja</string>

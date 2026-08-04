@@ -23,8 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -41,11 +39,8 @@ import hr.sonicpulse.app.ui.theme.Spacing
 /** Last detection + send status card. */
 @Composable
 fun LastDetectionCard(lastDetection: DetectionUiModel?, modifier: Modifier = Modifier) {
-    val accentColor = MaterialTheme.colorScheme.primary
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .drawBehind { drawRect(color = accentColor, size = Size(3.dp.toPx(), size.height)) },
+        modifier = modifier.fillMaxWidth(),
         shape = AppShapes.Card,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
@@ -89,7 +84,7 @@ private fun DetectionRow(detection: DetectionUiModel) {
         Column(modifier = Modifier.weight(1f).padding(start = Spacing.md)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    text = "%.1f".format(detection.peakDbfs),
+                    text = stringResource(R.string.peak_level_dbfs, detection.peakDbfs),
                     style = MonospaceValueStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 )
                 Text(
@@ -99,13 +94,23 @@ private fun DetectionRow(detection: DetectionUiModel) {
                 )
             }
             Text(
-                text = detection.coordinatesText ?: stringResource(R.string.coordinates_unavailable),
+                text = coordinatesTextFor(detection.latitudeText, detection.longitudeText),
                 style = MonospaceValueStyle.copy(fontSize = 11.sp),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
             )
         }
     }
 }
+
+/** [latitudeText]/[longitudeText] are null together (no fix) or non-null together (a valid fix) —
+ * see [DetectionUiModel]. */
+@Composable
+private fun coordinatesTextFor(latitudeText: String?, longitudeText: String?): String =
+    if (latitudeText != null && longitudeText != null) {
+        stringResource(R.string.coordinates_format, latitudeText, longitudeText)
+    } else {
+        stringResource(R.string.coordinates_unavailable)
+    }
 
 @Composable
 private fun SendResultBanner(sendResult: SendResult, modifier: Modifier = Modifier) {
