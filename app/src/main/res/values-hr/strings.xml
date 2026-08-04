@@ -121,6 +121,7 @@
     <string name="action_current_location">Trenutna lokacija</string>
     <string name="map_locating">Traženje lokacije…</string>
     <string name="map_location_denied">Dozvola za lokaciju nije odobrena</string>
+    <string name="map_location_unavailable">Trenutna lokacija nije dostupna</string>
     <string name="map_location_services_disabled">Lokacijske usluge su isključene</string>
     <string name="action_open_location_settings">Otvori postavke lokacije</string>
 

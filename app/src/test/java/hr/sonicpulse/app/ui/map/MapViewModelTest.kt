@@ -389,6 +389,242 @@ class MapViewModelTest {
         assertTrue(repository.cancelledIndices.contains(2))
         assertEquals(4, repository.deferredQueue.size)
     }
+
+    // --- Initial-loading request guard ---
+
+    @Test
+    fun `refresh during initial loading issues no second request`() = runTest(testDispatcher) {
+        val repository = ControllableHotspotsRepository()
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+
+        viewModel.onScreenEntered()
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertEquals(1, repository.deferredQueue.size)
+    }
+
+    @Test
+    fun `selectRange during initial loading issues no second request`() = runTest(testDispatcher) {
+        val repository = ControllableHotspotsRepository()
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+
+        viewModel.onScreenEntered()
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+
+        assertEquals(1, repository.deferredQueue.size)
+    }
+
+    @Test
+    fun `initial retry after initial failure issues one request`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { throwOnGetHotspots = IOException("boom") }
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+        check(viewModel.uiState.value.initialError)
+
+        repository.throwOnGetHotspots = null
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf(24, 24), repository.requestedSinceHours)
+    }
+
+    @Test
+    fun `the initial request guard is released after initial success`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { hotspots = mapOf(24 to listOf(hotspot())) }
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf(24, 24), repository.requestedSinceHours)
+    }
+
+    @Test
+    fun `the initial request guard is released after initial failure`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { throwOnGetHotspots = IOException("boom") }
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+        check(viewModel.uiState.value.initialError)
+
+        // Nothing has ever succeeded yet, so this is still treated as another initial attempt —
+        // the point of this test is only that it is not blocked by the guard.
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+
+        assertEquals(listOf(24, 72), repository.requestedSinceHours)
+    }
+
+    // --- Retry semantics (§3) ---
+
+    @Test
+    fun `retry after failed refresh requests the committed range`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { hotspots = mapOf(24 to listOf(hotspot())) }
+        val viewModel = viewModelAfterInitialLoad(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetHotspots = IOException("boom")
+        viewModel.refresh()
+        advanceUntilIdle()
+        check(viewModel.uiState.value.subsequentError)
+
+        repository.throwOnGetHotspots = null
+        viewModel.retry()
+        advanceUntilIdle()
+
+        assertEquals(listOf(24, 24, 24), repository.requestedSinceHours)
+        assertFalse(viewModel.uiState.value.subsequentError)
+    }
+
+    @Test
+    fun `retry after failed range change requests the failed range`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { hotspots = mapOf(24 to listOf(hotspot())) }
+        val viewModel = viewModelAfterInitialLoad(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetHotspots = IOException("boom")
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+        check(viewModel.uiState.value.subsequentError)
+
+        repository.throwOnGetHotspots = null
+        repository.hotspots = repository.hotspots + (72 to listOf(hotspot()))
+        viewModel.retry()
+        advanceUntilIdle()
+
+        assertEquals(listOf(24, 72, 72), repository.requestedSinceHours)
+        assertEquals(HotspotTimeRange.Last3Days, viewModel.uiState.value.committedRange)
+    }
+
+    @Test
+    fun `retrying a failed range preserves the old hotspots while loading`() = runTest(testDispatcher) {
+        val original = hotspot()
+        val repository = ControllableHotspotsRepository()
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+        repository.deferredQueue[0].complete(listOf(original))
+        advanceUntilIdle()
+
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+        repository.deferredQueue[1].completeExceptionally(IOException("boom"))
+        advanceUntilIdle()
+        check(viewModel.uiState.value.subsequentError)
+
+        viewModel.retry()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf(original), state.hotspots)
+        assertEquals(HotspotTimeRange.Last24Hours, state.committedRange)
+        assertEquals(HotspotTimeRange.Last3Days, state.pendingRange)
+    }
+
+    @Test
+    fun `new range selection replaces an older failed operation`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { hotspots = mapOf(24 to listOf(hotspot())) }
+        val viewModel = viewModelAfterInitialLoad(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetHotspots = IOException("boom")
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+        check(viewModel.uiState.value.subsequentError)
+
+        repository.throwOnGetHotspots = null
+        repository.hotspots = repository.hotspots + (168 to listOf(hotspot()))
+        viewModel.selectRange(HotspotTimeRange.Last7Days) // a fresh explicit action, not retry()
+        advanceUntilIdle()
+        assertEquals(listOf(24, 72, 168), repository.requestedSinceHours)
+
+        // The 72-hour failure must be gone — retry() now has nothing to repeat.
+        viewModel.retry()
+        advanceUntilIdle()
+        assertEquals(listOf(24, 72, 168), repository.requestedSinceHours)
+    }
+
+    @Test
+    fun `new refresh replaces an older failed operation`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { hotspots = mapOf(24 to listOf(hotspot())) }
+        val viewModel = viewModelAfterInitialLoad(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetHotspots = IOException("boom")
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+        check(viewModel.uiState.value.subsequentError)
+
+        repository.throwOnGetHotspots = null
+        viewModel.refresh() // a fresh explicit action, not retry()
+        advanceUntilIdle()
+        assertEquals(listOf(24, 72, 24), repository.requestedSinceHours)
+        assertFalse(viewModel.uiState.value.subsequentError)
+
+        // The 72-hour failure must be gone — retry() now has nothing to repeat.
+        viewModel.retry()
+        advanceUntilIdle()
+        assertEquals(listOf(24, 72, 24), repository.requestedSinceHours)
+    }
+
+    @Test
+    fun `stale failure cannot overwrite a newer retry state`() = runTest(testDispatcher) {
+        val repository = ControllableHotspotsRepository()
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+        repository.deferredQueue[0].complete(listOf(hotspot()))
+        advanceUntilIdle()
+
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+        val older = repository.deferredQueue[1]
+
+        viewModel.selectRange(HotspotTimeRange.Last7Days)
+        advanceUntilIdle()
+        val newer = repository.deferredQueue[2]
+
+        val newHotspot = hotspot()
+        newer.complete(listOf(newHotspot))
+        advanceUntilIdle()
+        // The stale (already-cancelled) older request finally "fails" — must be ignored entirely.
+        older.completeExceptionally(IOException("stale"))
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf(newHotspot), state.hotspots)
+        assertEquals(HotspotTimeRange.Last7Days, state.committedRange)
+        assertFalse(state.subsequentError)
+    }
+
+    @Test
+    fun `a retry cancelled by a newer action exposes no error`() = runTest(testDispatcher) {
+        val repository = ControllableHotspotsRepository()
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+        repository.deferredQueue[0].complete(listOf(hotspot()))
+        advanceUntilIdle()
+
+        viewModel.selectRange(HotspotTimeRange.Last3Days)
+        advanceUntilIdle()
+        repository.deferredQueue[1].completeExceptionally(IOException("boom"))
+        advanceUntilIdle()
+        check(viewModel.uiState.value.subsequentError)
+
+        viewModel.retry()
+        advanceUntilIdle()
+        viewModel.refresh() // supersedes the retry before it resolves
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.subsequentError)
+        assertFalse(state.initialError)
+    }
 }
 
 /** Lets a test control exactly when each `getHotspots` call resolves, and records which calls

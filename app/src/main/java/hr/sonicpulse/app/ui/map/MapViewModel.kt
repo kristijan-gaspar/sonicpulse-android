@@ -14,6 +14,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/** Which operation a failed subsequent (post-initial) load was — so [MapViewModel.retry] repeats
+ * the operation that actually failed, rather than always falling back to a plain refresh. */
+sealed interface FailedMapRequest {
+    data object Refresh : FailedMapRequest
+    data class RangeChange(val range: HotspotTimeRange) : FailedMapRequest
+}
+
 /**
  * Owns only backend hotspot state for the Map screen: loaded hotspots, committed/pending range,
  * loading/error flags, the active request job and the stale-result generation token. Camera state,
@@ -51,35 +58,70 @@ class MapViewModel @Inject constructor(
     private var generation = 0
     private var loadJob: Job? = null
 
+    /** True only while the very first load (whether from [onScreenEntered] or a [refresh]/[retry]
+     * repeating it after an initial failure) is actually in flight. Guards [refresh], [selectRange]
+     * and [retry] — not [load] itself — so a competing user action during initial load is refused
+     * outright rather than cancelling the request the whole screen is waiting on. */
+    private var isInitialRequestActive = false
+
+    /** What the last *subsequent* (post-initial) load attempt was, if it failed and hasn't been
+     * superseded by a newer explicit user action yet. `null` whenever there is nothing to retry —
+     * including right after a successful load, and right after starting any new load (a fresh
+     * attempt discards whatever failure preceded it, win or lose). */
+    private var failedRequest: FailedMapRequest? = null
+
     /** The one and only screen-entry trigger — always reloads [committedRange] (24 hours on the
      * very first entry), even if the ViewModel survived a previous visit via saved nav state. */
     fun onScreenEntered() {
         load(range = committedRange, isRangeChange = false)
     }
 
-    /** Re-fetches the currently committed range. A no-op-safe user action: at most one request per
-     * call, and it always supersedes whatever request (refresh or range change) was in flight. */
+    /** Re-fetches the currently committed range. Refused outright while the initial load is still
+     * in flight (see [isInitialRequestActive]) — otherwise a no-op-safe user action: at most one
+     * request per call, and it supersedes whatever subsequent request was in flight. */
     fun refresh() {
+        if (isInitialRequestActive) return
         load(range = committedRange, isRangeChange = false)
     }
 
     /** Selecting the already-committed or already-pending range is a deliberate no-op — one user
      * action must never produce more than one request, and re-tapping the same chip isn't a new
-     * action. */
+     * action. Also refused while the initial load is in flight, same as [refresh]. */
     fun selectRange(range: HotspotTimeRange) {
+        if (isInitialRequestActive) return
         if (range == committedRange || range == _uiState.value.pendingRange) {
             return
         }
         load(range = range, isRangeChange = true)
     }
 
+    /** Repeats whichever operation [failedRequest] actually was — a plain refresh of the committed
+     * range, or the specific range that failed to load — never a blind fallback to the committed
+     * range. A no-op if there is nothing recorded to retry (e.g. the failure was already superseded
+     * by a newer explicit action, or nothing has failed). Refused while the initial load is in
+     * flight, same as [refresh]/[selectRange]. */
+    fun retry() {
+        if (isInitialRequestActive) return
+        when (val failed = failedRequest) {
+            null -> Unit
+            FailedMapRequest.Refresh -> load(range = committedRange, isRangeChange = false)
+            is FailedMapRequest.RangeChange -> load(range = failed.range, isRangeChange = true)
+        }
+    }
+
     private fun load(range: HotspotTimeRange, isRangeChange: Boolean) {
         generation++
         val myGeneration = generation
         val isFirstLoad = !hasCompletedInitialLoad
+        if (isFirstLoad) {
+            isInitialRequestActive = true
+        }
 
         // Supersedes any in-flight load outright — cancels its network call, not just its result.
+        // Any load attempt — whether a fresh user action or a retry of a previous failure —
+        // discards the old failure record; it is only restored if this new attempt fails too.
         loadJob?.cancel()
+        failedRequest = null
 
         publishState(
             isInitialLoading = isFirstLoad,
@@ -94,6 +136,9 @@ class MapViewModel @Inject constructor(
                 val hotspots = hotspotsRepository.getHotspots(sinceHours = range.hours)
                 if (generation != myGeneration) return@launch
                 hasCompletedInitialLoad = true
+                if (isFirstLoad) {
+                    isInitialRequestActive = false
+                }
                 loadedHotspots = hotspots
                 committedRange = range
                 publishState(
@@ -110,6 +155,7 @@ class MapViewModel @Inject constructor(
                 // committedRange/loadedHotspots are untouched on failure — a failed range change
                 // therefore automatically "reverts" simply by never having been committed.
                 if (isFirstLoad) {
+                    isInitialRequestActive = false
                     publishState(
                         isInitialLoading = false,
                         isLoadingSubsequent = false,
@@ -117,6 +163,7 @@ class MapViewModel @Inject constructor(
                         initialError = true
                     )
                 } else {
+                    failedRequest = if (isRangeChange) FailedMapRequest.RangeChange(range) else FailedMapRequest.Refresh
                     publishState(
                         isInitialLoading = false,
                         isLoadingSubsequent = false,

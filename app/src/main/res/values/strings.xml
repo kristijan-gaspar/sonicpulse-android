@@ -123,6 +123,7 @@
     <string name="action_current_location">Current location</string>
     <string name="map_locating">Locating…</string>
     <string name="map_location_denied">Location permission was not granted</string>
+    <string name="map_location_unavailable">Current location is unavailable</string>
     <string name="map_location_services_disabled">Location services are turned off</string>
     <string name="action_open_location_settings">Open location settings</string>
 
