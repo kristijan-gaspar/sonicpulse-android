@@ -252,8 +252,7 @@ internal fun MonitoringContent(
         LiveDbfsChart(currentDbfs = uiState.currentDbfs, dbfsHistory = uiState.dbfsHistory)
         LocationStatusRow(
             microphoneActive = uiState.microphoneActive,
-            locationDisplayState = uiState.locationDisplayState,
-            backgroundActive = uiState.backgroundActive
+            locationDisplayState = uiState.locationDisplayState
         )
         LastDetectionCard(uiState.lastDetection)
     }

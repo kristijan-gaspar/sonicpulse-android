@@ -11,7 +11,6 @@ data class MonitoringUiState(
     val phase: MonitoringPhase = MonitoringPhase.Idle,
     val locationDisplayState: LocationDisplayState = LocationDisplayState.Unavailable,
     val microphoneActive: Boolean = false,
-    val backgroundActive: Boolean = false,
     val currentDbfs: Float = -120f,
     val dbfsHistory: List<Float> = emptyList(),
     val lastDetection: DetectionUiModel? = null,

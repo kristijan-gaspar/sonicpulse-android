@@ -60,7 +60,6 @@ private fun MonitoringState.toUiState(): MonitoringUiState = MonitoringUiState(
     phase = computePhase(this),
     locationDisplayState = computeLocationDisplayState(this),
     microphoneActive = isMonitoring,
-    backgroundActive = isMonitoring,
     currentDbfs = liveDbfs.toFloat(),
     dbfsHistory = dbfsHistory.map { it.toFloat() },
     lastDetection = sessionDetections.lastOrNull()?.toUiModel(),

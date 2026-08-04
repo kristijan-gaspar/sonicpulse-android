@@ -30,7 +30,6 @@ private fun MonitoringContentAcquiringLocationPreview() {
                 phase = MonitoringPhase.AcquiringLocation,
                 locationDisplayState = LocationDisplayState.Searching,
                 microphoneActive = true,
-                backgroundActive = true,
                 currentDbfs = -34f
             ),
             onStart = { }, onStop = { }, onEnableLocation = { }
@@ -47,7 +46,6 @@ private fun MonitoringContentListeningPreview() {
                 phase = MonitoringPhase.Listening,
                 locationDisplayState = LocationDisplayState.Gps,
                 microphoneActive = true,
-                backgroundActive = true,
                 currentDbfs = -18f,
                 dbfsHistory = List(100) { (-60f + it * 0.5f).coerceIn(-60f, 0f) }
             ),
@@ -64,8 +62,7 @@ private fun MonitoringContentPreciseLocationRequiredPreview() {
             uiState = MonitoringUiState(
                 phase = MonitoringPhase.PreciseLocationRequired,
                 locationDisplayState = LocationDisplayState.PreciseRequired,
-                microphoneActive = true,
-                backgroundActive = true
+                microphoneActive = true
             ),
             onStart = { }, onStop = { }, onEnableLocation = { }
         )
@@ -81,7 +78,6 @@ private fun MonitoringContentSendingPreview() {
                 phase = MonitoringPhase.Listening,
                 locationDisplayState = LocationDisplayState.Gps,
                 microphoneActive = true,
-                backgroundActive = true,
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
                     timestampText = "14:32:07",
@@ -104,7 +100,6 @@ private fun MonitoringContentSentPreview() {
                 phase = MonitoringPhase.Listening,
                 locationDisplayState = LocationDisplayState.Gps,
                 microphoneActive = true,
-                backgroundActive = true,
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
                     timestampText = "14:32:07",
@@ -127,7 +122,6 @@ private fun MonitoringContentFailedPreview() {
                 phase = MonitoringPhase.Listening,
                 locationDisplayState = LocationDisplayState.Gps,
                 microphoneActive = true,
-                backgroundActive = true,
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
                     timestampText = "14:32:07",
@@ -150,7 +144,6 @@ private fun MonitoringContentServerConfigurationErrorPreview() {
                 phase = MonitoringPhase.Listening,
                 locationDisplayState = LocationDisplayState.Gps,
                 microphoneActive = true,
-                backgroundActive = true,
                 serverConfigurationError = true,
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
