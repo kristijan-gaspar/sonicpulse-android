@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import hr.sonicpulse.app.R
@@ -118,7 +119,7 @@ fun MonitoringHintText(phase: MonitoringPhase, modifier: Modifier = Modifier) {
         modifier = modifier,
         style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        textAlign = TextAlign.Center
     )
 }
 
@@ -230,26 +231,44 @@ private fun MiniStatusCard(
     modifier: Modifier = Modifier
 ) {
     AppCard(modifier = modifier) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+
             Text(
                 text = label.uppercase(),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = Spacing.xs)
             )
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                 modifier = Modifier.padding(top = Spacing.xs)
             ) {
-                StatusDot(color = dotColor, blinking = blinking)
-                Text(text = statusText, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                StatusDot(
+                    color = dotColor,
+                    blinking = blinking
+                )
+
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }
 }
-
 /**
  * Persistent server-configuration warning, backed by `serverConfigurationError`. Shown for the
  * rest of the monitoring session after a 401/403 — every subsequent submission will keep failing
