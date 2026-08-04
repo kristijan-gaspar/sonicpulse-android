@@ -12,7 +12,9 @@ import hr.sonicpulse.app.data.location.DefaultLocationProvider
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.remote.AndroidSubmissionLogger
 import hr.sonicpulse.app.data.remote.SubmissionLogger
+import hr.sonicpulse.app.repository.DefaultDetectionsRepository
 import hr.sonicpulse.app.repository.DefaultMonitoringStateRepository
+import hr.sonicpulse.app.repository.DetectionsRepository
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 
 @Module
@@ -23,6 +25,11 @@ abstract class AppModule {
     abstract fun bindMonitoringStateRepository(
         impl: DefaultMonitoringStateRepository
     ): MonitoringStateRepository
+
+    @Binds
+    abstract fun bindDetectionsRepository(
+        impl: DefaultDetectionsRepository
+    ): DetectionsRepository
 
     @Binds
     abstract fun bindLocationProvider(

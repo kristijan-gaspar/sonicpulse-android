@@ -18,6 +18,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import hr.sonicpulse.app.ui.components.ComingSoonScreen
 import hr.sonicpulse.app.ui.components.SonicPulseTopBar
+import hr.sonicpulse.app.ui.detections.DetectionsScreen
 import hr.sonicpulse.app.ui.monitoring.MonitoringScreen
 
 @Composable
@@ -34,7 +35,7 @@ fun SonicPulseApp() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(SonicPulseDestination.Monitoring.route) { MonitoringScreen() }
-            composable(SonicPulseDestination.Detections.route) { ComingSoonScreen() }
+            composable(SonicPulseDestination.Detections.route) { DetectionsScreen() }
             composable(SonicPulseDestination.Map.route) { ComingSoonScreen() }
             composable(SonicPulseDestination.Settings.route) { ComingSoonScreen() }
         }

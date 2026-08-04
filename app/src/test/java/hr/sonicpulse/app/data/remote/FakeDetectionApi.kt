@@ -35,4 +35,14 @@ class FakeDetectionApi(
         throwOnSubmit?.let { throw it }
         return responseProvider(body)
     }
+
+    val historyRequests = mutableListOf<Triple<String, Long?, Int>>()
+    var historyResponse: DetectionHistoryPageDto = DetectionHistoryPageDto(items = emptyList(), nextCursor = null)
+    var throwOnGetHistory: Throwable? = null
+
+    override suspend fun getDetectionHistory(deviceId: String, cursor: Long?, limit: Int): DetectionHistoryPageDto {
+        historyRequests += Triple(deviceId, cursor, limit)
+        throwOnGetHistory?.let { throw it }
+        return historyResponse
+    }
 }

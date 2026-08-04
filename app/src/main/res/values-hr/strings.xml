@@ -70,4 +70,32 @@
     <!-- Monitoring — runtime permission flow -->
     <string name="permission_permanently_denied_message">Dozvola je trajno odbijena. Otvorite postavke aplikacije da je omogućite.</string>
     <string name="action_open_settings">Otvori postavke</string>
+
+    <!-- Detections — filters (A) -->
+    <string name="filter_all">Sve</string>
+    <string name="filter_today">Danas</string>
+    <string name="filter_grouped">Grupirano</string>
+    <string name="filter_ungrouped">Nije grupirano</string>
+    <string name="action_refresh">Osvježi</string>
+
+    <!-- Detections — status badge -->
+    <string name="status_grouped">Grupirano</string>
+    <string name="status_ungrouped">Nije grupirano</string>
+
+    <!-- Detections — list (B) -->
+    <string name="section_today_with_date">Danas — %1$s</string>
+    <string name="action_retry">Pokušaj ponovno</string>
+    <string name="action_load_more">Učitaj više</string>
+    <string name="detections_empty_no_history">Još nema detekcija</string>
+    <string name="detections_empty_no_matches">Nema detekcija koje odgovaraju ovom filteru</string>
+    <string name="detections_empty_no_matches_more_available">Nema podudaranja na ovoj stranici — možda ih ima na sljedećoj</string>
+    <string name="detections_error_initial_load">Učitavanje detekcija nije uspjelo</string>
+    <string name="detections_error_refresh">Osvježavanje detekcija nije uspjelo. Prikazani su prethodno učitani rezultati.</string>
+    <string name="detections_error_paging">Učitavanje dodatnih detekcija nije uspjelo</string>
+
+    <!-- Detections — detail bottom sheet (C) -->
+    <string name="detection_detail_title">Detalji detekcije</string>
+    <string name="detail_label_timestamp">Vrijeme</string>
+    <string name="detail_label_coordinates">Koordinate</string>
+    <string name="action_close">Zatvori</string>
 </resources>
