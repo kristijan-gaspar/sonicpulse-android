@@ -62,6 +62,10 @@ android {
 
         buildConfigField("String", "API_BASE_URL", apiBaseUrl.toKotlinStringLiteral())
         buildConfigField("String", "API_KEY", apiKey.toKotlinStringLiteral())
+        // Testing-only session-log export (see hr.sonicpulse.app.observability): on by default so
+        // every non-release build type (debug, and any future QA type) gets it without repeating
+        // the field; release turns it off explicitly below — the single place this is decided.
+        buildConfigField("boolean", "ENABLE_SESSION_LOGGING", "true")
     }
 
     buildTypes {
@@ -69,6 +73,7 @@ android {
             optimization {
                 enable = false
             }
+            buildConfigField("boolean", "ENABLE_SESSION_LOGGING", "false")
         }
     }
     compileOptions {

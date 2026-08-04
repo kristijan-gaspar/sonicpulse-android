@@ -16,7 +16,7 @@ private fun MonitoringContentIdlePreview() {
     SonicPulseTheme {
         MonitoringContent(
             uiState = MonitoringUiState(phase = MonitoringPhase.Idle),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }
@@ -32,7 +32,7 @@ private fun MonitoringContentAcquiringLocationPreview() {
                 microphoneActive = true,
                 currentDbfs = -34f
             ),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }
@@ -49,7 +49,7 @@ private fun MonitoringContentListeningPreview() {
                 currentDbfs = -18f,
                 dbfsHistory = List(100) { (-60f + it * 0.5f).coerceIn(-60f, 0f) }
             ),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }
@@ -64,7 +64,7 @@ private fun MonitoringContentPreciseLocationRequiredPreview() {
                 locationDisplayState = LocationDisplayState.PreciseRequired,
                 microphoneActive = true
             ),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }
@@ -86,7 +86,7 @@ private fun MonitoringContentSendingPreview() {
                     sendResult = SendResult.Sending
                 )
             ),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }
@@ -108,7 +108,7 @@ private fun MonitoringContentSentPreview() {
                     sendResult = SendResult.Sent
                 )
             ),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }
@@ -130,7 +130,7 @@ private fun MonitoringContentFailedPreview() {
                     sendResult = SendResult.FailedNoLocation
                 )
             ),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }
@@ -153,7 +153,7 @@ private fun MonitoringContentServerConfigurationErrorPreview() {
                     sendResult = SendResult.FailedServerConfig
                 )
             ),
-            onStart = { }, onStop = { }, onEnableLocation = { }
+            onStart = { }, onStop = { }, onEnableLocation = { }, onExportSessionLog = { }
         )
     }
 }

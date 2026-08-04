@@ -24,6 +24,8 @@ import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
+import hr.sonicpulse.app.observability.DetectionSessionLogger
+import hr.sonicpulse.app.observability.FinalizedEvent
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
 import hr.sonicpulse.engine.EngineConfig
@@ -76,6 +78,9 @@ class MonitoringService : Service() {
     @Inject
     lateinit var detectionSubmitter: DetectionSubmitter
 
+    @Inject
+    lateinit var detectionSessionLogger: DetectionSessionLogger
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val engineConfig = EngineConfig()
     private val sessionCoordinator by lazy { MonitoringSessionCoordinator(monitoringStateRepository) }
@@ -104,6 +109,10 @@ class MonitoringService : Service() {
         if (effect is MonitoringLifecycleEffect.StopSession) {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
+            // After teardown, not alongside it: tearDownCaptureAndLocation() is what actually
+            // blocks until the audio capture thread has fully drained, so finishing the session
+            // log here (not earlier) guarantees no onBlock() call can still be in flight.
+            detectionSessionLogger.finishSession()
         }
         // Normal teardown only — gives every still-Pending detection
         // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
@@ -191,6 +200,7 @@ class MonitoringService : Service() {
 
     private fun startAudioCapture() {
         firstBlockInstant = null
+        detectionSessionLogger.startSession(engineConfig)
 
         val engine = DetectionEngine(engineConfig)
         val recorder = AudioRecorder(
@@ -237,20 +247,26 @@ class MonitoringService : Service() {
         val startInstant = firstBlockInstant ?: Instant.now().also { firstBlockInstant = it }
 
         val event = engine.process(block)
-        engine.lastBlockMetrics?.let { monitoringStateRepository.publishMetrics(it) }
+        // Computed once, here, regardless of which of the two consumers below end up using it —
+        // same instant either way, just hoisted so onBlock() and sessionDetectionFor() below both
+        // reuse it instead of (potentially) computing it twice.
+        val peakTimeClient = event?.let {
+            PeakTimeCalculator.calculate(startInstant, it.peakBlockIndex, engineConfig.sampleRate, engineConfig.blockSize)
+        }
+
+        val metrics = engine.lastBlockMetrics
+        if (metrics != null) {
+            monitoringStateRepository.publishMetrics(metrics)
+            val finalizedEvent = if (event != null && peakTimeClient != null) FinalizedEvent(event, peakTimeClient) else null
+            detectionSessionLogger.onBlock(metrics, finalizedEvent)
+        }
 
         if (event != null) {
-            val peakTimeClient = PeakTimeCalculator.calculate(
-                startInstant,
-                event.peakBlockIndex,
-                engineConfig.sampleRate,
-                engineConfig.blockSize
-            )
             // Captured here, on the audio thread, at the exact moment of handoff — not inside
             // the coroutine below, whose scheduling could otherwise let a newer location update
             // arrive first and misrepresent what was actually known when this detection occurred.
             val locationSnapshot = locationProvider.currentSnapshot
-            val sessionDetection = sessionDetectionFor(event.peakDbfs, peakTimeClient, locationSnapshot)
+            val sessionDetection = sessionDetectionFor(event.peakDbfs, peakTimeClient!!, locationSnapshot)
             if (sessionDetection != null) {
                 // Published synchronously (MutableStateFlow.update is thread-safe) so the detection
                 // is visibly Pending before any submission attempt is even scheduled — insertion and
@@ -278,6 +294,7 @@ class MonitoringService : Service() {
         // monitoringFailed() above — a monitoringStopped() call here must not run alongside it.
         sessionCoordinator.endSession(wasActiveBeforeTeardown = false)
         tearDownCaptureAndLocation()
+        detectionSessionLogger.finishSession()
         stopForegroundCompat()
         stopSelf()
     }
@@ -345,6 +362,9 @@ class MonitoringService : Service() {
         if (effect is MonitoringLifecycleEffect.StopSession) {
             sessionCoordinator.endSession(effect.wasActive)
             tearDownCaptureAndLocation()
+            // See onDestroy(): after teardown, not alongside it, so the audio thread is
+            // guaranteed drained before the session log is finalized.
+            detectionSessionLogger.finishSession()
         }
         // Capture/location are stopped above first, so the audio thread cannot publish another
         // detection after this point — only then is it safe to give every still-Pending detection

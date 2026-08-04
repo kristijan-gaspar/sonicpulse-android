@@ -21,5 +21,11 @@ data class MonitoringUiState(
     /** Changes on every reported failure, even repeats of the same errorMessageRes — lets the
      * Composable key a one-shot Snackbar on this instead of on errorMessageRes, which wouldn't
      * change (and so wouldn't re-trigger) for two identical failures in a row. */
-    val errorEventId: Int = 0
+    val errorEventId: Int = 0,
+    /** True once a completed session log exists to export — see
+     * [hr.sonicpulse.app.observability.DetectionSessionLogger]. Always false when session logging
+     * is disabled at build time, since [hr.sonicpulse.app.observability.NoOpDetectionSessionLogger]
+     * never sets it. The Export button is only ever composed when `BuildConfig.ENABLE_SESSION_LOGGING`
+     * is also true — this field alone does not gate its visibility. */
+    val sessionLogAvailable: Boolean = false
 )

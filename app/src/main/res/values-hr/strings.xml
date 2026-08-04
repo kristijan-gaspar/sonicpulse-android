@@ -59,6 +59,11 @@
     <string name="send_failed_server_config">Nije poslano — konfiguracija servera</string>
     <string name="send_failed_other">Nije poslano — pogreška</string>
 
+    <!-- Monitoring — session log export (samo za testiranje, BuildConfig.ENABLE_SESSION_LOGGING) -->
+    <string name="action_export_session_log">Izvezi zapis sesije</string>
+    <string name="session_log_export_success">Zapis sesije izvezen</string>
+    <string name="session_log_export_failed">Izvoz zapisa sesije nije uspio</string>
+
     <!-- Monitoring — transient error snackbar -->
     <string name="error_capture_generic">Snimanje zvuka je prekinuto</string>
     <string name="error_startup_microphone_denied">Dozvola za mikrofon nije odobrena</string>

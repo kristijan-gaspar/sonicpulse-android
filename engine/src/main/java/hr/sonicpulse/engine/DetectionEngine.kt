@@ -65,7 +65,8 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             spike = signal.spike,
             crest = signal.crest,
             clipRatio = signal.clipRatio,
-            state = state
+            state = state,
+            blockIndex = blockIndex
         )
 
         return event

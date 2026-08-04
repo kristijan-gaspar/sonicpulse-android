@@ -61,6 +61,11 @@
     <string name="send_failed_server_config">Not sent — server configuration</string>
     <string name="send_failed_other">Not sent — error</string>
 
+    <!-- Monitoring — session log export (testing-only, BuildConfig.ENABLE_SESSION_LOGGING) -->
+    <string name="action_export_session_log">Export session log</string>
+    <string name="session_log_export_success">Session log exported</string>
+    <string name="session_log_export_failed">Couldn\'t export session log</string>
+
     <!-- Monitoring — transient error snackbar -->
     <string name="error_capture_generic">Audio capture stopped unexpectedly</string>
     <string name="error_startup_microphone_denied">Microphone permission was not granted</string>
