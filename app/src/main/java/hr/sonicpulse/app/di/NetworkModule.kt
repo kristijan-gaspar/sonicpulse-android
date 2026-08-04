@@ -8,6 +8,7 @@ import dagger.hilt.components.SingletonComponent
 import hr.sonicpulse.app.BuildConfig
 import hr.sonicpulse.app.data.remote.ApiKeyInterceptor
 import hr.sonicpulse.app.data.remote.DetectionApi
+import hr.sonicpulse.app.data.remote.HotspotApi
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -39,4 +40,8 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideDetectionApi(retrofit: Retrofit): DetectionApi = retrofit.create(DetectionApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideHotspotApi(retrofit: Retrofit): HotspotApi = retrofit.create(HotspotApi::class.java)
 }

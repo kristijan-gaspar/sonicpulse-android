@@ -100,4 +100,42 @@
     <string name="detail_label_timestamp">Timestamp</string>
     <string name="detail_label_coordinates">Coordinates</string>
     <string name="action_close">Close</string>
+
+    <!-- Map — time range -->
+    <string name="range_last_24_hours">Last 24 hours</string>
+    <string name="range_last_3_days">Last 3 days</string>
+    <string name="range_last_7_days">Last 7 days</string>
+
+    <!-- Map — map/style loading -->
+    <string name="map_error_load">Couldn\'t load the map</string>
+
+    <!-- Map — hotspot data loading -->
+    <string name="map_error_data_initial">Couldn\'t load hotspots</string>
+    <string name="map_error_data_refresh">Couldn\'t refresh hotspots. Showing previously loaded results.</string>
+    <string name="map_empty_no_hotspots">No hotspots in the selected period</string>
+
+    <!-- Map — legend -->
+    <string name="map_legend_2_devices">2 devices</string>
+    <string name="map_legend_3_devices">3 devices</string>
+    <string name="map_legend_4_plus_devices">4+ devices</string>
+
+    <!-- Map — current location -->
+    <string name="action_current_location">Current location</string>
+    <string name="map_locating">Locating…</string>
+    <string name="map_location_denied">Location permission was not granted</string>
+    <string name="map_location_unavailable">Current location is unavailable</string>
+    <string name="map_location_services_disabled">Location services are turned off</string>
+    <string name="action_open_location_settings">Open location settings</string>
+
+    <!-- Map — hotspot detail bottom sheet -->
+    <string name="hotspot_detail_title">Hotspot details</string>
+    <string name="detail_label_devices">Devices</string>
+    <string name="detail_label_radius">Radius</string>
+    <string name="detail_label_confidence">Confidence</string>
+    <string name="detail_label_time_span">Time span</string>
+    <string name="unit_meters_short">%1$d m</string>
+    <string name="unit_percent">%1$d%%</string>
+    <string name="duration_seconds">%1$d s</string>
+    <string name="duration_minutes_seconds">%1$d min %2$d s</string>
+    <string name="duration_hours_minutes">%1$d h %2$d min</string>
 </resources>
