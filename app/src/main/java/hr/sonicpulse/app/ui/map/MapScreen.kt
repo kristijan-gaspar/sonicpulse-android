@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -130,7 +131,7 @@ private const val LOCATION_FIX_TIMEOUT_MILLIS = 15_000L
 // to the true bottom edge), and instead give the FAB — a plain Compose composable we fully
 // control — enough of its own bottom padding to clear the attribution button.
 
-/** Small, uniform edge inset for every MapLibre ornament (logo, attribution, compass, scale bar). */
+/** Small, uniform edge inset for every enabled MapLibre ornament (logo, attribution, compass). */
 private val MapOrnamentEdgeInset = Spacing.sm
 
 /** MapLibre's native attribution/logo row has no Compose-measurable size — the compose wrapper
@@ -368,13 +369,15 @@ internal fun MapContent(
     }
 
     // --- Ornaments: explicit alignment + padding measured from the screen's own controls, rather
-    // than relying on default/undocumented MapLibre ornament positions (§1/§3). Every ornament
-    // gets its own corner so none of them overlap each other: logo bottom-start, attribution
-    // bottom-end, scale bar top-start, compass top-end. Top padding clears the measured top
-    // filter/legend controls (applies to both top-aligned ornaments). Bottom padding is only the
-    // small shared MapOrnamentEdgeInset — see the comment on that constant above: the FAB clears
-    // the attribution button with its own padding instead, so the logo (which never overlaps the
-    // FAB) is no longer pushed up unnecessarily high. ---
+    // than relying on default/undocumented MapLibre ornament positions (§1/§3). Every enabled
+    // ornament gets its own corner so none of them overlap each other: logo bottom-start,
+    // attribution bottom-end, compass top-end. The scale bar is disabled entirely — it's not
+    // needed for SonicPulse and visually competed with the filter/legend overlays for the same
+    // top-start corner. Top padding clears the measured top filter/legend controls (only the
+    // compass is top-aligned now, but the same clearance still applies to it). Bottom padding is
+    // only the small shared MapOrnamentEdgeInset — see the comment on that constant above: the FAB
+    // clears the attribution button with its own padding instead, so the logo (which never
+    // overlaps the FAB) is no longer pushed up unnecessarily high. ---
     var topControlsHeightPx by remember { mutableIntStateOf(0) }
     val topControlsHeightDp = with(density) { topControlsHeightPx.toDp() }
     val ornamentOptions = remember(topControlsHeightDp) {
@@ -391,8 +394,7 @@ internal fun MapContent(
             attributionAlignment = Alignment.BottomEnd,
             isCompassEnabled = true,
             compassAlignment = Alignment.TopEnd,
-            isScaleBarEnabled = true,
-            scaleBarAlignment = Alignment.TopStart
+            isScaleBarEnabled = false
         )
     }
 
@@ -662,19 +664,29 @@ private fun TimeRangeRow(
     }
 }
 
+/** A compact "Devices  ●2  ●3  ●4+" chip — not a full-width banner. `wrapContentWidth()`, not
+ * `fillMaxWidth()`, so it hugs its own content and sits at the top-start side of the map (the
+ * default alignment for a non-fillMaxWidth child inside the top controls' Start-aligned Column).
+ * It still sits inside a FlowRow so the title + 3 short entries wrap onto a second line rather
+ * than clip if they ever don't fit the available width (narrow screen, larger system font). */
 @Composable
 private fun MapLegend(modifier: Modifier = Modifier) {
-    // FlowRow, not Row: a plain Row never wraps, so long translated labels (e.g. Croatian "4+
-    // uređaja") combined with a narrow screen or a larger system font size would overflow past the
-    // screen edge instead of moving to a second line. FlowRow only wraps when the 3 entries
-    // actually don't fit — on a normal-width screen at default font scale they still render on one
-    // line, identical to before. It needs a bounded width to know when to wrap, hence fillMaxWidth.
-    Surface(modifier = modifier.fillMaxWidth(), shape = AppShapes.Card, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)) {
+    Surface(
+        modifier = modifier.wrapContentWidth(),
+        shape = AppShapes.Card,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+    ) {
         FlowRow(
-            modifier = Modifier.padding(Spacing.sm).fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs).wrapContentWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
+            Text(
+                text = stringResource(R.string.map_legend_title),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
             LegendEntry(SemanticColors.Yellow, stringResource(R.string.map_legend_2_devices))
             LegendEntry(SemanticColors.Warning, stringResource(R.string.map_legend_3_devices))
             LegendEntry(SemanticColors.Danger, stringResource(R.string.map_legend_4_plus_devices))
@@ -682,12 +694,14 @@ private fun MapLegend(modifier: Modifier = Modifier) {
     }
 }
 
+/** One "●2"-style entry — [count] is just the number (or "4+"), the shared [R.string.map_legend_title]
+ * supplies "Devices"/"Uređaji" once for the whole legend rather than repeating it per entry. */
 @Composable
-private fun LegendEntry(color: Color, label: String, modifier: Modifier = Modifier) {
+private fun LegendEntry(color: Color, count: String, modifier: Modifier = Modifier) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(10.dp).background(color, CircleShape))
-        Spacer(modifier = Modifier.width(Spacing.xs))
-        Text(text = label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+        Box(modifier = Modifier.size(8.dp).background(color, CircleShape))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(text = count, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
