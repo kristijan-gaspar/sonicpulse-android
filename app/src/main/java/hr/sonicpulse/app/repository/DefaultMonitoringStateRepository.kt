@@ -46,7 +46,13 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
 
     override fun monitoringStartupFailed(failure: MonitoringStartupFailure) {
         _state.update {
-            it.copy(isMonitoring = false, startupError = failure, captureError = null, errorEventId = it.errorEventId + 1)
+            it.copy(
+                isMonitoring = false,
+                startupError = failure,
+                captureError = null,
+                errorEventId = it.errorEventId + 1,
+                submissionCounters = SubmissionTransitions.incrementDroppedPermissionIfApplicable(it.submissionCounters, failure)
+            )
         }
     }
 
@@ -81,7 +87,13 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     }
 
     override fun locationRefreshFailed(failure: LocationRefreshFailure) {
-        _state.update { it.copy(locationRefreshError = failure, errorEventId = it.errorEventId + 1) }
+        _state.update {
+            it.copy(
+                locationRefreshError = failure,
+                errorEventId = it.errorEventId + 1,
+                submissionCounters = SubmissionTransitions.incrementDroppedPermissionIfApplicable(it.submissionCounters, failure)
+            )
+        }
     }
 
     override fun locationRefreshSucceeded() {

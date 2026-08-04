@@ -25,6 +25,7 @@ import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
 import hr.sonicpulse.app.repository.MonitoringStateRepository
+import hr.sonicpulse.app.service.notification.DetectionAlertCoordinator
 import hr.sonicpulse.engine.DetectionEngine
 import hr.sonicpulse.engine.EngineConfig
 import java.time.Instant
@@ -35,6 +36,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -76,6 +80,9 @@ class MonitoringService : Service() {
     @Inject
     lateinit var detectionSubmitter: DetectionSubmitter
 
+    @Inject
+    lateinit var detectionAlertCoordinator: DetectionAlertCoordinator
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val engineConfig = EngineConfig()
     private val sessionCoordinator by lazy { MonitoringSessionCoordinator(monitoringStateRepository) }
@@ -85,6 +92,7 @@ class MonitoringService : Service() {
     private var audioRecorder: AudioRecorder? = null
     private var firstBlockInstant: Instant? = null
     private var locationPollingJob: Job? = null
+    private var detectionAlertJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -231,6 +239,17 @@ class MonitoringService : Service() {
                 delay(LOCATION_POLL_INTERVAL_MILLIS)
             }
         }
+
+        // Off the audio thread — handleBlock() only ever publishes to monitoringStateRepository
+        // synchronously; this coroutine observes that StateFlow and does the DataStore read +
+        // notification/vibration side effects here instead, on serviceScope.
+        detectionAlertJob = serviceScope.launch {
+            monitoringStateRepository.state
+                .map { it.sessionDetections.lastOrNull() }
+                .filterNotNull()
+                .distinctUntilChangedBy { it.localEventId }
+                .collect { detection -> detectionAlertCoordinator.onLocalDetection(detection) }
+        }
     }
 
     private fun handleBlock(engine: DetectionEngine, block: ShortArray) {
@@ -359,6 +378,8 @@ class MonitoringService : Service() {
     private fun tearDownCaptureAndLocation() {
         locationPollingJob?.cancel()
         locationPollingJob = null
+        detectionAlertJob?.cancel()
+        detectionAlertJob = null
         locationProvider.stop()
         audioRecorder?.close()
         audioRecorder = null

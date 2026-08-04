@@ -6,6 +6,7 @@ import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.domain.model.SubmissionStatus
+import hr.sonicpulse.app.service.LocationRefreshFailure
 import hr.sonicpulse.app.service.MonitoringStartupFailure
 import hr.sonicpulse.engine.BlockMetrics
 import hr.sonicpulse.engine.DetectionState
@@ -586,5 +587,62 @@ class DefaultMonitoringStateRepositoryTest {
             state.sessionDetections.first { it.localEventId == failed.localEventId }.submissionStatus
         )
         assertEquals(0, state.submissionCounters.cancelled)
+    }
+
+    @Test
+    fun `monitoringStartupFailed with a microphone or location permission denial increments droppedPermission`() {
+        listOf(MonitoringStartupFailure.MicrophonePermissionDenied, MonitoringStartupFailure.LocationPermissionDenied)
+            .forEach { failure ->
+                val repository = DefaultMonitoringStateRepository()
+
+                repository.monitoringStartupFailed(failure)
+
+                assertEquals("failure $failure", 1, repository.state.value.submissionCounters.droppedPermission)
+            }
+    }
+
+    @Test
+    fun `monitoringStartupFailed with a non-permission failure does not increment droppedPermission`() {
+        listOf(
+            MonitoringStartupFailure.LocationServicesDisabled,
+            MonitoringStartupFailure.LocationStartFailed(RuntimeException()),
+            MonitoringStartupFailure.ForegroundStartFailed(RuntimeException())
+        ).forEach { failure ->
+            val repository = DefaultMonitoringStateRepository()
+
+            repository.monitoringStartupFailed(failure)
+
+            assertEquals("failure $failure", 0, repository.state.value.submissionCounters.droppedPermission)
+        }
+    }
+
+    @Test
+    fun `locationRefreshFailed with PermissionDenied increments droppedPermission`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repository.locationRefreshFailed(LocationRefreshFailure.PermissionDenied)
+
+        assertEquals(1, repository.state.value.submissionCounters.droppedPermission)
+    }
+
+    @Test
+    fun `locationRefreshFailed with a non-permission failure does not increment droppedPermission`() {
+        listOf(LocationRefreshFailure.LocationServicesDisabled, LocationRefreshFailure.Failed).forEach { failure ->
+            val repository = DefaultMonitoringStateRepository()
+
+            repository.locationRefreshFailed(failure)
+
+            assertEquals("failure $failure", 0, repository.state.value.submissionCounters.droppedPermission)
+        }
+    }
+
+    @Test
+    fun `monitoringStarted resets droppedPermission from a previous session`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStartupFailed(MonitoringStartupFailure.MicrophonePermissionDenied)
+
+        repository.monitoringStarted()
+
+        assertEquals(0, repository.state.value.submissionCounters.droppedPermission)
     }
 }

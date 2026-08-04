@@ -3,6 +3,8 @@ package hr.sonicpulse.app.repository
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.domain.model.SubmissionStatus
+import hr.sonicpulse.app.service.LocationRefreshFailure
+import hr.sonicpulse.app.service.MonitoringStartupFailure
 import java.util.UUID
 
 /**
@@ -31,6 +33,30 @@ internal object SubmissionTransitions {
             submissionCounters = incrementCounter(state.submissionCounters, reason),
             serverConfigurationError = state.serverConfigurationError || reason == SubmissionFailureReason.Unauthorized
         )
+    }
+
+    /** [SubmissionCounters.droppedPermission] only counts the two startup failures that are
+     * actually permission-related — [MonitoringStartupFailure.LocationServicesDisabled] and the
+     * two `*StartFailed` variants are unrelated failure modes, never counted here. */
+    fun incrementDroppedPermissionIfApplicable(
+        counters: SubmissionCounters,
+        failure: MonitoringStartupFailure
+    ): SubmissionCounters = when (failure) {
+        MonitoringStartupFailure.MicrophonePermissionDenied,
+        MonitoringStartupFailure.LocationPermissionDenied ->
+            counters.copy(droppedPermission = counters.droppedPermission + 1)
+        MonitoringStartupFailure.LocationServicesDisabled,
+        is MonitoringStartupFailure.LocationStartFailed,
+        is MonitoringStartupFailure.ForegroundStartFailed -> counters
+    }
+
+    fun incrementDroppedPermissionIfApplicable(
+        counters: SubmissionCounters,
+        failure: LocationRefreshFailure
+    ): SubmissionCounters = if (failure is LocationRefreshFailure.PermissionDenied) {
+        counters.copy(droppedPermission = counters.droppedPermission + 1)
+    } else {
+        counters
     }
 
     /** Gives every retained Pending detection a terminal Failed(Cancelled) result; idempotent. */

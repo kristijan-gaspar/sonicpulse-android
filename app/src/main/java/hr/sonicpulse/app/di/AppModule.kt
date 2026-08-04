@@ -4,6 +4,8 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import hr.sonicpulse.app.data.datastore.AppSettingsRepository
+import hr.sonicpulse.app.data.datastore.DefaultAppSettingsRepository
 import hr.sonicpulse.app.data.datastore.DefaultInstallationIdRepository
 import hr.sonicpulse.app.data.datastore.DefaultPermissionRequestHistory
 import hr.sonicpulse.app.data.datastore.InstallationIdRepository
@@ -18,6 +20,12 @@ import hr.sonicpulse.app.repository.DefaultMonitoringStateRepository
 import hr.sonicpulse.app.repository.DetectionsRepository
 import hr.sonicpulse.app.repository.HotspotsRepository
 import hr.sonicpulse.app.repository.MonitoringStateRepository
+import hr.sonicpulse.app.service.notification.AndroidDetectionNotifier
+import hr.sonicpulse.app.service.notification.AndroidDetectionVibrator
+import hr.sonicpulse.app.service.notification.DetectionNotifier
+import hr.sonicpulse.app.service.notification.DetectionVibrator
+import hr.sonicpulse.app.ui.permissions.AndroidPermissionChecker
+import hr.sonicpulse.app.ui.permissions.PermissionChecker
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -57,4 +65,24 @@ abstract class AppModule {
     abstract fun bindPermissionRequestHistory(
         impl: DefaultPermissionRequestHistory
     ): PermissionRequestHistory
+
+    @Binds
+    abstract fun bindAppSettingsRepository(
+        impl: DefaultAppSettingsRepository
+    ): AppSettingsRepository
+
+    @Binds
+    abstract fun bindDetectionNotifier(
+        impl: AndroidDetectionNotifier
+    ): DetectionNotifier
+
+    @Binds
+    abstract fun bindDetectionVibrator(
+        impl: AndroidDetectionVibrator
+    ): DetectionVibrator
+
+    @Binds
+    abstract fun bindPermissionChecker(
+        impl: AndroidPermissionChecker
+    ): PermissionChecker
 }
