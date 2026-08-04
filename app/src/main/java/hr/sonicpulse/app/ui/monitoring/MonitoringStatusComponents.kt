@@ -9,14 +9,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
@@ -177,22 +179,29 @@ fun MonitoringActionButton(
     }
 }
 
-/** Location status row — Mikrofon / Lokacija / Pozadina mini-cards. */
+/** Location status row — Mikrofon / Lokacija mini-cards, each filling half the row. No separate
+ * "Background" card: its state was never independently measured (it always mirrored
+ * `microphoneActive`, i.e. `isMonitoring`) and its cloud icon misleadingly suggested cloud sync. */
 @Composable
 fun LocationStatusRow(
     microphoneActive: Boolean,
     locationDisplayState: LocationDisplayState,
-    backgroundActive: Boolean,
     modifier: Modifier = Modifier
 ) {
-    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+    // height(IntrinsicSize.Min) + fillMaxHeight on each card: if one card's status text wraps to
+    // a second line (a longer translation, or a large system font scale) and the other doesn't,
+    // both cards still end up the same height instead of the shorter one looking visually smaller.
+    Row(
+        modifier = modifier.fillMaxWidth().height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
         MiniStatusCard(
             icon = Icons.Filled.Mic,
             label = stringResource(R.string.label_microphone),
             statusText = stringResource(if (microphoneActive) R.string.location_status_active else R.string.location_status_unavailable),
             dotColor = if (microphoneActive) SemanticColors.Success else SemanticColors.Warning,
             blinking = false,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).fillMaxHeight()
         )
         val (locationStatusRes, locationDotColor, locationBlinking) = when (locationDisplayState) {
             LocationDisplayState.Gps -> Triple(R.string.location_status_gps, SemanticColors.Success, false)
@@ -206,15 +215,7 @@ fun LocationStatusRow(
             statusText = stringResource(locationStatusRes),
             dotColor = locationDotColor,
             blinking = locationBlinking,
-            modifier = Modifier.weight(1f)
-        )
-        MiniStatusCard(
-            icon = Icons.Filled.CloudSync,
-            label = stringResource(R.string.label_background),
-            statusText = stringResource(if (backgroundActive) R.string.location_status_active else R.string.location_status_inactive),
-            dotColor = if (backgroundActive) SemanticColors.Success else SemanticColors.Warning,
-            blinking = false,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).fillMaxHeight()
         )
     }
 }

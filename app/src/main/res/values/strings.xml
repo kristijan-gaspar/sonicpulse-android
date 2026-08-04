@@ -37,9 +37,7 @@
     <!-- Monitoring — location status row (F) -->
     <string name="label_microphone">Microphone</string>
     <string name="label_location">Location</string>
-    <string name="label_background">Background</string>
     <string name="location_status_active">Active</string>
-    <string name="location_status_inactive">Inactive</string>
     <string name="location_status_unavailable">Unavailable</string>
     <string name="location_status_searching">Searching</string>
     <string name="location_status_precise_required">Not precise</string>

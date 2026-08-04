@@ -96,7 +96,6 @@ class MonitoringViewModelTest {
         assertEquals(MonitoringPhase.AcquiringLocation, state.phase)
         assertEquals(LocationDisplayState.Searching, state.locationDisplayState)
         assertTrue(state.microphoneActive)
-        assertTrue(state.backgroundActive)
     }
 
     @Test
@@ -207,7 +206,6 @@ class MonitoringViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(MonitoringPhase.Idle, state.phase)
         assertTrue(!state.microphoneActive)
-        assertTrue(!state.backgroundActive)
     }
 
     @Test
