@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
@@ -44,6 +43,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -101,6 +102,7 @@ internal fun DetectionsContent(
     val todayLabel = stringResource(R.string.filter_today)
     val groupedLabel = stringResource(R.string.filter_grouped)
     val ungroupedLabel = stringResource(R.string.filter_ungrouped)
+    val refreshLabel = stringResource(R.string.action_refresh)
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -123,9 +125,14 @@ internal fun DetectionsContent(
                 enabled = !uiState.isInitialLoading && !uiState.isRefreshing
             ) {
                 if (uiState.isRefreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    // Semantics kept identical to the Icon it replaces — without this, a screen
+                    // reader announces this button with no name at all while it is loading.
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp).semantics { contentDescription = refreshLabel },
+                        strokeWidth = 2.dp
+                    )
                 } else {
-                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                    Icon(Icons.Filled.Refresh, contentDescription = refreshLabel)
                 }
             }
         }
@@ -273,7 +280,7 @@ private fun DetectionListItem(
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .background(iconBackground, RoundedCornerShape(13.dp)),
+                    .background(iconBackground, AppShapes.IconContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(icon, contentDescription = null, tint = iconTint)
@@ -281,7 +288,7 @@ private fun DetectionListItem(
             Column(modifier = Modifier.weight(1f).padding(start = Spacing.md)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
-                        text = "%.1f".format(item.peakDbfs),
+                        text = stringResource(R.string.peak_level_dbfs, item.peakDbfs),
                         style = MonospaceValueStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     )
                     Text(
@@ -296,7 +303,7 @@ private fun DetectionListItem(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = item.coordinatesText,
+                        text = stringResource(R.string.coordinates_format, item.latitudeText, item.longitudeText),
                         style = MaterialTheme.typography.bodySmall,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
@@ -428,7 +435,7 @@ private fun DetectionDetailBottomSheet(
             }
             Spacer(modifier = Modifier.height(Spacing.md))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                DetailCell(value = "%.1f".format(detection.peakDbfs), modifier = Modifier.weight(1f))
+                DetailCell(value = stringResource(R.string.peak_level_dbfs, detection.peakDbfs), modifier = Modifier.weight(1f))
                 DetailCell(
                     value = stringResource(if (detection.grouped) R.string.status_grouped else R.string.status_ungrouped),
                     color = if (detection.grouped) SemanticColors.Success else SemanticColors.Warning,
@@ -437,7 +444,10 @@ private fun DetectionDetailBottomSheet(
             }
             Spacer(modifier = Modifier.height(Spacing.md))
             DetailRow(label = stringResource(R.string.detail_label_timestamp), value = detection.detailTimestampText)
-            DetailRow(label = stringResource(R.string.detail_label_coordinates), value = detection.coordinatesText)
+            DetailRow(
+                label = stringResource(R.string.detail_label_coordinates),
+                value = stringResource(R.string.coordinates_format, detection.latitudeText, detection.longitudeText)
+            )
         }
     }
 }

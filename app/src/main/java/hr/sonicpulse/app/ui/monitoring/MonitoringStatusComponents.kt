@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -128,7 +128,9 @@ fun MonitoringActionButton(
     onEnableLocation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val singleButtonModifier = Modifier.fillMaxWidth().height(54.dp)
+    // heightIn(min = ...), not a fixed height: at large system font scales the button's own text
+    // needs to grow taller than 54.dp, and a fixed height would clip it.
+    val singleButtonModifier = Modifier.fillMaxWidth().heightIn(min = 54.dp)
     when (phase) {
         MonitoringPhase.Idle -> Button(
             onClick = onStart,

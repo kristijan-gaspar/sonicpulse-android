@@ -4,18 +4,11 @@ import android.Manifest
 import hr.sonicpulse.app.BuildConfig
 import hr.sonicpulse.app.data.datastore.FakeAppSettingsRepository
 import hr.sonicpulse.app.data.datastore.FakeInstallationIdRepository
-import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.AppLanguage
 import hr.sonicpulse.app.domain.model.AppSettings
-import hr.sonicpulse.app.domain.model.SessionDetection
-import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.domain.model.ThemeMode
-import hr.sonicpulse.app.repository.FakeMonitoringStateRepository
-import hr.sonicpulse.app.repository.SubmissionCounters
 import hr.sonicpulse.app.ui.permissions.FakePermissionChecker
 import hr.sonicpulse.app.ui.theme.FakeAppLanguageController
-import java.time.Instant
-import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -46,26 +39,17 @@ class SettingsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun detection() = SessionDetection(
-        localEventId = UUID.randomUUID(),
-        peakDbfs = -10.0,
-        peakTimeClient = Instant.EPOCH,
-        location = LocationSnapshot.Valid(45.8, 16.0, 8.0f)
-    )
-
     /** [SettingsViewModel.uiState] is built via `stateIn(started = SharingStarted.Eagerly, ...)` —
      * with a [StandardTestDispatcher] (unlike real `Dispatchers.Main.immediate`), the eager
      * collector only actually runs once the dispatcher is advanced, so every caller here needs
      * the state to reflect the fakes' current values before its first assertion. */
     private fun TestScope.viewModel(
         settingsRepository: FakeAppSettingsRepository = FakeAppSettingsRepository(),
-        monitoringStateRepository: FakeMonitoringStateRepository = FakeMonitoringStateRepository(),
         installationIdRepository: FakeInstallationIdRepository = FakeInstallationIdRepository(fixedId = "fixed-id"),
         permissionChecker: FakePermissionChecker = FakePermissionChecker(),
         appLanguageController: FakeAppLanguageController = FakeAppLanguageController()
     ) = SettingsViewModel(
         settingsRepository,
-        monitoringStateRepository,
         installationIdRepository,
         permissionChecker,
         appLanguageController
@@ -104,73 +88,6 @@ class SettingsViewModelTest {
         val state = viewModel(permissionChecker = checker).uiState.value
 
         assertFalse(state.preciseLocationPermissionGranted)
-    }
-
-    @Test
-    fun `maps successful submission counter`() = runTest(testDispatcher) {
-        val monitoringStateRepository = FakeMonitoringStateRepository()
-        monitoringStateRepository.monitoringStarted()
-        val target = detection()
-        monitoringStateRepository.localDetectionOccurred(target)
-        monitoringStateRepository.submissionSucceeded(target.localEventId)
-
-        val state = viewModel(monitoringStateRepository = monitoringStateRepository).uiState.value
-
-        assertEquals(1, state.successfulSubmissions)
-    }
-
-    @Test
-    fun `maps the uncapped local detection count directly, not the capped retained list`() = runTest(testDispatcher) {
-        val monitoringStateRepository = FakeMonitoringStateRepository()
-        monitoringStateRepository.monitoringStarted()
-        repeat(101) { monitoringStateRepository.localDetectionOccurred(detection()) }
-
-        val state = viewModel(monitoringStateRepository = monitoringStateRepository).uiState.value
-
-        assertEquals(101, state.localDetections)
-        assertEquals(100, monitoringStateRepository.state.value.sessionDetections.size)
-    }
-
-    @Test
-    fun `maps network error counter`() = runTest(testDispatcher) {
-        val monitoringStateRepository = FakeMonitoringStateRepository()
-        monitoringStateRepository.monitoringStarted()
-        val target = detection()
-        monitoringStateRepository.localDetectionOccurred(target)
-        monitoringStateRepository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
-
-        val state = viewModel(monitoringStateRepository = monitoringStateRepository).uiState.value
-
-        assertEquals(1, state.networkErrors)
-    }
-
-    @Test
-    fun `maps combined location-drop count from no-location, stale and inaccurate reasons`() = runTest(testDispatcher) {
-        val monitoringStateRepository = FakeMonitoringStateRepository()
-        monitoringStateRepository.monitoringStarted()
-        listOf(
-            SubmissionFailureReason.NoLocation,
-            SubmissionFailureReason.StaleLocation,
-            SubmissionFailureReason.InaccurateLocation
-        ).forEach { reason ->
-            val target = detection()
-            monitoringStateRepository.localDetectionOccurred(target)
-            monitoringStateRepository.submissionFailed(target.localEventId, reason)
-        }
-
-        val state = viewModel(monitoringStateRepository = monitoringStateRepository).uiState.value
-
-        assertEquals(3, state.droppedLocation)
-    }
-
-    @Test
-    fun `maps the real permissionFailures diagnostic`() = runTest(testDispatcher) {
-        val monitoringStateRepository = FakeMonitoringStateRepository()
-        monitoringStateRepository.setState(monitoringStateRepository.state.value.copy(submissionCounters = SubmissionCounters(permissionFailures = 4)))
-
-        val state = viewModel(monitoringStateRepository = monitoringStateRepository).uiState.value
-
-        assertEquals(4, state.permissionFailures)
     }
 
     @Test
@@ -257,7 +174,6 @@ class SettingsViewModelTest {
 
         val viewModel = SettingsViewModel(
             FakeAppSettingsRepository(),
-            FakeMonitoringStateRepository(),
             FakeInstallationIdRepository(fixedId = "fixed-id"),
             FakePermissionChecker(),
             languageController
@@ -275,7 +191,6 @@ class SettingsViewModelTest {
 
         val viewModel = SettingsViewModel(
             FakeAppSettingsRepository(),
-            FakeMonitoringStateRepository(),
             FakeInstallationIdRepository(fixedId = "fixed-id"),
             FakePermissionChecker(),
             languageController

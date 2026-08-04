@@ -9,8 +9,6 @@ import hr.sonicpulse.app.data.datastore.AppSettingsRepository
 import hr.sonicpulse.app.data.datastore.InstallationIdRepository
 import hr.sonicpulse.app.domain.model.AppLanguage
 import hr.sonicpulse.app.domain.model.ThemeMode
-import hr.sonicpulse.app.repository.MonitoringState
-import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.app.ui.permissions.PermissionChecker
 import hr.sonicpulse.app.ui.theme.AppLanguageController
 import javax.inject.Inject
@@ -23,15 +21,14 @@ import kotlinx.coroutines.launch
 
 /**
  * Combines persisted [AppSettings][hr.sonicpulse.app.domain.model.AppSettings] (theme only), the
- * current language from [AppLanguageController], live permission status, monitoring diagnostics,
- * the installation id and the app version into one immutable [SettingsUiState] —
- * [SettingsScreen][SettingsScreen] only ever renders this and forwards user actions back here, it
- * never touches DataStore, a repository or [AppLanguageController] directly (§4).
+ * current language from [AppLanguageController], live permission status, the installation id and
+ * the app version into one immutable [SettingsUiState] — [SettingsScreen][SettingsScreen] only
+ * ever renders this and forwards user actions back here, it never touches DataStore, a repository
+ * or [AppLanguageController] directly (§4).
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val appSettingsRepository: AppSettingsRepository,
-    monitoringStateRepository: MonitoringStateRepository,
     private val installationIdRepository: InstallationIdRepository,
     private val permissionChecker: PermissionChecker,
     private val appLanguageController: AppLanguageController
@@ -45,28 +42,22 @@ class SettingsViewModel @Inject constructor(
 
     val uiState: StateFlow<SettingsUiState> = combine(
         appSettingsRepository.settings,
-        monitoringStateRepository.state,
         _permissionStatus,
         _installationId,
         _language
-    ) { settings, monitoringState, permissions, installationId, language ->
+    ) { settings, permissions, installationId, language ->
         SettingsUiState(
             themeMode = settings.themeMode,
             language = language,
             microphonePermissionGranted = permissions.microphoneGranted,
             preciseLocationPermissionGranted = permissions.preciseLocationGranted,
-            successfulSubmissions = monitoringState.submissionCounters.submissionSucceeded,
-            localDetections = monitoringState.localDetectionCount,
-            networkErrors = monitoringState.submissionCounters.droppedNetwork,
-            droppedLocation = droppedLocationCount(monitoringState),
-            permissionFailures = monitoringState.submissionCounters.permissionFailures,
             installationId = installationId,
             versionName = BuildConfig.VERSION_NAME
         )
     }.stateIn(
         scope = viewModelScope,
-        // Eager, matching MonitoringViewModel: diagnostics/permission status must be correct the
-        // instant the screen reads uiState.value, before any collector has actually subscribed.
+        // Eager, matching MonitoringViewModel: permission status must be correct the instant the
+        // screen reads uiState.value, before any collector has actually subscribed.
         started = SharingStarted.Eagerly,
         initialValue = SettingsUiState(language = initialLanguage, versionName = BuildConfig.VERSION_NAME)
     )
@@ -103,8 +94,3 @@ class SettingsViewModel @Inject constructor(
 }
 
 private data class PermissionStatus(val microphoneGranted: Boolean, val preciseLocationGranted: Boolean)
-
-private fun droppedLocationCount(state: MonitoringState): Int =
-    state.submissionCounters.droppedNoLocation +
-        state.submissionCounters.droppedStaleLocation +
-        state.submissionCounters.droppedInaccurateLocation

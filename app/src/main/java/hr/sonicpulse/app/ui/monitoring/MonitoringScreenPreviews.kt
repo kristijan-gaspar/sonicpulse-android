@@ -85,7 +85,8 @@ private fun MonitoringContentSendingPreview() {
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
                     timestampText = "14:32:07",
-                    coordinatesText = "45.80000, 16.00000",
+                    latitudeText = "45.80000",
+                    longitudeText = "16.00000",
                     sendResult = SendResult.Sending
                 )
             ),
@@ -107,7 +108,8 @@ private fun MonitoringContentSentPreview() {
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
                     timestampText = "14:32:07",
-                    coordinatesText = "45.80000, 16.00000",
+                    latitudeText = "45.80000",
+                    longitudeText = "16.00000",
                     sendResult = SendResult.Sent
                 )
             ),
@@ -129,7 +131,8 @@ private fun MonitoringContentFailedPreview() {
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
                     timestampText = "14:32:07",
-                    coordinatesText = null,
+                    latitudeText = null,
+                    longitudeText = null,
                     sendResult = SendResult.FailedNoLocation
                 )
             ),
@@ -152,7 +155,8 @@ private fun MonitoringContentServerConfigurationErrorPreview() {
                 lastDetection = DetectionUiModel(
                     peakDbfs = -9.4,
                     timestampText = "14:32:07",
-                    coordinatesText = "45.80000, 16.00000",
+                    latitudeText = "45.80000",
+                    longitudeText = "16.00000",
                     sendResult = SendResult.FailedServerConfig
                 )
             ),
