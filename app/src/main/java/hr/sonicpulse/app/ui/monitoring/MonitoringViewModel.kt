@@ -128,17 +128,20 @@ private fun locationRefreshErrorMessageRes(failure: LocationRefreshFailure): Int
     LocationRefreshFailure.Failed -> R.string.error_location_refresh_failed
 }
 
-private fun SessionDetection.toUiModel(): DetectionUiModel = DetectionUiModel(
-    peakDbfs = peakDbfs,
-    timestampText = TimestampFormatter.format(peakTimeClient),
-    coordinatesText = coordinatesTextOf(location),
-    sendResult = sendResultOf(submissionStatus)
-)
+private fun SessionDetection.toUiModel(): DetectionUiModel {
+    val validLocation = location as? LocationSnapshot.Valid
+    return DetectionUiModel(
+        peakDbfs = peakDbfs,
+        timestampText = TimestampFormatter.format(peakTimeClient),
+        latitudeText = validLocation?.let { formatCoordinate(it.latitude) },
+        longitudeText = validLocation?.let { formatCoordinate(it.longitude) },
+        sendResult = sendResultOf(submissionStatus)
+    )
+}
 
-private fun coordinatesTextOf(location: LocationSnapshot): String? =
-    (location as? LocationSnapshot.Valid)?.let {
-        String.format(Locale.US, "%.5f, %.5f", it.latitude, it.longitude)
-    }
+/** Fixed 5-decimal precision, always dot-separated regardless of the app's display language —
+ * coordinates are technical data, not a localized number. */
+private fun formatCoordinate(value: Double): String = String.format(Locale.US, "%.5f", value)
 
 private fun sendResultOf(status: SubmissionStatus): SendResult = when (status) {
     SubmissionStatus.Pending -> SendResult.Sending

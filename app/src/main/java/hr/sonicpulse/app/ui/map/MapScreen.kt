@@ -35,7 +35,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -64,6 +63,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -367,89 +368,93 @@ internal fun MapContent(
 
     val polygonsByBucket = remember(uiState.hotspots) { bucketPolygons(uiState.hotspots) }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
-        Box(modifier = modifier.fillMaxSize().padding(innerPadding)) {
-            key(mapInstanceKey) {
-                val instanceGeneration = remember(mapInstanceKey) { renderCoordinator.newInstance() }
-                MaplibreMap(
-                    modifier = Modifier.fillMaxSize(),
-                    baseStyle = BaseStyle.Uri(MAP_STYLE_URL),
-                    cameraState = cameraState,
-                    options = MapOptions(ornamentOptions = ornamentOptions),
-                    onMapClick = { position: Position, _ ->
-                        val hit = HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
-                        if (hit != null) {
-                            selectedHotspot = hit
-                            ClickResult.Consume
-                        } else {
-                            ClickResult.Pass
-                        }
-                    },
-                    onMapLoadFailed = { reason ->
-                        renderCoordinator.onLoadFailed(instanceGeneration, reason)
-                        renderVersion++
-                    },
-                    onMapLoadFinished = {
-                        renderCoordinator.onLoadFinished(instanceGeneration)
-                        renderVersion++
+    // No Scaffold here on purpose: the app-level Scaffold in SonicPulseApp already reserves the
+    // area between the top bar and the bottom navigation bar, and a nested Scaffold's own default
+    // window-insets handling would re-reserve part of that same space, shrinking the map viewport
+    // for no reason (§3) — filters/legend/FAB/snackbar are plain overlays inside this Box instead.
+    Box(modifier = modifier.fillMaxSize()) {
+        key(mapInstanceKey) {
+            val instanceGeneration = remember(mapInstanceKey) { renderCoordinator.newInstance() }
+            MaplibreMap(
+                modifier = Modifier.fillMaxSize(),
+                baseStyle = BaseStyle.Uri(MAP_STYLE_URL),
+                cameraState = cameraState,
+                options = MapOptions(ornamentOptions = ornamentOptions),
+                onMapClick = { position: Position, _ ->
+                    val hit = HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
+                    if (hit != null) {
+                        selectedHotspot = hit
+                        ClickResult.Consume
+                    } else {
+                        ClickResult.Pass
                     }
-                ) {
-                    polygonsByBucket.forEach { (bucket, polygons) ->
-                        if (polygons.isEmpty()) return@forEach
-                        val source = rememberGeoJsonSource(data = GeoJsonData.JsonString(HotspotGeoJson.featureCollection(polygons)))
-                        FillLayer(
-                            id = "hotspots-fill-${bucket.name}",
-                            source = source,
-                            color = const(bucket.color),
-                            opacity = const(0.25f)
-                        )
-                        LineLayer(
-                            id = "hotspots-outline-${bucket.name}",
-                            source = source,
-                            color = const(bucket.color),
-                            width = const(2.dp)
-                        )
-                    }
+                },
+                onMapLoadFailed = { reason ->
+                    renderCoordinator.onLoadFailed(instanceGeneration, reason)
+                    renderVersion++
+                },
+                onMapLoadFinished = {
+                    renderCoordinator.onLoadFinished(instanceGeneration)
+                    renderVersion++
+                }
+            ) {
+                polygonsByBucket.forEach { (bucket, polygons) ->
+                    if (polygons.isEmpty()) return@forEach
+                    val source = rememberGeoJsonSource(data = GeoJsonData.JsonString(HotspotGeoJson.featureCollection(polygons)))
+                    FillLayer(
+                        id = "hotspots-fill-${bucket.name}",
+                        source = source,
+                        color = const(bucket.color),
+                        opacity = const(0.25f)
+                    )
+                    LineLayer(
+                        id = "hotspots-outline-${bucket.name}",
+                        source = source,
+                        color = const(bucket.color),
+                        width = const(2.dp)
+                    )
+                }
 
-                    if (locationEnabled) {
-                        val locationProvider = rememberFusedLocationProvider()
-                        val userLocationState = rememberUserLocationState(locationProvider = locationProvider)
-                        val location = userLocationState.location
-                        if (location != null) {
-                            LocationPuck(idPrefix = "map-user-location", location = location, cameraState = cameraState)
-                        }
-                        LaunchedEffect(location, currentLocatingGeneration) {
-                            if (location != null && locatingCoordinator.complete(currentLocatingGeneration)) {
-                                locatingVersion++
-                                cameraState.animateTo(CameraPosition(target = location.position.value, zoom = 15.0))
-                            }
+                if (locationEnabled) {
+                    val locationProvider = rememberFusedLocationProvider()
+                    val userLocationState = rememberUserLocationState(locationProvider = locationProvider)
+                    val location = userLocationState.location
+                    if (location != null) {
+                        LocationPuck(idPrefix = "map-user-location", location = location, cameraState = cameraState)
+                    }
+                    LaunchedEffect(location, currentLocatingGeneration) {
+                        if (location != null && locatingCoordinator.complete(currentLocatingGeneration)) {
+                            locatingVersion++
+                            cameraState.animateTo(CameraPosition(target = location.position.value, zoom = 15.0))
                         }
                     }
                 }
             }
-
-            // §4 visual priority: map-render failure > map-render loading > hotspot states >
-            // normal controls — each tier is exclusive of the ones below it, not merely drawn on
-            // top of them. While the map itself hasn't finished loading, no hotspot-state overlay
-            // or normal control is composed at all (not just hidden), so nothing can be
-            // misleadingly interactive over a full-screen map failure or a bare loading map.
-            val currentRenderState = renderVersion.let { renderCoordinator.state }
-            when (currentRenderState) {
-                is MapRenderState.Failed -> MapLoadErrorOverlay(onRetry = {
-                    mapInstanceKey++
-                })
-                MapRenderState.Loading -> MapLoadingIndicator()
-                MapRenderState.Loaded -> HotspotControlsAndOverlays(
-                    uiState = uiState,
-                    onSelectRange = onSelectRange,
-                    onRefresh = onRefresh,
-                    onRetry = onRetry,
-                    onCurrentLocationClick = ::onCurrentLocationClick,
-                    isLocating = isLocating,
-                    onTopControlsMeasured = { topControlsHeightPx = it }
-                )
-            }
         }
+
+        // §4 visual priority: map-render failure > map-render loading > hotspot states >
+        // normal controls — each tier is exclusive of the ones below it, not merely drawn on
+        // top of them. While the map itself hasn't finished loading, no hotspot-state overlay
+        // or normal control is composed at all (not just hidden), so nothing can be
+        // misleadingly interactive over a full-screen map failure or a bare loading map.
+        val currentRenderState = renderVersion.let { renderCoordinator.state }
+        when (currentRenderState) {
+            is MapRenderState.Failed -> MapLoadErrorOverlay(onRetry = {
+                mapInstanceKey++
+            })
+            MapRenderState.Loading -> MapLoadingIndicator()
+            MapRenderState.Loaded -> HotspotControlsAndOverlays(
+                uiState = uiState,
+                onSelectRange = onSelectRange,
+                onRefresh = onRefresh,
+                onRetry = onRetry,
+                onCurrentLocationClick = ::onCurrentLocationClick,
+                isLocating = isLocating,
+                onTopControlsMeasured = { topControlsHeightPx = it }
+            )
+        }
+
+        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
     selectedHotspot?.let { hotspot ->
@@ -507,11 +512,17 @@ private fun HotspotControlsAndOverlays(
             }
 
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+                val currentLocationLabel = stringResource(R.string.action_current_location)
                 FloatingActionButton(onClick = onCurrentLocationClick, modifier = Modifier.padding(Spacing.lg)) {
                     if (isLocating) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        // Semantics kept identical to the Icon it replaces — without this, a screen
+                        // reader announces this button with no name at all while it is locating.
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp).semantics { contentDescription = currentLocationLabel },
+                            strokeWidth = 2.dp
+                        )
                     } else {
-                        Icon(Icons.Filled.MyLocation, contentDescription = stringResource(R.string.action_current_location))
+                        Icon(Icons.Filled.MyLocation, contentDescription = currentLocationLabel)
                     }
                 }
             }
@@ -595,11 +606,17 @@ private fun TimeRangeRow(
             loading = { it == pendingRange },
             modifier = Modifier.weight(1f)
         )
+        val refreshLabel = stringResource(R.string.action_refresh)
         IconButton(onClick = onRefresh, enabled = !requestActive) {
             if (isLoadingSubsequent && pendingRange == null) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                // Semantics kept identical to the Icon it replaces — without this, a screen reader
+                // announces this button with no name at all while it is loading.
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp).semantics { contentDescription = refreshLabel },
+                    strokeWidth = 2.dp
+                )
             } else {
-                Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                Icon(Icons.Filled.Refresh, contentDescription = refreshLabel)
             }
         }
     }

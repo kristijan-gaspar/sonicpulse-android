@@ -48,7 +48,13 @@
     <!-- Monitoring — last detection + send status (G) -->
     <string name="section_last_detection">Last detection</string>
     <string name="no_detections_yet">No detections yet this session</string>
+    <!-- Peak level with its unit, e.g. "-18.4 dBFS" — unit is intentionally identical in every language -->
+    <string name="peak_level_dbfs">%1$.1f dBFS</string>
     <string name="coordinates_unavailable">Coordinates unavailable</string>
+    <!-- Labeled lat/lon pair, e.g. "Lat: 45.81234 · Lon: 15.97654" — args are already-formatted
+         numeric strings (fixed precision, dot decimal separator regardless of app language), so
+         this template only supplies the labels; "Lat"/"Lon" are kept identical in every language. -->
+    <string name="coordinates_format">Lat: %1$s · Lon: %2$s</string>
     <string name="send_success">Sent</string>
     <string name="send_failed">Send failed</string>
     <string name="send_in_progress">Sending…</string>
@@ -161,14 +167,6 @@
     <string name="permission_status_granted">Granted</string>
     <string name="permission_status_denied">Denied</string>
     <string name="settings_action_open">Open</string>
-
-    <!-- Settings — section D: Diagnostics -->
-    <string name="settings_section_diagnostics">Diagnostics</string>
-    <string name="diagnostics_successful_submissions">Successful submissions</string>
-    <string name="diagnostics_local_detections">Local detections</string>
-    <string name="diagnostics_network_errors">Network errors</string>
-    <string name="diagnostics_dropped_location">Dropped — location</string>
-    <string name="diagnostics_permission_failures">Permission failures</string>
 
     <!-- Settings — section E: Device ID -->
     <string name="settings_section_device_id">Device ID</string>

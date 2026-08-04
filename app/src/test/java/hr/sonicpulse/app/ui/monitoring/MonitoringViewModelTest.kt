@@ -224,7 +224,7 @@ class MonitoringViewModelTest {
     }
 
     @Test
-    fun `a detection maps peakDbfs, timestamp, coordinatesText and Sending status`() = runTest(testDispatcher) {
+    fun `a detection maps peakDbfs, timestamp, latitudeText, longitudeText and Sending status`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
         val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory())
         val target = detection(location = LocationSnapshot.Valid(45.8, 16.0, 8.0f))
@@ -236,7 +236,8 @@ class MonitoringViewModelTest {
         requireNotNull(last)
         assertEquals(-10.0, last.peakDbfs, 0.0)
         assertEquals(expectedTimestampText(target.peakTimeClient), last.timestampText)
-        assertEquals("45.80000, 16.00000", last.coordinatesText)
+        assertEquals("45.80000", last.latitudeText)
+        assertEquals("16.00000", last.longitudeText)
         assertEquals(SendResult.Sending, last.sendResult)
     }
 
