@@ -20,12 +20,10 @@ import hr.sonicpulse.app.repository.DefaultMonitoringStateRepository
 import hr.sonicpulse.app.repository.DetectionsRepository
 import hr.sonicpulse.app.repository.HotspotsRepository
 import hr.sonicpulse.app.repository.MonitoringStateRepository
-import hr.sonicpulse.app.service.notification.AndroidDetectionNotifier
-import hr.sonicpulse.app.service.notification.AndroidDetectionVibrator
-import hr.sonicpulse.app.service.notification.DetectionNotifier
-import hr.sonicpulse.app.service.notification.DetectionVibrator
 import hr.sonicpulse.app.ui.permissions.AndroidPermissionChecker
 import hr.sonicpulse.app.ui.permissions.PermissionChecker
+import hr.sonicpulse.app.ui.theme.AppLanguageController
+import hr.sonicpulse.app.ui.theme.DefaultAppLanguageController
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -72,17 +70,12 @@ abstract class AppModule {
     ): AppSettingsRepository
 
     @Binds
-    abstract fun bindDetectionNotifier(
-        impl: AndroidDetectionNotifier
-    ): DetectionNotifier
-
-    @Binds
-    abstract fun bindDetectionVibrator(
-        impl: AndroidDetectionVibrator
-    ): DetectionVibrator
-
-    @Binds
     abstract fun bindPermissionChecker(
         impl: AndroidPermissionChecker
     ): PermissionChecker
+
+    @Binds
+    abstract fun bindAppLanguageController(
+        impl: DefaultAppLanguageController
+    ): AppLanguageController
 }

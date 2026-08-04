@@ -12,50 +12,56 @@ import hr.sonicpulse.app.domain.model.ThemeMode
 import hr.sonicpulse.app.repository.MonitoringState
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.app.ui.permissions.PermissionChecker
+import hr.sonicpulse.app.ui.theme.AppLanguageController
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * Combines persisted [AppSettings][hr.sonicpulse.app.domain.model.AppSettings], live permission
- * status, monitoring diagnostics, the installation id and the app version into one immutable
- * [SettingsUiState] — [SettingsScreen][SettingsScreen] only ever renders this and forwards user
- * actions back here, it never touches DataStore or a repository directly (§4).
+ * Combines persisted [AppSettings][hr.sonicpulse.app.domain.model.AppSettings] (theme only), the
+ * current language from [AppLanguageController], live permission status, monitoring diagnostics,
+ * the installation id and the app version into one immutable [SettingsUiState] —
+ * [SettingsScreen][SettingsScreen] only ever renders this and forwards user actions back here, it
+ * never touches DataStore, a repository or [AppLanguageController] directly (§4).
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val appSettingsRepository: AppSettingsRepository,
     monitoringStateRepository: MonitoringStateRepository,
     private val installationIdRepository: InstallationIdRepository,
-    private val permissionChecker: PermissionChecker
+    private val permissionChecker: PermissionChecker,
+    private val appLanguageController: AppLanguageController
 ) : ViewModel() {
 
     private val _permissionStatus = MutableStateFlow(currentPermissionStatus())
     private val _installationId = MutableStateFlow<String?>(null)
+    // Seeded from AppCompat's own current resolution (stored locale, or the effective system
+    // locale if none was ever stored) — never a synthetic AppSettings() default. AppLanguageController
+    // exposes no Flow of its own, so this is the ViewModel's locally-cached view of it, updated only
+    // by this ViewModel's own setLanguage() calls — nothing else in the app changes the language.
+    private val _language = MutableStateFlow(appLanguageController.currentLanguage())
 
     val uiState: StateFlow<SettingsUiState> = combine(
         appSettingsRepository.settings,
         monitoringStateRepository.state,
         _permissionStatus,
-        _installationId
-    ) { settings, monitoringState, permissions, installationId ->
+        _installationId,
+        _language
+    ) { settings, monitoringState, permissions, installationId, language ->
         SettingsUiState(
             themeMode = settings.themeMode,
-            language = settings.language,
-            detectionNotificationEnabled = settings.detectionNotificationEnabled,
-            detectionVibrationEnabled = settings.detectionVibrationEnabled,
+            language = language,
             microphonePermissionGranted = permissions.microphoneGranted,
             preciseLocationPermissionGranted = permissions.preciseLocationGranted,
             successfulSubmissions = monitoringState.submissionCounters.submissionSucceeded,
-            localDetections = localDetectionCount(monitoringState),
+            localDetections = monitoringState.localDetectionCount,
             networkErrors = monitoringState.submissionCounters.droppedNetwork,
             droppedLocation = droppedLocationCount(monitoringState),
-            droppedPermissions = monitoringState.submissionCounters.droppedPermission,
+            permissionFailures = monitoringState.submissionCounters.permissionFailures,
             installationId = installationId,
             versionName = BuildConfig.VERSION_NAME
         )
@@ -84,19 +90,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { appSettingsRepository.setThemeMode(mode) }
     }
 
+    /** A no-op — never calls [AppLanguageController.setLanguage] — when [language] already equals
+     * the currently effective language. */
     fun setLanguage(language: AppLanguage) {
         if (uiState.value.language == language) return
-        viewModelScope.launch { appSettingsRepository.setLanguage(language) }
-    }
-
-    fun setDetectionNotificationEnabled(enabled: Boolean) {
-        if (uiState.value.detectionNotificationEnabled == enabled) return
-        viewModelScope.launch { appSettingsRepository.setDetectionNotificationEnabled(enabled) }
-    }
-
-    fun setDetectionVibrationEnabled(enabled: Boolean) {
-        if (uiState.value.detectionVibrationEnabled == enabled) return
-        viewModelScope.launch { appSettingsRepository.setDetectionVibrationEnabled(enabled) }
+        appLanguageController.setLanguage(language)
+        _language.value = language
     }
 
     private fun currentPermissionStatus(): PermissionStatus = PermissionStatus(
@@ -106,11 +105,6 @@ class SettingsViewModel @Inject constructor(
 }
 
 private data class PermissionStatus(val microphoneGranted: Boolean, val preciseLocationGranted: Boolean)
-
-/** Capped by [hr.sonicpulse.app.repository.SessionDetectionRetention] at 100 retained detections —
- * the true count for an exceptionally long session with more local detections than that would be
- * undercounted; there is no separate uncapped counter to read from instead. */
-private fun localDetectionCount(state: MonitoringState): Int = state.sessionDetections.size
 
 private fun droppedLocationCount(state: MonitoringState): Int =
     state.submissionCounters.droppedNoLocation +

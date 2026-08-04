@@ -3,9 +3,9 @@ package hr.sonicpulse.app.data.datastore
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
-import hr.sonicpulse.app.domain.model.AppLanguage
 import hr.sonicpulse.app.domain.model.AppSettings
 import hr.sonicpulse.app.domain.model.ThemeMode
 import java.io.IOException
@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -26,7 +27,7 @@ class DefaultAppSettingsRepositoryTest {
         PreferenceDataStoreFactory.create(produceFile = { tempFolder.newFile(fileName) })
 
     @Test
-    fun `empty DataStore emits AppSettings defaults`() = runTest {
+    fun `empty DataStore emits the remaining defaults`() = runTest {
         val repository = DefaultAppSettingsRepository(newDataStore("a.preferences_pb"))
 
         val settings = repository.settings.first()
@@ -45,36 +46,6 @@ class DefaultAppSettingsRepositoryTest {
     }
 
     @Test
-    fun `language persists across a fresh repository instance backed by the same store`() = runTest {
-        val dataStore = newDataStore("c.preferences_pb")
-        DefaultAppSettingsRepository(dataStore).setLanguage(AppLanguage.English)
-
-        val settings = DefaultAppSettingsRepository(dataStore).settings.first()
-
-        assertEquals(AppLanguage.English, settings.language)
-    }
-
-    @Test
-    fun `detection notification toggle persists across a fresh repository instance`() = runTest {
-        val dataStore = newDataStore("d.preferences_pb")
-        DefaultAppSettingsRepository(dataStore).setDetectionNotificationEnabled(true)
-
-        val settings = DefaultAppSettingsRepository(dataStore).settings.first()
-
-        assertEquals(true, settings.detectionNotificationEnabled)
-    }
-
-    @Test
-    fun `vibration toggle persists across a fresh repository instance`() = runTest {
-        val dataStore = newDataStore("e.preferences_pb")
-        DefaultAppSettingsRepository(dataStore).setDetectionVibrationEnabled(true)
-
-        val settings = DefaultAppSettingsRepository(dataStore).settings.first()
-
-        assertEquals(true, settings.detectionVibrationEnabled)
-    }
-
-    @Test
     fun `an unknown persisted theme value falls back to the default`() = runTest {
         val dataStore = newDataStore("f.preferences_pb")
         dataStore.updateData { it.toMutablePreferences().apply { this[stringPreferencesKey("theme_mode")] = "Neon" } }
@@ -85,21 +56,36 @@ class DefaultAppSettingsRepositoryTest {
     }
 
     @Test
-    fun `an unknown persisted language value falls back to the default`() = runTest {
-        val dataStore = newDataStore("g.preferences_pb")
-        dataStore.updateData { it.toMutablePreferences().apply { this[stringPreferencesKey("language")] = "Klingon" } }
-
-        val settings = DefaultAppSettingsRepository(dataStore).settings.first()
-
-        assertEquals(AppLanguage.Croatian, settings.language)
-    }
-
-    @Test
     fun `a write failure does not throw`() = runTest {
         val repository = DefaultAppSettingsRepository(AlwaysFailingDataStore)
 
         // Must complete without propagating the underlying IOException.
         repository.setThemeMode(ThemeMode.Light)
+    }
+
+    @Test
+    fun `removed alert settings keys are ignored if present from a previous app version`() = runTest {
+        val dataStore = newDataStore("i.preferences_pb")
+        dataStore.updateData {
+            it.toMutablePreferences().apply {
+                this[booleanPreferencesKey("detection_notification_enabled")] = true
+                this[booleanPreferencesKey("detection_vibration_enabled")] = true
+            }
+        }
+
+        val settings = DefaultAppSettingsRepository(dataStore).settings.first()
+
+        assertEquals(AppSettings(), settings)
+    }
+
+    @Test
+    fun `language is not persisted in the general settings DataStore`() = runTest {
+        val dataStore = newDataStore("j.preferences_pb")
+        DefaultAppSettingsRepository(dataStore).setThemeMode(ThemeMode.Light)
+
+        val rawPreferences = dataStore.data.first()
+
+        assertNull(rawPreferences[stringPreferencesKey("language")])
     }
 
     /** A [DataStore] whose every write throws — proves [DefaultAppSettingsRepository] swallows a

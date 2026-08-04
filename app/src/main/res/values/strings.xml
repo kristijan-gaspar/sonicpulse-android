@@ -154,13 +154,6 @@
     <string name="settings_monitoring_notification_title">Monitoring notification</string>
     <string name="settings_monitoring_notification_description">Mandatory for background monitoring</string>
     <string name="settings_always_enabled">Always enabled</string>
-    <string name="settings_detection_notification_title">Detection notification</string>
-    <string name="settings_detection_notification_description">Notify when a new detection occurs</string>
-    <string name="settings_detection_vibration_title">Detection vibration</string>
-    <string name="settings_detection_vibration_description">Vibrate when a new detection occurs</string>
-    <string name="detection_alert_channel_name">Detection alerts</string>
-    <string name="detection_alert_title">New detection</string>
-    <string name="detection_alert_text">A loud sound was detected nearby</string>
 
     <!-- Settings — section C: Permissions -->
     <string name="settings_section_permissions">Permissions</string>
@@ -175,7 +168,7 @@
     <string name="diagnostics_local_detections">Local detections</string>
     <string name="diagnostics_network_errors">Network errors</string>
     <string name="diagnostics_dropped_location">Dropped — location</string>
-    <string name="diagnostics_dropped_permissions">Dropped — permissions</string>
+    <string name="diagnostics_permission_failures">Permission failures</string>
 
     <!-- Settings — section E: Device ID -->
     <string name="settings_section_device_id">Device ID</string>

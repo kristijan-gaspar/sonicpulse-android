@@ -590,19 +590,19 @@ class DefaultMonitoringStateRepositoryTest {
     }
 
     @Test
-    fun `monitoringStartupFailed with a microphone or location permission denial increments droppedPermission`() {
+    fun `monitoringStartupFailed with a microphone or location permission denial increments permissionFailures`() {
         listOf(MonitoringStartupFailure.MicrophonePermissionDenied, MonitoringStartupFailure.LocationPermissionDenied)
             .forEach { failure ->
                 val repository = DefaultMonitoringStateRepository()
 
                 repository.monitoringStartupFailed(failure)
 
-                assertEquals("failure $failure", 1, repository.state.value.submissionCounters.droppedPermission)
+                assertEquals("failure $failure", 1, repository.state.value.submissionCounters.permissionFailures)
             }
     }
 
     @Test
-    fun `monitoringStartupFailed with a non-permission failure does not increment droppedPermission`() {
+    fun `monitoringStartupFailed with a non-permission failure does not increment permissionFailures`() {
         listOf(
             MonitoringStartupFailure.LocationServicesDisabled,
             MonitoringStartupFailure.LocationStartFailed(RuntimeException()),
@@ -612,37 +612,79 @@ class DefaultMonitoringStateRepositoryTest {
 
             repository.monitoringStartupFailed(failure)
 
-            assertEquals("failure $failure", 0, repository.state.value.submissionCounters.droppedPermission)
+            assertEquals("failure $failure", 0, repository.state.value.submissionCounters.permissionFailures)
         }
     }
 
     @Test
-    fun `locationRefreshFailed with PermissionDenied increments droppedPermission`() {
+    fun `locationRefreshFailed with PermissionDenied increments permissionFailures`() {
         val repository = DefaultMonitoringStateRepository()
 
         repository.locationRefreshFailed(LocationRefreshFailure.PermissionDenied)
 
-        assertEquals(1, repository.state.value.submissionCounters.droppedPermission)
+        assertEquals(1, repository.state.value.submissionCounters.permissionFailures)
     }
 
     @Test
-    fun `locationRefreshFailed with a non-permission failure does not increment droppedPermission`() {
+    fun `locationRefreshFailed with a non-permission failure does not increment permissionFailures`() {
         listOf(LocationRefreshFailure.LocationServicesDisabled, LocationRefreshFailure.Failed).forEach { failure ->
             val repository = DefaultMonitoringStateRepository()
 
             repository.locationRefreshFailed(failure)
 
-            assertEquals("failure $failure", 0, repository.state.value.submissionCounters.droppedPermission)
+            assertEquals("failure $failure", 0, repository.state.value.submissionCounters.permissionFailures)
         }
     }
 
     @Test
-    fun `monitoringStarted resets droppedPermission from a previous session`() {
+    fun `monitoringStarted resets permissionFailures from a previous session`() {
         val repository = DefaultMonitoringStateRepository()
         repository.monitoringStartupFailed(MonitoringStartupFailure.MicrophonePermissionDenied)
 
         repository.monitoringStarted()
 
-        assertEquals(0, repository.state.value.submissionCounters.droppedPermission)
+        assertEquals(0, repository.state.value.submissionCounters.permissionFailures)
+    }
+
+    @Test
+    fun `localDetectionOccurred increments localDetectionCount exactly once`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repository.localDetectionOccurred(detection())
+
+        assertEquals(1, repository.state.value.localDetectionCount)
+    }
+
+    @Test
+    fun `submission status changes do not affect localDetectionCount`() {
+        val repository = DefaultMonitoringStateRepository()
+        val target = detection()
+        repository.localDetectionOccurred(target)
+
+        repository.submissionSucceeded(target.localEventId)
+        repository.submissionFailed(target.localEventId, SubmissionFailureReason.NetworkError)
+
+        assertEquals(1, repository.state.value.localDetectionCount)
+    }
+
+    @Test
+    fun `monitoringStarted resets localDetectionCount from a previous session`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.localDetectionOccurred(detection())
+        check(repository.state.value.localDetectionCount > 0)
+
+        repository.monitoringStarted()
+
+        assertEquals(0, repository.state.value.localDetectionCount)
+    }
+
+    @Test
+    fun `more than 100 local detections still produce the correct uncapped count while the retained list stays capped at 100`() {
+        val repository = DefaultMonitoringStateRepository()
+
+        repeat(105) { repository.localDetectionOccurred(detection(peakDbfs = it.toDouble())) }
+
+        assertEquals(105, repository.state.value.localDetectionCount)
+        assertEquals(100, repository.state.value.sessionDetections.size)
     }
 }

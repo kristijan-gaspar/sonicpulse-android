@@ -47,7 +47,7 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
                 startupError = failure,
                 captureError = null,
                 errorEventId = it.errorEventId + 1,
-                submissionCounters = SubmissionTransitions.incrementDroppedPermissionIfApplicable(it.submissionCounters, failure)
+                submissionCounters = SubmissionTransitions.incrementPermissionFailuresIfApplicable(it.submissionCounters, failure)
             )
         }
     }
@@ -66,7 +66,12 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
 
     override fun localDetectionOccurred(detection: SessionDetection) {
         occurredDetections += detection
-        _state.update { it.copy(sessionDetections = SessionDetectionRetention.append(it.sessionDetections, detection)) }
+        _state.update {
+            it.copy(
+                sessionDetections = SessionDetectionRetention.append(it.sessionDetections, detection),
+                localDetectionCount = it.localDetectionCount + 1
+            )
+        }
     }
 
     override fun submissionSucceeded(localEventId: UUID) {
@@ -89,7 +94,7 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
             it.copy(
                 locationRefreshError = failure,
                 errorEventId = it.errorEventId + 1,
-                submissionCounters = SubmissionTransitions.incrementDroppedPermissionIfApplicable(it.submissionCounters, failure)
+                submissionCounters = SubmissionTransitions.incrementPermissionFailuresIfApplicable(it.submissionCounters, failure)
             )
         }
     }

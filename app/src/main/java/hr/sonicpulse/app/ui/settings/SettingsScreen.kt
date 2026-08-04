@@ -1,14 +1,9 @@
 package hr.sonicpulse.app.ui.settings
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,10 +28,8 @@ import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.NotificationImportant
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -49,7 +42,6 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -70,7 +62,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -110,26 +101,12 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // The permission dialog's own result is intentionally unused: AndroidDetectionNotifier
-    // re-checks POST_NOTIFICATIONS itself at post-time regardless of what happens here, so a
-    // denial here needs no separate handling — it simply means future notifications stay silent.
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { }
-
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
         SettingsContent(
             uiState = uiState,
             modifier = Modifier.padding(innerPadding),
             onThemeSelect = viewModel::setThemeMode,
             onLanguageSelect = viewModel::setLanguage,
-            onDetectionNotificationToggle = { enabled ->
-                viewModel.setDetectionNotificationEnabled(enabled)
-                if (enabled && needsNotificationPermissionRequest(context)) {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            },
-            onDetectionVibrationToggle = viewModel::setDetectionVibrationEnabled,
             onOpenAppSettings = { openAppSettingsSafely(context) },
             onCopyDeviceId = { id ->
                 clipboardManager.setText(AnnotatedString(id))
@@ -138,12 +115,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         )
     }
 }
-
-/** Only ever true right before an explicit, visible user action (flipping the switch on) — never
- * evaluated merely because the screen was opened or resumed. */
-private fun needsNotificationPermissionRequest(context: Context): Boolean =
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
 
 private fun openAppSettingsSafely(context: Context) {
     val intent = Intent(
@@ -162,8 +133,6 @@ internal fun SettingsContent(
     uiState: SettingsUiState,
     onThemeSelect: (ThemeMode) -> Unit,
     onLanguageSelect: (AppLanguage) -> Unit,
-    onDetectionNotificationToggle: (Boolean) -> Unit,
-    onDetectionVibrationToggle: (Boolean) -> Unit,
     onOpenAppSettings: () -> Unit,
     onCopyDeviceId: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -178,12 +147,7 @@ internal fun SettingsContent(
         verticalArrangement = Arrangement.spacedBy(Spacing.xl)
     ) {
         AppearanceSection(uiState.themeMode, uiState.language, onThemeSelect, onLanguageSelect)
-        NotificationsSection(
-            uiState.detectionNotificationEnabled,
-            uiState.detectionVibrationEnabled,
-            onDetectionNotificationToggle,
-            onDetectionVibrationToggle
-        )
+        NotificationsSection()
         PermissionsSection(uiState.microphonePermissionGranted, uiState.preciseLocationPermissionGranted, onOpenAppSettings)
         DiagnosticsSection(uiState)
         DeviceIdSection(uiState.installationId, onCopyDeviceId)
@@ -291,12 +255,7 @@ private fun LanguageSegmentedControl(selected: AppLanguage, onSelect: (AppLangua
 // --- Section B: Notifications ---
 
 @Composable
-private fun NotificationsSection(
-    detectionNotificationEnabled: Boolean,
-    detectionVibrationEnabled: Boolean,
-    onDetectionNotificationToggle: (Boolean) -> Unit,
-    onDetectionVibrationToggle: (Boolean) -> Unit
-) {
+private fun NotificationsSection() {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         SectionHeader(stringResource(R.string.settings_section_notifications))
         AppCard {
@@ -310,22 +269,6 @@ private fun NotificationsSection(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
-                }
-            )
-            SettingsRow(
-                icon = Icons.Filled.NotificationImportant,
-                title = stringResource(R.string.settings_detection_notification_title),
-                description = stringResource(R.string.settings_detection_notification_description),
-                trailing = {
-                    Switch(checked = detectionNotificationEnabled, onCheckedChange = onDetectionNotificationToggle)
-                }
-            )
-            SettingsRow(
-                icon = Icons.Filled.Vibration,
-                title = stringResource(R.string.settings_detection_vibration_title),
-                description = stringResource(R.string.settings_detection_vibration_description),
-                trailing = {
-                    Switch(checked = detectionVibrationEnabled, onCheckedChange = onDetectionVibrationToggle)
                 }
             )
         }
@@ -397,7 +340,7 @@ private fun DiagnosticsSection(uiState: SettingsUiState) {
             DiagnosticRow(stringResource(R.string.diagnostics_local_detections), uiState.localDetections, MaterialTheme.colorScheme.onSurface)
             DiagnosticRow(stringResource(R.string.diagnostics_network_errors), uiState.networkErrors, SemanticColors.Danger)
             DiagnosticRow(stringResource(R.string.diagnostics_dropped_location), uiState.droppedLocation, SemanticColors.Warning)
-            DiagnosticRow(stringResource(R.string.diagnostics_dropped_permissions), uiState.droppedPermissions, SemanticColors.Warning)
+            DiagnosticRow(stringResource(R.string.diagnostics_permission_failures), uiState.permissionFailures, SemanticColors.Warning)
         }
     }
 }

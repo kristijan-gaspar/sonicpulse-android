@@ -152,13 +152,6 @@
     <string name="settings_monitoring_notification_title">Obavijest o praćenju</string>
     <string name="settings_monitoring_notification_description">Obavezno za praćenje u pozadini</string>
     <string name="settings_always_enabled">Uvijek omogućeno</string>
-    <string name="settings_detection_notification_title">Obavijest o detekciji</string>
-    <string name="settings_detection_notification_description">Obavijesti kad dođe do nove detekcije</string>
-    <string name="settings_detection_vibration_title">Vibracija pri detekciji</string>
-    <string name="settings_detection_vibration_description">Vibriraj kad dođe do nove detekcije</string>
-    <string name="detection_alert_channel_name">Obavijesti o detekciji</string>
-    <string name="detection_alert_title">Nova detekcija</string>
-    <string name="detection_alert_text">U blizini je otkriven glasan zvuk</string>
 
     <!-- Settings — section C: Permissions -->
     <string name="settings_section_permissions">Dozvole</string>
@@ -173,7 +166,7 @@
     <string name="diagnostics_local_detections">Lokalne detekcije</string>
     <string name="diagnostics_network_errors">Mrežne pogreške</string>
     <string name="diagnostics_dropped_location">Odbačeno — lokacija</string>
-    <string name="diagnostics_dropped_permissions">Odbačeno — dozvole</string>
+    <string name="diagnostics_permission_failures">Pogreške dozvola</string>
 
     <!-- Settings — section E: Device ID -->
     <string name="settings_section_device_id">ID uređaja</string>

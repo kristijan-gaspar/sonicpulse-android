@@ -15,6 +15,11 @@ data class MonitoringState(
     val dbfsHistory: List<Double> = emptyList(),
     val engineState: DetectionState = DetectionState.IDLE,
     val sessionDetections: List<SessionDetection> = emptyList(),
+    /** Uncapped count of local detections this session — unlike [sessionDetections], which
+     * intentionally retains only the latest [hr.sonicpulse.app.repository.SessionDetectionRetention.MAX_SESSION_DETECTIONS],
+     * this never shrinks as older entries are evicted and is never affected by a later submission
+     * outcome (Settings §4). */
+    val localDetectionCount: Int = 0,
     val captureError: AudioCaptureError? = null,
     val startupError: MonitoringStartupFailure? = null,
     /** Bumped on every monitoringFailed/monitoringStartupFailed call, even repeats of the same

@@ -51,7 +51,7 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
                 startupError = failure,
                 captureError = null,
                 errorEventId = it.errorEventId + 1,
-                submissionCounters = SubmissionTransitions.incrementDroppedPermissionIfApplicable(it.submissionCounters, failure)
+                submissionCounters = SubmissionTransitions.incrementPermissionFailuresIfApplicable(it.submissionCounters, failure)
             )
         }
     }
@@ -71,7 +71,12 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     }
 
     override fun localDetectionOccurred(detection: SessionDetection) {
-        _state.update { it.copy(sessionDetections = SessionDetectionRetention.append(it.sessionDetections, detection)) }
+        _state.update {
+            it.copy(
+                sessionDetections = SessionDetectionRetention.append(it.sessionDetections, detection),
+                localDetectionCount = it.localDetectionCount + 1
+            )
+        }
     }
 
     override fun submissionSucceeded(localEventId: UUID) {
@@ -91,7 +96,7 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
             it.copy(
                 locationRefreshError = failure,
                 errorEventId = it.errorEventId + 1,
-                submissionCounters = SubmissionTransitions.incrementDroppedPermissionIfApplicable(it.submissionCounters, failure)
+                submissionCounters = SubmissionTransitions.incrementPermissionFailuresIfApplicable(it.submissionCounters, failure)
             )
         }
     }

@@ -35,26 +35,26 @@ internal object SubmissionTransitions {
         )
     }
 
-    /** [SubmissionCounters.droppedPermission] only counts the two startup failures that are
+    /** [SubmissionCounters.permissionFailures] only counts the two startup failures that are
      * actually permission-related — [MonitoringStartupFailure.LocationServicesDisabled] and the
      * two `*StartFailed` variants are unrelated failure modes, never counted here. */
-    fun incrementDroppedPermissionIfApplicable(
+    fun incrementPermissionFailuresIfApplicable(
         counters: SubmissionCounters,
         failure: MonitoringStartupFailure
     ): SubmissionCounters = when (failure) {
         MonitoringStartupFailure.MicrophonePermissionDenied,
         MonitoringStartupFailure.LocationPermissionDenied ->
-            counters.copy(droppedPermission = counters.droppedPermission + 1)
+            counters.copy(permissionFailures = counters.permissionFailures + 1)
         MonitoringStartupFailure.LocationServicesDisabled,
         is MonitoringStartupFailure.LocationStartFailed,
         is MonitoringStartupFailure.ForegroundStartFailed -> counters
     }
 
-    fun incrementDroppedPermissionIfApplicable(
+    fun incrementPermissionFailuresIfApplicable(
         counters: SubmissionCounters,
         failure: LocationRefreshFailure
     ): SubmissionCounters = if (failure is LocationRefreshFailure.PermissionDenied) {
-        counters.copy(droppedPermission = counters.droppedPermission + 1)
+        counters.copy(permissionFailures = counters.permissionFailures + 1)
     } else {
         counters
     }

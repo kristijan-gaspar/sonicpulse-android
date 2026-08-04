@@ -13,6 +13,7 @@ import hr.sonicpulse.app.domain.model.ThemeMode
 import hr.sonicpulse.app.repository.FakeMonitoringStateRepository
 import hr.sonicpulse.app.repository.SubmissionCounters
 import hr.sonicpulse.app.ui.permissions.FakePermissionChecker
+import hr.sonicpulse.app.ui.theme.FakeAppLanguageController
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -60,27 +61,25 @@ class SettingsViewModelTest {
         settingsRepository: FakeAppSettingsRepository = FakeAppSettingsRepository(),
         monitoringStateRepository: FakeMonitoringStateRepository = FakeMonitoringStateRepository(),
         installationIdRepository: FakeInstallationIdRepository = FakeInstallationIdRepository(fixedId = "fixed-id"),
-        permissionChecker: FakePermissionChecker = FakePermissionChecker()
-    ) = SettingsViewModel(settingsRepository, monitoringStateRepository, installationIdRepository, permissionChecker)
-        .also { advanceUntilIdle() }
+        permissionChecker: FakePermissionChecker = FakePermissionChecker(),
+        appLanguageController: FakeAppLanguageController = FakeAppLanguageController()
+    ) = SettingsViewModel(
+        settingsRepository,
+        monitoringStateRepository,
+        installationIdRepository,
+        permissionChecker,
+        appLanguageController
+    ).also { advanceUntilIdle() }
 
     @Test
     fun `maps persisted settings into ui state`() = runTest(testDispatcher) {
-        val settingsRepository = FakeAppSettingsRepository(
-            AppSettings(
-                themeMode = ThemeMode.Light,
-                language = AppLanguage.English,
-                detectionNotificationEnabled = true,
-                detectionVibrationEnabled = true
-            )
-        )
+        val settingsRepository = FakeAppSettingsRepository(AppSettings(themeMode = ThemeMode.Light))
+        val languageController = FakeAppLanguageController(initial = AppLanguage.English)
 
-        val state = viewModel(settingsRepository = settingsRepository).uiState.value
+        val state = viewModel(settingsRepository = settingsRepository, appLanguageController = languageController).uiState.value
 
         assertEquals(ThemeMode.Light, state.themeMode)
         assertEquals(AppLanguage.English, state.language)
-        assertTrue(state.detectionNotificationEnabled)
-        assertTrue(state.detectionVibrationEnabled)
     }
 
     @Test
@@ -121,15 +120,15 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `maps local detection count from session detections`() = runTest(testDispatcher) {
+    fun `maps the uncapped local detection count directly, not the capped retained list`() = runTest(testDispatcher) {
         val monitoringStateRepository = FakeMonitoringStateRepository()
         monitoringStateRepository.monitoringStarted()
-        monitoringStateRepository.localDetectionOccurred(detection())
-        monitoringStateRepository.localDetectionOccurred(detection())
+        repeat(101) { monitoringStateRepository.localDetectionOccurred(detection()) }
 
         val state = viewModel(monitoringStateRepository = monitoringStateRepository).uiState.value
 
-        assertEquals(2, state.localDetections)
+        assertEquals(101, state.localDetections)
+        assertEquals(100, monitoringStateRepository.state.value.sessionDetections.size)
     }
 
     @Test
@@ -165,13 +164,13 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `maps the real permission-drop diagnostic`() = runTest(testDispatcher) {
+    fun `maps the real permissionFailures diagnostic`() = runTest(testDispatcher) {
         val monitoringStateRepository = FakeMonitoringStateRepository()
-        monitoringStateRepository.setState(monitoringStateRepository.state.value.copy(submissionCounters = SubmissionCounters(droppedPermission = 4)))
+        monitoringStateRepository.setState(monitoringStateRepository.state.value.copy(submissionCounters = SubmissionCounters(permissionFailures = 4)))
 
         val state = viewModel(monitoringStateRepository = monitoringStateRepository).uiState.value
 
-        assertEquals(4, state.droppedPermissions)
+        assertEquals(4, state.permissionFailures)
     }
 
     @Test
@@ -202,36 +201,15 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `setLanguage calls the repository`() = runTest(testDispatcher) {
-        val settingsRepository = FakeAppSettingsRepository()
-        val viewModel = viewModel(settingsRepository = settingsRepository)
+    fun `changing language calls the correct AppLanguageController operation`() = runTest(testDispatcher) {
+        val languageController = FakeAppLanguageController(initial = AppLanguage.Croatian)
+        val viewModel = viewModel(appLanguageController = languageController)
 
         viewModel.setLanguage(AppLanguage.English)
         advanceUntilIdle()
 
-        assertEquals(listOf(AppLanguage.English), settingsRepository.setLanguageCalls)
-    }
-
-    @Test
-    fun `setDetectionNotificationEnabled calls the repository`() = runTest(testDispatcher) {
-        val settingsRepository = FakeAppSettingsRepository()
-        val viewModel = viewModel(settingsRepository = settingsRepository)
-
-        viewModel.setDetectionNotificationEnabled(true)
-        advanceUntilIdle()
-
-        assertEquals(listOf(true), settingsRepository.setDetectionNotificationEnabledCalls)
-    }
-
-    @Test
-    fun `setDetectionVibrationEnabled calls the repository`() = runTest(testDispatcher) {
-        val settingsRepository = FakeAppSettingsRepository()
-        val viewModel = viewModel(settingsRepository = settingsRepository)
-
-        viewModel.setDetectionVibrationEnabled(true)
-        advanceUntilIdle()
-
-        assertEquals(listOf(true), settingsRepository.setDetectionVibrationEnabledCalls)
+        assertEquals(listOf(AppLanguage.English), languageController.setLanguageCalls)
+        assertEquals(AppLanguage.English, viewModel.uiState.value.language)
     }
 
     @Test
@@ -246,14 +224,24 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `selecting the already-active language does not write to the repository`() = runTest(testDispatcher) {
-        val settingsRepository = FakeAppSettingsRepository(AppSettings(language = AppLanguage.Croatian))
-        val viewModel = viewModel(settingsRepository = settingsRepository)
+    fun `selecting the currently effective language is a no-op`() = runTest(testDispatcher) {
+        val languageController = FakeAppLanguageController(initial = AppLanguage.Croatian)
+        val viewModel = viewModel(appLanguageController = languageController)
 
         viewModel.setLanguage(AppLanguage.Croatian)
         advanceUntilIdle()
 
-        assertTrue(settingsRepository.setLanguageCalls.isEmpty())
+        assertTrue(languageController.setLanguageCalls.isEmpty())
+    }
+
+    @Test
+    fun `constructing the ViewModel only reads the current language, never writes it`() = runTest(testDispatcher) {
+        val languageController = FakeAppLanguageController(initial = AppLanguage.English)
+
+        val viewModel = viewModel(appLanguageController = languageController)
+
+        assertEquals(AppLanguage.English, viewModel.uiState.value.language)
+        assertTrue(languageController.setLanguageCalls.isEmpty())
     }
 
     @Test
