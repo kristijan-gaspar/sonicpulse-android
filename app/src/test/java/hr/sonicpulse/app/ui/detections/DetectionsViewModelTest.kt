@@ -9,6 +9,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -335,6 +336,215 @@ class DetectionsViewModelTest {
         val finalPeaks = viewModel.uiState.value.sections.flatMap { it.items }.map { it.peakDbfs }
         assertEquals(listOf(-3.0), finalPeaks)
     }
+
+    // --- Refresh blocks paging (item 1) ---
+
+    @Test
+    fun `loadNextPage during manual refresh issues no repository request`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 5L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        check(viewModel.uiState.value.canLoadMore)
+
+        viewModel.refresh()
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        // Only the two refresh() calls (cursor = null) went out — no paging request in between.
+        assertEquals(listOf(null, null), repository.requestedCursors)
+    }
+
+    @Test
+    fun `an attempted loadNextPage during refresh cannot affect the refreshed result`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection(peakDbfs = -1.0)), nextCursor = 5L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        repository.pages = mapOf(null to DetectionPage(items = listOf(detection(peakDbfs = -2.0)), nextCursor = 7L))
+        viewModel.refresh()
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf(-2.0), state.sections.flatMap { it.items }.map { it.peakDbfs })
+        assertTrue(state.canLoadMore)
+    }
+
+    @Test
+    fun `after refresh succeeds a later loadNextPage uses the refreshed cursor`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 5L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        repository.pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 9L))
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(listOf(null, null, 9L), repository.requestedCursors)
+    }
+
+    @Test
+    fun `loadNextPage in a filtered empty state is unavailable while refresh is active`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection(hotspotId = null)), nextCursor = 1L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+        viewModel.selectFilter(DetectionsFilter.Grouped)
+        check(viewModel.uiState.value.emptyState == DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable)
+
+        viewModel.refresh()
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(listOf(null, null), repository.requestedCursors)
+    }
+
+    // --- refreshError is only cleared by a successful first page (item 2) ---
+
+    @Test
+    fun `a successful loadNextPage after a failed refresh preserves refreshError`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 5L))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.refresh()
+        advanceUntilIdle()
+        check(viewModel.uiState.value.refreshError)
+
+        repository.throwOnGetPage = null
+        repository.pages = repository.pages + (5L to DetectionPage(items = listOf(detection()), nextCursor = null))
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.refreshError)
+    }
+
+    @Test
+    fun `a later successful refresh clears refreshError`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        repository.throwOnGetPage = IOException("boom")
+        viewModel.refresh()
+        advanceUntilIdle()
+        check(viewModel.uiState.value.refreshError)
+
+        repository.throwOnGetPage = null
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.refreshError)
+    }
+
+    // --- Superseded jobs are actually cancelled (item 3) ---
+
+    @Test
+    fun `starting a newer refresh cancels the older repository coroutine`() = runTest(testDispatcher) {
+        val repository = ControllableDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf(0), repository.cancelledIndices)
+    }
+
+    @Test
+    fun `starting a refresh cancels an active paging coroutine`() = runTest(testDispatcher) {
+        val repository = ControllableDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+        viewModel.refresh()
+        advanceUntilIdle()
+        repository.deferredQueue[0].complete(DetectionPage(items = listOf(detection()), nextCursor = 1L))
+        advanceUntilIdle()
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf(1), repository.cancelledIndices)
+    }
+
+    @Test
+    fun `cancelling the older refresh does not expose any error flag`() = runTest(testDispatcher) {
+        val repository = ControllableDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.initialError)
+        assertFalse(state.refreshError)
+        assertFalse(state.pagingError)
+    }
+
+    @Test
+    fun `cancelling active paging via a new refresh does not expose pagingError`() = runTest(testDispatcher) {
+        val repository = ControllableDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+        viewModel.refresh()
+        advanceUntilIdle()
+        repository.deferredQueue[0].complete(DetectionPage(items = listOf(detection()), nextCursor = 1L))
+        advanceUntilIdle()
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.pagingError)
+    }
+
+    @Test
+    fun `completion of an older cancelled refresh does not clear the newer refresh's active state`() =
+        runTest(testDispatcher) {
+            val repository = ControllableDetectionsRepository()
+            val viewModel = DetectionsViewModel(repository)
+
+            viewModel.refresh()
+            advanceUntilIdle()
+            repository.deferredQueue[0].complete(DetectionPage(items = listOf(detection()), nextCursor = 1L))
+            advanceUntilIdle()
+            check(viewModel.uiState.value.canLoadMore)
+
+            viewModel.refresh() // refresh #2 -> deferredQueue[1]
+            advanceUntilIdle()
+            viewModel.refresh() // refresh #3 cancels #2 -> deferredQueue[2]
+            advanceUntilIdle()
+            check(repository.deferredQueue.size == 3)
+
+            viewModel.loadNextPage()
+            advanceUntilIdle()
+
+            // Still blocked: refresh #3 is the active one. Refresh #2's cancellation/completion
+            // must not have cleared the refreshJob reference that now points to #3.
+            assertEquals(3, repository.deferredQueue.size)
+        }
 
     // --- Paging correctness ---
 
@@ -718,13 +928,23 @@ class DetectionsViewModelTest {
 }
 
 /** Lets a test control exactly when each `getDetectionsPage` call resolves, to prove genuine
- * out-of-order (race) behavior that [FakeDetectionsRepository]'s synchronous fake cannot simulate. */
+ * out-of-order (race) behavior that [FakeDetectionsRepository]'s synchronous fake cannot simulate.
+ * Also records which calls were actually cancelled (their calling coroutine cancelled while
+ * suspended in [CompletableDeferred.await]), to prove superseded jobs are really cancelled and not
+ * just ignored via the generation check. */
 private class ControllableDetectionsRepository : DetectionsRepository {
     val deferredQueue = mutableListOf<CompletableDeferred<DetectionPage>>()
+    val cancelledIndices = mutableListOf<Int>()
 
     override suspend fun getDetectionsPage(cursor: Long?, limit: Int): DetectionPage {
         val deferred = CompletableDeferred<DetectionPage>()
+        val index = deferredQueue.size
         deferredQueue += deferred
-        return deferred.await()
+        try {
+            return deferred.await()
+        } catch (e: CancellationException) {
+            cancelledIndices += index
+            throw e
+        }
     }
 }

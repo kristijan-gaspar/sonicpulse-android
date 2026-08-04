@@ -12,6 +12,7 @@ import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,11 +50,23 @@ class DetectionsViewModel @Inject constructor(
     private var selectedFilter = DetectionsFilter.All
     private var generation = 0
 
+    /** The in-flight first-page request, whether from [refresh]'s initial load or a manual
+     * refresh. `null` once it has completed, failed, or been cancelled. Used both to cancel a
+     * superseded request and to block [loadNextPage] while a refresh is active. */
+    private var refreshJob: Job? = null
+
+    /** The in-flight [loadNextPage] request, `null` once completed/failed/cancelled. */
+    private var pagingJob: Job? = null
+
     /**
      * Before the first successful load, behaves like the initial load (nothing to preserve, full
      * -screen loading, failure is [DetectionsUiState.initialError]). After that, a manual refresh
      * preserves the currently loaded detections/cursor/canLoadMore/filter while it runs, and only
      * replaces them on success — a failure is [DetectionsUiState.refreshError], never [DetectionsUiState.initialError].
+     *
+     * Supersedes any in-flight paging request: [pagingJob] is cancelled outright (not just
+     * discarded via the generation check) so its network call doesn't run to no purpose, and any
+     * older [refreshJob] is cancelled the same way.
      */
     fun refresh() {
         generation++
@@ -62,7 +75,10 @@ class DetectionsViewModel @Inject constructor(
 
         // Item 13: a refresh always supersedes any in-flight loadNextPage() immediately — its
         // loading/error indicator must never linger once its result is guaranteed to be discarded.
+        pagingJob?.cancel()
         isLoadingNextPage = false
+
+        refreshJob?.cancel()
 
         if (isFirstLoad) {
             loadedDetections = emptyList()
@@ -78,12 +94,12 @@ class DetectionsViewModel @Inject constructor(
             pagingError = false
         )
 
-        viewModelScope.launch {
+        val job = viewModelScope.launch {
             try {
                 val page = detectionsRepository.getDetectionsPage(cursor = null, limit = PAGE_SIZE)
                 if (generation != myGeneration) return@launch
                 hasCompletedInitialLoad = true
-                applyPage(page, merge = false)
+                applyFirstPage(page)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -95,23 +111,29 @@ class DetectionsViewModel @Inject constructor(
                 }
             }
         }
+        refreshJob = job
+        // Identity-safe: only clear the field if it still refers to this exact job — an older,
+        // already-superseded refresh's completion must never clear a newer refresh's reference.
+        job.invokeOnCompletion { if (refreshJob === job) refreshJob = null }
     }
 
     /** The retry action for a failed page — [nextCursor] is only ever advanced by a successful
-     * [applyPage], so a retry after failure naturally reuses the same cursor. */
+     * [applyNextPage], so a retry after failure naturally reuses the same cursor. Blocked while
+     * the initial load or a manual refresh is active, so a page fetched with a cursor that is
+     * about to become stale can never merge into a freshly refreshed first page. */
     fun loadNextPage() {
-        if (isLoadingNextPage || !canLoadMore) {
+        if (isLoadingNextPage || !canLoadMore || refreshJob?.isActive == true) {
             return
         }
         isLoadingNextPage = true
         val myGeneration = generation
         publishState(isLoadingNextPage = true, pagingError = false)
 
-        viewModelScope.launch {
+        val job = viewModelScope.launch {
             try {
                 val page = detectionsRepository.getDetectionsPage(cursor = nextCursor, limit = PAGE_SIZE)
                 if (generation != myGeneration) return@launch
-                applyPage(page, merge = true)
+                applyNextPage(page)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -120,6 +142,9 @@ class DetectionsViewModel @Inject constructor(
                 publishState(isLoadingNextPage = false, pagingError = true)
             }
         }
+        pagingJob = job
+        // Identity-safe for the same reason as refreshJob above.
+        job.invokeOnCompletion { if (pagingJob === job) pagingJob = null }
     }
 
     fun selectFilter(filter: DetectionsFilter) {
@@ -127,8 +152,11 @@ class DetectionsViewModel @Inject constructor(
         publishState()
     }
 
-    private fun applyPage(page: DetectionPage, merge: Boolean) {
-        loadedDetections = mergeDedup(if (merge) loadedDetections else emptyList(), page.items)
+    /** Replaces the loaded history with a fresh first page — used by both the very first load and
+     * every manual refresh. Only this clears [DetectionsUiState.refreshError]: a later successful
+     * [loadNextPage] does not mean a previously failed refresh actually succeeded. */
+    private fun applyFirstPage(page: DetectionPage) {
+        loadedDetections = mergeDedup(emptyList(), page.items)
         nextCursor = page.nextCursor
         canLoadMore = page.nextCursor != null
         isLoadingNextPage = false
@@ -140,6 +168,17 @@ class DetectionsViewModel @Inject constructor(
             refreshError = false,
             pagingError = false
         )
+    }
+
+    /** Merges a later page into what's already loaded. Deliberately leaves
+     * [DetectionsUiState.refreshError] untouched — the default parameters of [publishState] carry
+     * the current value forward, so a stale refresh failure stays visible until the next refresh. */
+    private fun applyNextPage(page: DetectionPage) {
+        loadedDetections = mergeDedup(loadedDetections, page.items)
+        nextCursor = page.nextCursor
+        canLoadMore = page.nextCursor != null
+        isLoadingNextPage = false
+        publishState(isLoadingNextPage = false, pagingError = false)
     }
 
     private fun publishState(

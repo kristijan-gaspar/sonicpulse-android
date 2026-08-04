@@ -141,6 +141,7 @@ internal fun DetectionsContent(
                 emptyState = uiState.emptyState,
                 isLoadingNextPage = uiState.isLoadingNextPage,
                 pagingError = uiState.pagingError,
+                pagingActionDisabled = uiState.isRefreshing,
                 onLoadMore = onLoadNextPage
             )
             else -> DetectionsList(
@@ -148,6 +149,7 @@ internal fun DetectionsContent(
                 isLoadingNextPage = uiState.isLoadingNextPage,
                 canLoadMore = uiState.canLoadMore,
                 pagingError = uiState.pagingError,
+                pagingActionDisabled = uiState.isRefreshing,
                 onLoadNextPage = onLoadNextPage,
                 onItemClick = { selectedDetection = it }
             )
@@ -182,6 +184,7 @@ private fun DetectionsList(
     isLoadingNextPage: Boolean,
     canLoadMore: Boolean,
     pagingError: Boolean,
+    pagingActionDisabled: Boolean,
     onLoadNextPage: () -> Unit,
     onItemClick: (DetectionHistoryItemUiModel) -> Unit,
     modifier: Modifier = Modifier
@@ -193,7 +196,7 @@ private fun DetectionsList(
     LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(Spacing.lg)) {
         sections.forEach { section ->
             stickyHeader { DateSectionHeader(section.date) }
-            items(section.items, key = { it.id.toString() }) { item ->
+            items(section.items, key = { it.id }) { item ->
                 DetectionListItem(
                     item = item,
                     onClick = { onItemClick(item) },
@@ -206,6 +209,7 @@ private fun DetectionsList(
                 isLoadingNextPage = isLoadingNextPage,
                 pagingError = pagingError,
                 canLoadMore = canLoadMore,
+                pagingActionDisabled = pagingActionDisabled,
                 onLoadNextPage = onLoadNextPage
             )
         }
@@ -213,16 +217,21 @@ private fun DetectionsList(
 }
 
 /** One deterministic footer: exactly one of loading / error / load-more / nothing, per current
- * state — never more than one of these at once, and never a retry that fires automatically. */
+ * state — never more than one of these at once, and never a retry that fires automatically.
+ * While [pagingActionDisabled] (a manual refresh is active), the footer shows nothing at all: the
+ * ViewModel already refuses to issue a paging request during a refresh, and a visible but inert
+ * Load more/Retry would be misleading. */
 @Composable
 private fun PagingFooter(
     isLoadingNextPage: Boolean,
     pagingError: Boolean,
     canLoadMore: Boolean,
+    pagingActionDisabled: Boolean,
     onLoadNextPage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     when {
+        pagingActionDisabled -> Unit
         isLoadingNextPage -> LoadingFooter(modifier)
         pagingError -> PagingErrorFooter(onRetry = onLoadNextPage, modifier = modifier)
         canLoadMore -> LoadMoreFooter(onClick = onLoadNextPage, modifier = modifier)
@@ -309,6 +318,7 @@ private fun DetectionsEmptyView(
     emptyState: DetectionsEmptyState,
     isLoadingNextPage: Boolean,
     pagingError: Boolean,
+    pagingActionDisabled: Boolean,
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -328,7 +338,7 @@ private fun DetectionsEmptyView(
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             textAlign = TextAlign.Center
         )
-        if (emptyState is DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable) {
+        if (emptyState is DetectionsEmptyState.NoCurrentMatchesMorePagesAvailable && !pagingActionDisabled) {
             Spacer(modifier = Modifier.height(Spacing.md))
             when {
                 isLoadingNextPage -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
