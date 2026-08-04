@@ -20,6 +20,7 @@ okhttp = "4.12.0"
 kotlinxSerializationJson = "1.7.3"
 retrofitKotlinxSerializationConverter = "1.0.0"
 datastorePreferences = "1.1.1"
+maplibreCompose = "0.13.0"
 
 [libraries]
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
@@ -51,6 +52,8 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
+maplibre-compose = { group = "org.maplibre.compose", name = "maplibre-compose", version.ref = "maplibreCompose" }
+maplibre-compose-gms = { group = "org.maplibre.compose", name = "maplibre-compose-gms", version.ref = "maplibreCompose" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

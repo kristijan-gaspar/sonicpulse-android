@@ -98,4 +98,41 @@
     <string name="detail_label_timestamp">Vrijeme</string>
     <string name="detail_label_coordinates">Koordinate</string>
     <string name="action_close">Zatvori</string>
+
+    <!-- Map — time range -->
+    <string name="range_last_24_hours">Zadnja 24 sata</string>
+    <string name="range_last_3_days">Zadnja 3 dana</string>
+    <string name="range_last_7_days">Zadnjih 7 dana</string>
+
+    <!-- Map — map/style loading -->
+    <string name="map_error_load">Učitavanje karte nije uspjelo</string>
+
+    <!-- Map — hotspot data loading -->
+    <string name="map_error_data_initial">Učitavanje žarišta nije uspjelo</string>
+    <string name="map_error_data_refresh">Osvježavanje žarišta nije uspjelo. Prikazani su prethodno učitani rezultati.</string>
+    <string name="map_empty_no_hotspots">Nema žarišta u odabranom razdoblju</string>
+
+    <!-- Map — legend -->
+    <string name="map_legend_2_devices">2 uređaja</string>
+    <string name="map_legend_3_devices">3 uređaja</string>
+    <string name="map_legend_4_plus_devices">4+ uređaja</string>
+
+    <!-- Map — current location -->
+    <string name="action_current_location">Trenutna lokacija</string>
+    <string name="map_locating">Traženje lokacije…</string>
+    <string name="map_location_denied">Dozvola za lokaciju nije odobrena</string>
+    <string name="map_location_services_disabled">Lokacijske usluge su isključene</string>
+    <string name="action_open_location_settings">Otvori postavke lokacije</string>
+
+    <!-- Map — hotspot detail bottom sheet -->
+    <string name="hotspot_detail_title">Detalji žarišta</string>
+    <string name="detail_label_devices">Broj uređaja</string>
+    <string name="detail_label_radius">Radijus</string>
+    <string name="detail_label_confidence">Pouzdanost</string>
+    <string name="detail_label_time_span">Vremenski raspon</string>
+    <string name="unit_meters_short">%1$d m</string>
+    <string name="unit_percent">%1$d%%</string>
+    <string name="duration_seconds">%1$d s</string>
+    <string name="duration_minutes_seconds">%1$d min %2$d s</string>
+    <string name="duration_hours_minutes">%1$d h %2$d min</string>
 </resources>

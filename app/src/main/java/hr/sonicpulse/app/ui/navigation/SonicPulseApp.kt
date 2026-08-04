@@ -19,6 +19,7 @@ import androidx.navigation.compose.rememberNavController
 import hr.sonicpulse.app.ui.components.ComingSoonScreen
 import hr.sonicpulse.app.ui.components.SonicPulseTopBar
 import hr.sonicpulse.app.ui.detections.DetectionsScreen
+import hr.sonicpulse.app.ui.map.MapScreen
 import hr.sonicpulse.app.ui.monitoring.MonitoringScreen
 
 @Composable
@@ -36,7 +37,7 @@ fun SonicPulseApp() {
         ) {
             composable(SonicPulseDestination.Monitoring.route) { MonitoringScreen() }
             composable(SonicPulseDestination.Detections.route) { DetectionsScreen() }
-            composable(SonicPulseDestination.Map.route) { ComingSoonScreen() }
+            composable(SonicPulseDestination.Map.route) { MapScreen() }
             composable(SonicPulseDestination.Settings.route) { ComingSoonScreen() }
         }
     }

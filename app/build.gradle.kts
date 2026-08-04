@@ -104,6 +104,9 @@ dependencies {
 
     implementation(libs.play.services.location)
 
+    implementation(libs.maplibre.compose)
+    implementation(libs.maplibre.compose.gms)
+
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.kotlinx.serialization)
     implementation(libs.okhttp)
