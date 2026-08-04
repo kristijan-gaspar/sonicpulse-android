@@ -34,4 +34,16 @@ class LocatingCoordinator {
         attempt = attempt.copy(active = false)
         return true
     }
+
+    /** Unconditionally stops whatever attempt is currently active — used when an external
+     * condition (location services becoming unavailable) invalidates the attempt regardless of
+     * generation identity. Deliberately does *not* bump the generation: the current attempt's own
+     * generation stays current, so a still-in-flight timeout for it later calls [complete] with a
+     * matching generation but finds [LocatingAttempt.active] already `false` and correctly no-ops
+     * instead of surfacing a stale "unavailable" message. */
+    fun cancel() {
+        if (attempt.active) {
+            attempt = attempt.copy(active = false)
+        }
+    }
 }

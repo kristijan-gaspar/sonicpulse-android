@@ -84,4 +84,42 @@ class LocatingCoordinatorTest {
 
         assertFalse(completedAgain)
     }
+
+    @Test
+    fun `cancel stops an active attempt without bumping its generation`() {
+        val coordinator = LocatingCoordinator()
+        val generation = coordinator.start()
+
+        coordinator.cancel()
+
+        assertFalse(coordinator.attempt.active)
+        assertEquals(generation, coordinator.attempt.generation)
+    }
+
+    @Test
+    fun `an attempt cancelled because location services became unavailable ignores its later timeout`() {
+        val coordinator = LocatingCoordinator()
+        val generation = coordinator.start()
+        check(coordinator.attempt.active)
+
+        // Location services become unavailable mid-attempt — the screen cancels it immediately.
+        coordinator.cancel()
+        assertFalse(coordinator.attempt.active)
+
+        // The attempt's own 15 s timeout still fires later; it must have no effect at all.
+        val timeoutCompleted = coordinator.complete(generation)
+
+        assertFalse(timeoutCompleted)
+        assertFalse(coordinator.attempt.active)
+    }
+
+    @Test
+    fun `cancelling when nothing is active is a no-op`() {
+        val coordinator = LocatingCoordinator()
+
+        coordinator.cancel()
+
+        assertFalse(coordinator.attempt.active)
+        assertEquals(0L, coordinator.attempt.generation)
+    }
 }

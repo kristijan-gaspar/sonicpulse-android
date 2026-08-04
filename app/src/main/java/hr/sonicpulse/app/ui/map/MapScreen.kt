@@ -203,6 +203,16 @@ internal fun MapContent(
         locatingVersion++
     }
 
+    /** Location services are unavailable (checked fresh on every button press and again on resume
+     * from Android's location settings): the map-local provider must not stay enabled, and any
+     * attempt currently waiting on a fix must stop immediately rather than linger until its own
+     * 15 s timeout fires later for no reason. */
+    fun disableLocationDueToServicesUnavailable() {
+        locationEnabled = false
+        locatingCoordinator.cancel()
+        locatingVersion++
+    }
+
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -242,6 +252,7 @@ internal fun MapContent(
     // shortcut — a permission granted earlier does not mean services are still on right now.
     fun onCurrentLocationClick() {
         if (!isLocationServicesEnabled(context)) {
+            disableLocationDueToServicesUnavailable()
             scope.launch {
                 val result = snackbarHostState.showSnackbar(
                     message = context.getString(R.string.map_location_services_disabled),
@@ -313,10 +324,13 @@ internal fun MapContent(
             }
             if (currentOpenedLocationSettings.value) {
                 openedLocationSettingsFromMap = false
-                // Re-checked here for its own sake — the next explicit Current Location press
-                // (§5.1) re-checks it again regardless, and this resume handler never auto-starts
-                // locating or animates the camera either way.
-                isLocationServicesEnabled(context)
+                // If services are still off, apply the same cleanup as an explicit button press
+                // would (disable the provider, cancel any lingering attempt) — but never start a
+                // new attempt or move the camera just because services are now back on; that only
+                // happens from a later explicit Current Location press.
+                if (!isLocationServicesEnabled(context)) {
+                    disableLocationDueToServicesUnavailable()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
