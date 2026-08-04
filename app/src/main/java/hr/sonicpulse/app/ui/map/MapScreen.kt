@@ -115,6 +115,11 @@ private val DefaultCameraPosition = CameraPosition(target = Position(longitude =
 /** A value between 10 and 15 s is acceptable per the plan; 15 s chosen and used consistently. */
 private const val LOCATION_FIX_TIMEOUT_MILLIS = 15_000L
 
+/** Vertical clearance reserved for bottom-aligned ornaments so attribution (bottom-end) never sits
+ * under the current-location FAB (also bottom-end): the FAB's own diameter (56dp) + its outer
+ * `Spacing.lg` padding from the screen edge + a small visual buffer. */
+private val CurrentLocationFabClearance = 56.dp + Spacing.lg + Spacing.sm
+
 @Composable
 fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -220,16 +225,14 @@ internal fun MapContent(
                 snackbarHostState.showSnackbar(context.getString(R.string.map_location_denied))
             }
             MapLocationPermissionOutcome.PermanentlyDenied -> scope.launch {
-                openedAppSettingsForLocation = true
                 val result = snackbarHostState.showSnackbar(
                     message = context.getString(R.string.permission_permanently_denied_message),
                     actionLabel = context.getString(R.string.action_open_settings),
                     duration = SnackbarDuration.Long
                 )
                 if (result == SnackbarResult.ActionPerformed) {
+                    openedAppSettingsForLocation = true
                     openAppSettings(context)
-                } else {
-                    openedAppSettingsForLocation = false
                 }
             }
         }
@@ -240,16 +243,14 @@ internal fun MapContent(
     fun onCurrentLocationClick() {
         if (!isLocationServicesEnabled(context)) {
             scope.launch {
-                openedLocationSettingsFromMap = true
                 val result = snackbarHostState.showSnackbar(
                     message = context.getString(R.string.map_location_services_disabled),
                     actionLabel = context.getString(R.string.action_open_location_settings),
                     duration = SnackbarDuration.Long
                 )
                 if (result == SnackbarResult.ActionPerformed) {
+                    openedLocationSettingsFromMap = true
                     context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                } else {
-                    openedLocationSettingsFromMap = false
                 }
             }
             return
@@ -305,14 +306,17 @@ internal fun MapContent(
                     PackageManager.PERMISSION_GRANTED
                 val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
                     PackageManager.PERMISSION_GRANTED
-                if (fineGranted || coarseGranted) {
-                    locationEnabled = true
-                }
+                // Neither auto-starts locating nor animates the camera — only updates whether the
+                // map-local location provider/puck may run at all; a later explicit Current
+                // Location press performs the actual attempt.
+                locationEnabled = fineGranted || coarseGranted
             }
             if (currentOpenedLocationSettings.value) {
-                // isLocationServicesEnabled() is re-checked fresh on the next explicit button
-                // press (§5.1) — nothing else needs updating here.
                 openedLocationSettingsFromMap = false
+                // Re-checked here for its own sake — the next explicit Current Location press
+                // (§5.1) re-checks it again regardless, and this resume handler never auto-starts
+                // locating or animates the camera either way.
+                isLocationServicesEnabled(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -320,23 +324,30 @@ internal fun MapContent(
     }
 
     // --- Ornaments: explicit alignment + padding measured from the screen's own controls, rather
-    // than relying on default/undocumented MapLibre ornament positions (§1). Logo + attribution
-    // sit bottom-start (opposite the bottom-end FAB); the scale bar joins them there, clear of the
-    // top filter/legend area; the compass sits top-end, pushed below the measured top-controls
-    // height so it never sits under the filter row. ---
+    // than relying on default/undocumented MapLibre ornament positions (§1/§3). Every ornament
+    // gets its own corner so none of them overlap each other: logo bottom-start, attribution
+    // bottom-end, scale bar top-start, compass top-end. Top padding clears the measured top
+    // filter/legend controls (applies to both top-aligned ornaments); bottom padding clears the
+    // current-location FAB (applies to both bottom-aligned ornaments — including logo, which
+    // doesn't strictly need it, but a single shared PaddingValues is all OrnamentOptions exposes). ---
     var topControlsHeightPx by remember { mutableIntStateOf(0) }
     val topControlsHeightDp = with(density) { topControlsHeightPx.toDp() }
     val ornamentOptions = remember(topControlsHeightDp) {
         OrnamentOptions(
-            padding = PaddingValues(start = Spacing.sm, top = topControlsHeightDp + Spacing.sm, end = Spacing.sm, bottom = Spacing.lg),
+            padding = PaddingValues(
+                start = Spacing.sm,
+                top = topControlsHeightDp + Spacing.sm,
+                end = Spacing.sm,
+                bottom = CurrentLocationFabClearance
+            ),
             isLogoEnabled = true,
             logoAlignment = Alignment.BottomStart,
             isAttributionEnabled = true,
-            attributionAlignment = Alignment.BottomStart,
+            attributionAlignment = Alignment.BottomEnd,
             isCompassEnabled = true,
             compassAlignment = Alignment.TopEnd,
             isScaleBarEnabled = true,
-            scaleBarAlignment = Alignment.BottomStart
+            scaleBarAlignment = Alignment.TopStart
         )
     }
 
@@ -435,6 +446,9 @@ internal fun MapContent(
 /** Everything drawn once the map itself has not (fully) failed: top filter/legend controls,
  * hotspot loading/error/empty overlays and the current-location FAB. Split out so the map-render
  * failure branch above can omit all of it structurally, not just visually. */
+/** While the very first load has failed, this composes *only* the dedicated initial-error state —
+ * no filters, refresh, legend, empty state or FAB — so there is exactly one way to recover
+ * (its own Retry) and nothing else is reachable or even present in the composition. */
 @Composable
 private fun HotspotControlsAndOverlays(
     uiState: MapUiState,
@@ -446,41 +460,46 @@ private fun HotspotControlsAndOverlays(
     onTopControlsMeasured: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier.fillMaxWidth().padding(Spacing.lg).onSizeChanged { onTopControlsMeasured(it.height) }
-    ) {
-        TimeRangeRow(
-            committedRange = uiState.committedRange,
-            pendingRange = uiState.pendingRange,
-            isInitialLoading = uiState.isInitialLoading,
-            isLoadingSubsequent = uiState.isLoadingSubsequent,
-            onSelectRange = onSelectRange,
-            onRefresh = onRefresh
-        )
-        Spacer(modifier = Modifier.height(Spacing.sm))
-        MapLegend()
-        if (uiState.subsequentError) {
-            Spacer(modifier = Modifier.height(Spacing.sm))
-            SubsequentErrorBanner(onRetry = onRetry)
+    when {
+        uiState.initialError -> {
+            InitialDataErrorOverlay(onRetry = onRefresh)
         }
-    }
+        else -> {
+            Column(
+                modifier = modifier.fillMaxWidth().padding(Spacing.lg).onSizeChanged { onTopControlsMeasured(it.height) }
+            ) {
+                TimeRangeRow(
+                    committedRange = uiState.committedRange,
+                    pendingRange = uiState.pendingRange,
+                    isInitialLoading = uiState.isInitialLoading,
+                    isLoadingSubsequent = uiState.isLoadingSubsequent,
+                    onSelectRange = onSelectRange,
+                    onRefresh = onRefresh
+                )
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                MapLegend()
+                if (uiState.subsequentError) {
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    SubsequentErrorBanner(onRetry = onRetry)
+                }
+            }
 
-    if (uiState.isInitialLoading) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
-    } else if (uiState.initialError) {
-        InitialDataErrorOverlay(onRetry = onRefresh)
-    } else if (uiState.hotspots.isEmpty()) {
-        EmptyHotspotsOverlay()
-    }
+            if (uiState.isInitialLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (uiState.hotspots.isEmpty()) {
+                EmptyHotspotsOverlay()
+            }
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
-        FloatingActionButton(onClick = onCurrentLocationClick, modifier = Modifier.padding(Spacing.lg)) {
-            if (isLocating) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(Icons.Filled.MyLocation, contentDescription = stringResource(R.string.action_current_location))
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+                FloatingActionButton(onClick = onCurrentLocationClick, modifier = Modifier.padding(Spacing.lg)) {
+                    if (isLocating) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Filled.MyLocation, contentDescription = stringResource(R.string.action_current_location))
+                    }
+                }
             }
         }
     }

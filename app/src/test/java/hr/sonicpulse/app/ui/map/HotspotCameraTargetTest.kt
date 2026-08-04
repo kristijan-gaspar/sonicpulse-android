@@ -35,7 +35,10 @@ class HotspotCameraTargetTest {
         val target = HotspotCamera.targetFor(listOf(hotspot(latitude = 45.8, longitude = 16.0, radiusMeters = 0.0)))
 
         val center = target as HotspotCameraTarget.Center
-        assertEquals(45.8, center.latitude, 0.0)
+        // The center comes from the generated ring (a sin/asin round-trip), not the raw hotspot
+        // coordinate directly, so it's only exact up to floating-point precision — irrelevant for
+        // camera placement but not bit-identical to the input.
+        assertEquals(45.8, center.latitude, 1e-9)
         assertEquals(16.0, center.longitude, 0.0)
         assertEquals(HotspotCamera.SINGLE_POINT_ZOOM, center.zoom, 0.0)
     }
@@ -83,5 +86,49 @@ class HotspotCameraTargetTest {
         val invalid = hotspot(latitude = Double.NaN, longitude = Double.NaN)
 
         assertEquals(HotspotCameraTarget.KeepCurrent, HotspotCamera.targetFor(listOf(invalid)))
+    }
+
+    @Test
+    fun `two co-located zero-radius hotspots produce Center`() {
+        val a = hotspot(latitude = 45.8, longitude = 16.0, radiusMeters = 0.0)
+        val b = hotspot(latitude = 45.8, longitude = 16.0, radiusMeters = 0.0)
+
+        val target = HotspotCamera.targetFor(listOf(a, b))
+
+        val center = target as HotspotCameraTarget.Center
+        // The center comes from the generated ring (a sin/asin round-trip), not the raw hotspot
+        // coordinate directly, so it's only exact up to floating-point precision — irrelevant for
+        // camera placement but not bit-identical to the input.
+        assertEquals(45.8, center.latitude, 1e-9)
+        assertEquals(16.0, center.longitude, 0.0)
+        assertEquals(HotspotCamera.SINGLE_POINT_ZOOM, center.zoom, 0.0)
+    }
+
+    @Test
+    fun `multiple degenerate hotspots never produce Bounds`() {
+        val hotspots = List(5) { hotspot(latitude = 45.8, longitude = 16.0, radiusMeters = 0.0) }
+
+        val target = HotspotCamera.targetFor(hotspots)
+
+        assertTrue(target is HotspotCameraTarget.Center)
+    }
+
+    @Test
+    fun `a near-zero span produces a deterministic Center`() {
+        val epsilon = HotspotCamera.CAMERA_SPAN_EPSILON_DEGREES / 10.0
+        val a = hotspot(latitude = 45.8, longitude = 16.0, radiusMeters = 0.0)
+        val b = hotspot(latitude = 45.8 + epsilon, longitude = 16.0 + epsilon, radiusMeters = 0.0)
+
+        val target = HotspotCamera.targetFor(listOf(a, b))
+
+        val center = target as HotspotCameraTarget.Center
+        assertEquals(HotspotCamera.SINGLE_POINT_ZOOM, center.zoom, 0.0)
+    }
+
+    @Test
+    fun `ordinary non-degenerate data still produces Bounds`() {
+        val target = HotspotCamera.targetFor(listOf(hotspot(radiusMeters = 300.0)))
+
+        assertTrue(target is HotspotCameraTarget.Bounds)
     }
 }

@@ -21,9 +21,10 @@ sealed interface HotspotCameraTarget {
  * Derives a [HotspotCameraTarget] from a committed hotspot dataset. Two cases are deliberately
  * routed to [HotspotCameraTarget.Center] instead of [HotspotCameraTarget.Bounds]:
  *
- * - a single hotspot with `radiusMeters == 0` — its generated polygon degenerates to a single
- *   repeated point (`west == east`, `south == north`), which must never be fed into MapLibre's
- *   bounding-box camera fit (§8);
+ * - a degenerate span — every point (across any number of hotspots) collapses to essentially one
+ *   geographic location, e.g. one zero-radius hotspot, several co-located zero-radius hotspots, or
+ *   an extremely small near-zero span. Detected by span magnitude ([CAMERA_SPAN_EPSILON_DEGREES]),
+ *   never by hotspot count — a zero-area `BoundingBox` must never reach MapLibre's camera fit (§8);
  * - any dataset whose minimal longitude span crosses the anti-meridian (§9) — this project could
  *   not verify whether MapLibre Compose 0.13.0's camera fit correctly interprets a `BoundingBox`
  *   with `west > east` as "wraps around" rather than an inverted/empty box, and the task's own
@@ -32,8 +33,12 @@ sealed interface HotspotCameraTarget {
  */
 object HotspotCamera {
 
-    /** Sensible "close" zoom for a single point with no meaningful radius to frame. */
+    /** Sensible "close" zoom for a degenerate span with no meaningful area to frame. */
     const val SINGLE_POINT_ZOOM = 16.0
+
+    /** Below this, both latitude and longitude spans are treated as "no meaningful area" rather
+     * than a genuine (if tiny) bounding box — independent of how many hotspots contributed to it. */
+    const val CAMERA_SPAN_EPSILON_DEGREES = 1e-9
 
     private const val MIN_ZOOM = 2.0
     private const val MAX_ZOOM = 16.0
@@ -53,14 +58,18 @@ object HotspotCamera {
         }
         val span = HotspotBounds.compute(polygons) ?: return HotspotCameraTarget.KeepCurrent
 
-        val isDegeneratePoint = span.northLatitude == span.southLatitude && span.longitudeSpanDegrees == 0.0
-        if (hotspots.size == 1 && isDegeneratePoint) {
-            val hotspot = hotspots.single()
-            return HotspotCameraTarget.Center(hotspot.latitude, hotspot.longitude, SINGLE_POINT_ZOOM)
+        val latitudeSpanDegrees = span.northLatitude - span.southLatitude
+        val isDegenerate = latitudeSpanDegrees < CAMERA_SPAN_EPSILON_DEGREES &&
+            span.longitudeSpanDegrees < CAMERA_SPAN_EPSILON_DEGREES
+        if (isDegenerate) {
+            return HotspotCameraTarget.Center(
+                latitude = (span.northLatitude + span.southLatitude) / 2.0,
+                longitude = span.centerLongitude,
+                zoom = SINGLE_POINT_ZOOM
+            )
         }
 
         if (span.crossesAntimeridian) {
-            val latitudeSpanDegrees = span.northLatitude - span.southLatitude
             return HotspotCameraTarget.Center(
                 latitude = (span.northLatitude + span.southLatitude) / 2.0,
                 longitude = span.centerLongitude,
