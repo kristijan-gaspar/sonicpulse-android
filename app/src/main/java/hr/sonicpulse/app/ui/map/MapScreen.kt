@@ -80,6 +80,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.domain.model.Hotspot
 import hr.sonicpulse.app.ui.components.FilterChipRow
+import hr.sonicpulse.app.ui.components.FilterChipRowHorizontalContentPadding
 import hr.sonicpulse.app.ui.permissions.PermissionDecisionEvaluator
 import hr.sonicpulse.app.ui.theme.AppShapes
 import hr.sonicpulse.app.ui.theme.MonospaceValueStyle
@@ -533,7 +534,11 @@ private fun HotspotControlsAndOverlays(
                     onRefresh = onRefresh
                 )
                 Spacer(modifier = Modifier.height(Spacing.sm))
-                MapLegend()
+                // Aligns the legend's left edge with the first filter chip's left edge, not the
+                // Column's own edge: FilterChipRow's LazyRow has its own internal
+                // FilterChipRowHorizontalContentPadding before the first chip, which this
+                // Column's plain start padding (Spacing.lg, applied above) doesn't account for.
+                MapLegend(modifier = Modifier.padding(start = FilterChipRowHorizontalContentPadding))
                 if (uiState.subsequentError) {
                     Spacer(modifier = Modifier.height(Spacing.sm))
                     SubsequentErrorBanner(onRetry = onRetry)

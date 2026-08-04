@@ -27,6 +27,12 @@ import androidx.compose.ui.unit.dp
  * tiles) rather than on a flat background. */
 private const val DisabledSelectedContainerBlend = 0.45f
 
+/** [FilterChipRow]'s own `LazyRow` content padding before its first chip — public so a caller
+ * whose other overlays must visually align with the first chip's left edge (e.g. the Map screen's
+ * legend, below its [FilterChipRow]) can reuse this exact value instead of duplicating it as an
+ * unexplained magic number that could later drift out of sync. */
+val FilterChipRowHorizontalContentPadding = 16.dp
+
 /** A horizontally scrollable, single-select row of Material 3 FilterChips — a shared component
  * (design doc §4.4), not specific to any one screen's filter set. [enabled] and [loading] default
  * to "always enabled, never loading" so existing callers (e.g. Detections) are unaffected; the Map
@@ -68,7 +74,7 @@ fun <T> FilterChipRow(
 
     LazyRow(
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp),
+        contentPadding = PaddingValues(horizontal = FilterChipRowHorizontalContentPadding),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(options) { option ->
