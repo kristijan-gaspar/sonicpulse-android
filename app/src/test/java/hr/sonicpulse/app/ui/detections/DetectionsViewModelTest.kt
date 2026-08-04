@@ -340,6 +340,21 @@ class DetectionsViewModelTest {
     // --- Refresh blocks paging (item 1) ---
 
     @Test
+    fun `loadNextPage during initial loading issues no repository request`() = runTest(testDispatcher) {
+        val repository = ControllableDetectionsRepository()
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+        check(viewModel.uiState.value.isInitialLoading)
+
+        viewModel.loadNextPage()
+        advanceUntilIdle()
+
+        assertEquals(1, repository.deferredQueue.size)
+    }
+
+    @Test
     fun `loadNextPage during manual refresh issues no repository request`() = runTest(testDispatcher) {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 5L))

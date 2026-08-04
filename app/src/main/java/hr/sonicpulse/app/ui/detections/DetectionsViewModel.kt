@@ -125,13 +125,15 @@ class DetectionsViewModel @Inject constructor(
         if (isLoadingNextPage || !canLoadMore || refreshJob?.isActive == true) {
             return
         }
+        val cursor = nextCursor ?: return
+
         isLoadingNextPage = true
         val myGeneration = generation
         publishState(isLoadingNextPage = true, pagingError = false)
 
         val job = viewModelScope.launch {
             try {
-                val page = detectionsRepository.getDetectionsPage(cursor = nextCursor, limit = PAGE_SIZE)
+                val page = detectionsRepository.getDetectionsPage(cursor = cursor, limit = PAGE_SIZE)
                 if (generation != myGeneration) return@launch
                 applyNextPage(page)
             } catch (e: CancellationException) {
