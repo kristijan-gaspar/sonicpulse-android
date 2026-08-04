@@ -35,9 +35,7 @@
     <!-- Monitoring — location status row (F) -->
     <string name="label_microphone">Mikrofon</string>
     <string name="label_location">Lokacija</string>
-    <string name="label_background">Pozadina</string>
     <string name="location_status_active">Aktivno</string>
-    <string name="location_status_inactive">Neaktivno</string>
     <string name="location_status_unavailable">Nedostupno</string>
     <string name="location_status_searching">Traži se</string>
     <string name="location_status_precise_required">Nije precizno</string>
@@ -119,9 +117,11 @@
     <string name="map_empty_no_hotspots">Nema žarišta u odabranom razdoblju</string>
 
     <!-- Map — legend -->
-    <string name="map_legend_2_devices">2 uređaja</string>
-    <string name="map_legend_3_devices">3 uređaja</string>
-    <string name="map_legend_4_plus_devices">4+ uređaja</string>
+    <!-- Naslov legende prikazan jednom; oznake pojedinih stavki su samo broj, bez ponavljanja "uređaja" -->
+    <string name="map_legend_title">Uređaji</string>
+    <string name="map_legend_2_devices">2</string>
+    <string name="map_legend_3_devices">3</string>
+    <string name="map_legend_4_plus_devices">4+</string>
 
     <!-- Map — current location -->
     <string name="action_current_location">Trenutna lokacija</string>

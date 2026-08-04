@@ -37,9 +37,7 @@
     <!-- Monitoring — location status row (F) -->
     <string name="label_microphone">Microphone</string>
     <string name="label_location">Location</string>
-    <string name="label_background">Background</string>
     <string name="location_status_active">Active</string>
-    <string name="location_status_inactive">Inactive</string>
     <string name="location_status_unavailable">Unavailable</string>
     <string name="location_status_searching">Searching</string>
     <string name="location_status_precise_required">Not precise</string>
@@ -121,9 +119,11 @@
     <string name="map_empty_no_hotspots">No hotspots in the selected period</string>
 
     <!-- Map — legend -->
-    <string name="map_legend_2_devices">2 devices</string>
-    <string name="map_legend_3_devices">3 devices</string>
-    <string name="map_legend_4_plus_devices">4+ devices</string>
+    <!-- Legend title shown once; per-entry labels are just the count so "devices" isn't repeated -->
+    <string name="map_legend_title">Devices</string>
+    <string name="map_legend_2_devices">2</string>
+    <string name="map_legend_3_devices">3</string>
+    <string name="map_legend_4_plus_devices">4+</string>
 
     <!-- Map — current location -->
     <string name="action_current_location">Current location</string>
