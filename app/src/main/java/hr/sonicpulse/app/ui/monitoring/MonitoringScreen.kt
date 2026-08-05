@@ -16,11 +16,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -34,17 +36,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import hr.sonicpulse.app.BuildConfig
 import hr.sonicpulse.app.R
+import hr.sonicpulse.app.observability.SessionLogExporter
 import hr.sonicpulse.app.service.MonitoringService
 import hr.sonicpulse.app.ui.permissions.PermissionDecisionEvaluator
 import hr.sonicpulse.app.ui.theme.Spacing
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
@@ -188,15 +198,46 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
         uiState.errorMessageRes?.let { resId -> snackbarHostState.showSnackbar(context.getString(resId)) }
     }
 
+    // --- Session log export (testing-only, BuildConfig.ENABLE_SESSION_LOGGING): the button
+    // itself is only ever composed when the flag is on (see MonitoringContent) and the launcher
+    // is cheap to register regardless, so it's declared unconditionally here like every other
+    // launcher on this screen. A null uri means the user cancelled the picker — not a failure,
+    // nothing is shown for it. ---
+    val exportSessionLogLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val json = withContext(Dispatchers.Default) { viewModel.sessionLogJson() }
+            val result = if (json != null) {
+                SessionLogExporter.write(context.contentResolver, uri, json)
+            } else {
+                Result.failure(IllegalStateException("No completed session log available"))
+            }
+            val messageRes = if (result.isSuccess) {
+                R.string.session_log_export_success
+            } else {
+                R.string.session_log_export_failed
+            }
+            snackbarHostState.showSnackbar(context.getString(messageRes))
+        }
+    }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
         MonitoringContent(
             uiState = uiState,
             onStart = { requestStartPermissions() },
             onStop = { stopMonitoring(context) },
             onEnableLocation = { requestPreciseLocationUpgrade() },
+            onExportSessionLog = { exportSessionLogLauncher.launch(suggestedSessionLogFileName()) },
             modifier = Modifier.padding(innerPadding)
         )
     }
+}
+
+private fun suggestedSessionLogFileName(): String {
+    val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+    return "sonicpulse-session-$timestamp.json"
 }
 
 private suspend fun showOpenSettingsSnackbar(
@@ -221,6 +262,7 @@ internal fun MonitoringContent(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onEnableLocation: () -> Unit,
+    onExportSessionLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -255,6 +297,18 @@ internal fun MonitoringContent(
             locationDisplayState = uiState.locationDisplayState
         )
         LastDetectionCard(uiState.lastDetection)
+        // Hidden entirely (not just disabled) when the build doesn't have session logging, and
+        // hidden until a session has actually finished — only "disabled while monitoring is
+        // active" is a true enabled/disabled state rather than a presence/absence one.
+        if (BuildConfig.ENABLE_SESSION_LOGGING && uiState.sessionLogAvailable) {
+            OutlinedButton(
+                onClick = onExportSessionLog,
+                enabled = !uiState.microphoneActive,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.action_export_session_log))
+            }
+        }
     }
 }
 

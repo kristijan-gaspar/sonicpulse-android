@@ -469,6 +469,17 @@ class DetectionEngineTest {
     }
 
     @Test
+    fun `lastBlockMetrics blockIndex matches the number of blocks already processed`() {
+        val engine = DetectionEngine(config)
+
+        engine.process(silenceBlock())
+        engine.process(silenceBlock())
+        engine.process(silenceBlock())
+
+        assertEquals(2L, engine.lastBlockMetrics!!.blockIndex)
+    }
+
+    @Test
     fun `lastBlockMetrics baseline is the pre-update value used for this block's spike, not the value after`() {
         val engine = DetectionEngine(config)
         val baselineBeforeFirstCall = engine.currentBaseline

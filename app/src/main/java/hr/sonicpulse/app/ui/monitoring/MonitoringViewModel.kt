@@ -12,6 +12,7 @@ import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.domain.model.SubmissionFailureReason
 import hr.sonicpulse.app.domain.model.SubmissionStatus
+import hr.sonicpulse.app.observability.DetectionSessionLogger
 import hr.sonicpulse.app.repository.MonitoringState
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.app.service.LocationRefreshFailure
@@ -22,26 +23,30 @@ import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
 @HiltViewModel
 class MonitoringViewModel @Inject constructor(
     monitoringStateRepository: MonitoringStateRepository,
-    private val permissionRequestHistory: PermissionRequestHistory
+    private val permissionRequestHistory: PermissionRequestHistory,
+    private val detectionSessionLogger: DetectionSessionLogger
 ) : ViewModel() {
 
-    val uiState: StateFlow<MonitoringUiState> = monitoringStateRepository.state
-        .map { it.toUiState() }
-        .stateIn(
-            scope = viewModelScope,
-            // Eager, not WhileSubscribed: MonitoringStateRepository is a singleton fed by
-            // MonitoringService regardless of whether this screen is visible, so there is no
-            // "no one's watching" case worth optimizing for, and eager sharing keeps uiState.value
-            // correct even before a collector subscribes.
-            started = SharingStarted.Eagerly,
-            initialValue = monitoringStateRepository.state.value.toUiState()
-        )
+    val uiState: StateFlow<MonitoringUiState> = combine(
+        monitoringStateRepository.state,
+        detectionSessionLogger.hasCompletedSession
+    ) { state, sessionLogAvailable ->
+        state.toUiState(sessionLogAvailable)
+    }.stateIn(
+        scope = viewModelScope,
+        // Eager, not WhileSubscribed: MonitoringStateRepository is a singleton fed by
+        // MonitoringService regardless of whether this screen is visible, so there is no
+        // "no one's watching" case worth optimizing for, and eager sharing keeps uiState.value
+        // correct even before a collector subscribes.
+        started = SharingStarted.Eagerly,
+        initialValue = monitoringStateRepository.state.value.toUiState(detectionSessionLogger.hasCompletedSession.value)
+    )
 
     /** Whether [permission] has ever been requested before this installation — see
      * [PermissionRequestHistory] for why Android itself doesn't expose this. */
@@ -51,12 +56,17 @@ class MonitoringViewModel @Inject constructor(
     suspend fun markPermissionRequested(permission: String) {
         permissionRequestHistory.markRequested(permission)
     }
+
+    /** The latest completed session log as JSON, or null if none exists — see
+     * [DetectionSessionLogger.exportJson]. Cheap enough to call directly, but callers should
+     * still do so off the main thread since it's invoked as part of a larger export flow. */
+    fun sessionLogJson(): String? = detectionSessionLogger.exportJson()
 }
 
 private val TimestampFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("HH:mm:ss", Locale.getDefault()).withZone(ZoneId.systemDefault())
 
-private fun MonitoringState.toUiState(): MonitoringUiState = MonitoringUiState(
+private fun MonitoringState.toUiState(sessionLogAvailable: Boolean): MonitoringUiState = MonitoringUiState(
     phase = computePhase(this),
     locationDisplayState = computeLocationDisplayState(this),
     microphoneActive = isMonitoring,
@@ -65,7 +75,8 @@ private fun MonitoringState.toUiState(): MonitoringUiState = MonitoringUiState(
     lastDetection = sessionDetections.lastOrNull()?.toUiModel(),
     serverConfigurationError = serverConfigurationError,
     errorMessageRes = errorMessageRes(this),
-    errorEventId = errorEventId
+    errorEventId = errorEventId,
+    sessionLogAvailable = sessionLogAvailable
 )
 
 private fun computePhase(state: MonitoringState): MonitoringPhase {
