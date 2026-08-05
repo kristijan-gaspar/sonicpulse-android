@@ -61,8 +61,14 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             TriggerEvaluator.shouldTrigger(signal.dbfs, signal.spike, signal.crest, signal.clipRatio, config)
         // The looser release condition — only ever used to decide whether an already-open event
         // is still active; never reapplies the full onset trigger (crest/clip/dbfs) to a
-        // candidate that has already started.
-        val stillActive = signal.spike > config.releaseSpikeMin
+        // candidate that has already started. Peak-relative, not baseline-relative: a frozen
+        // background baseline can sit far below the real room level, so comparing against it
+        // (as spike does) could keep ordinary room noise "active" long after a short impulse has
+        // actually ended. Comparing against the candidate's own strongest block so far avoids
+        // that regardless of how far off the baseline is. eventPeakDbfs here is still the peak as
+        // it stood *before* this block — handleActiveBlock() below updates it afterward, so a
+        // later, louder active block raises the release boundary for every block that follows it.
+        val stillActive = signal.dbfs > eventPeakDbfs - config.releaseDropDb
 
         // Baseline reflects the established background, not the candidate block itself:
         // a block that starts a detection must not be allowed to raise its own reference.

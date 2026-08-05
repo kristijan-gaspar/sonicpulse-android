@@ -6,9 +6,11 @@ import kotlinx.serialization.Serializable
  * Version 2 replaced the accepted-only `detections` list with an outcome-carrying `candidates`
  * list (see [CandidateLogEntry]) and added candidate-retention accounting
  * ([SessionLogDocument.totalCandidateCount], [SessionLogDocument.recordedCandidateCount],
- * [SessionLogDocument.candidatesTruncated]) — a testing-only artifact gated behind
+ * [SessionLogDocument.candidatesTruncated]). Version 3 replaced the baseline-relative
+ * `releaseSpikeMin` field with the peak-relative `releaseDropDb` (see
+ * [hr.sonicpulse.engine.EngineConfig.releaseDropDb]) — a testing-only artifact gated behind
  * `BuildConfig.ENABLE_SESSION_LOGGING`, so no migration path for existing exported files. */
-const val SESSION_LOG_SCHEMA_VERSION = 2
+const val SESSION_LOG_SCHEMA_VERSION = 3
 
 /** One completed monitoring session, ready to serialize and export — the top-level exported
  * document. All instants are ISO-8601 strings (`java.time.Instant.toString()`), not epoch
@@ -53,7 +55,7 @@ data class EngineConfigSnapshot(
     val alphaUp: Double,
     val dbfsMin: Double,
     val spikeMin: Double,
-    val releaseSpikeMin: Double,
+    val releaseDropDb: Double,
     val crestMin: Double,
     val crestWindowBlocks: Int,
     val clipLevel: Int,
