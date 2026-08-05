@@ -200,6 +200,9 @@ class MonitoringService : Service() {
 
     private fun startAudioCapture() {
         firstBlockInstant = null
+        // Only prepares the log session — it is not genuinely activated (and does not disturb a
+        // previously completed, still-exportable session) until the first real block arrives via
+        // onBlock() in handleBlock() below. See DetectionSessionLogger's KDoc.
         detectionSessionLogger.startSession(engineConfig)
 
         val engine = DetectionEngine(engineConfig)

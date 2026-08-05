@@ -21,22 +21,29 @@ import kotlinx.coroutines.flow.StateFlow
  */
 interface DetectionSessionLogger {
 
-    /** True once a finished session is available to export — false again the moment a *new*
-     * session starts (see [startSession]). Never true while a session is still in progress. */
+    /** True once a finished session is available to export — false again once a *new* session is
+     * genuinely activated by its first [onBlock] call, not merely prepared via [startSession].
+     * Never true while a session is actively being recorded. */
     val hasCompletedSession: StateFlow<Boolean>
 
-    /** Begins a new session, replacing any still-in-progress session and discarding the
-     * previous completed session (if any) — this is the one moment that discard is allowed. */
+    /** Prepares a new session (captures config/device identity) and discards any still-in-progress
+     * *activated* session's buffered data. Deliberately does not yet touch the previous completed
+     * session — a capture attempt that never produces a single block (e.g. a synchronous
+     * `AudioRecord` failure) must not destroy the last export. The previous completed session is
+     * only discarded once this prepared session is genuinely activated — see [onBlock]. */
     fun startSession(config: EngineConfig)
 
     /** [event] is non-null exactly on the block where the engine actually emitted a
      * [DetectionEvent] — see [FinalizedEvent]. Must be safe to call before [startSession] (a
-     * no-op) and safe to call many times per second. */
+     * no-op) and safe to call many times per second. The *first* call after a [startSession]
+     * genuinely activates that session (see implementations for what that means). */
     fun onBlock(metrics: BlockMetrics, event: FinalizedEvent?)
 
-    /** Finalizes the in-progress session into the latest completed session, if one is in
-     * progress. Idempotent: a no-op when no session is in progress (already finished, or never
-     * started) — safe to call from more than one teardown path. */
+    /** Finalizes the in-progress session into the latest completed session, if one was genuinely
+     * activated (received at least one [onBlock] call). Idempotent: a no-op when no session is
+     * in progress (already finished, never started, or prepared but never activated) — safe to
+     * call from more than one teardown path, and safe after a capture attempt that never produced
+     * a block (the previous completed session is left untouched in that case). */
     fun finishSession()
 
     /** The latest completed session as pretty-printed JSON, or null if none exists yet. Safe to

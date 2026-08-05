@@ -50,10 +50,17 @@ data class EngineConfigSnapshot(
 )
 
 /** One accepted [hr.sonicpulse.engine.DetectionEvent], with enough context to understand why the
- * engine accepted it. [durationBlocks]/[durationMillis] and [maxDbfs]/[maxSpike]/[maxCrest]/
- * [maxClipRatio] describe only the triggered event itself (DETECTING plus its non-trigger tail);
- * [blocks] (and [blockCount]) additionally include the small pre-event ring-buffer context for
- * reference, so they cover a slightly wider span than the duration/max figures do. */
+ * engine accepted it. [durationBlocks]/[durationMillis] and [maxDbfs]/[maxSpike]/[maxCrestFactorDb]/
+ * [maxClipRatio] describe the *complete* triggered event (DETECTING plus its non-trigger tail),
+ * derived from every block that actually arrived — regardless of [blocksTruncated]. [blocks]
+ * additionally includes the small pre-event ring-buffer context for reference, so it covers a
+ * slightly wider span than the duration/max figures do.
+ *
+ * [totalEventBlockCount] is the real number of blocks the event consisted of;
+ * [recordedBlockCount] is `blocks.size` (pre-event context plus however many detailed event
+ * blocks were actually retained). The two differ, and [blocksTruncated] is true, only for an
+ * event long enough to exceed [JsonDetectionSessionLogger.MAX_DETAILED_EVENT_BLOCKS] — a
+ * pathological sustained trigger, not a normal impulsive event. */
 @Serializable
 data class DetectionLogEntry(
     val detectedAt: String,
@@ -63,16 +70,20 @@ data class DetectionLogEntry(
     val durationMillis: Long,
     val maxDbfs: Double,
     val maxSpike: Double,
-    val maxCrest: Double?,
+    val maxCrestFactorDb: Double?,
     val maxClipRatio: Double,
-    val blockCount: Int,
+    val totalEventBlockCount: Int,
+    val recordedBlockCount: Int,
+    val blocksTruncated: Boolean,
     val blocks: List<BlockLogEntry>
 )
 
 /** One [hr.sonicpulse.engine.BlockMetrics] record belonging to a detection — either part of the
  * triggered event itself, or the small pre-event ring-buffer context that preceded it (both are
  * present in [DetectionLogEntry.blocks]; [relativeToPeakMillis] can be negative for pre-event or
- * early-event blocks). */
+ * early-event blocks). [crestFactorDb] is a peak-to-RMS ratio expressed in dB, not a level
+ * relative to digital full scale — despite the sibling fields' `Dbfs` naming, crest factor is
+ * never dBFS. */
 @Serializable
 data class BlockLogEntry(
     val blockIndex: Long,
@@ -81,7 +92,7 @@ data class BlockLogEntry(
     val dbfs: Double,
     val baselineDbfs: Double,
     val spikeDb: Double,
-    val crestDbfs: Double?,
+    val crestFactorDb: Double?,
     val clipRatio: Double,
     val state: String
 )

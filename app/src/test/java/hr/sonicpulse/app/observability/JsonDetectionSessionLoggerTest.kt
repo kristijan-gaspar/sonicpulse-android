@@ -16,6 +16,11 @@ class JsonDetectionSessionLoggerTest {
 
     private val config = EngineConfig()
 
+    /** Mirrors [JsonDetectionSessionLogger]'s private `MAX_DETAILED_EVENT_BLOCKS` — kept as a
+     * literal here (the constant is intentionally private) rather than duplicating the engine's
+     * own calculation. */
+    private val maxDetailedEventBlocks = 100
+
     private fun metrics(
         blockIndex: Long,
         dbfs: Double = -60.0,
@@ -78,6 +83,19 @@ class JsonDetectionSessionLoggerTest {
         assertTrue(document.detections.isEmpty())
     }
 
+    @Test
+    fun `a genuinely activated session with zero detections remains exportable`() {
+        val logger = JsonDetectionSessionLogger()
+
+        logger.startTestSession()
+        logger.onBlock(metrics(0, state = DetectionState.IDLE), null) // the one block that activates it
+        logger.finishSession()
+
+        assertEquals(true, logger.hasCompletedSession.value)
+        val document = decode(requireNotNull(logger.exportJson()))
+        assertTrue(document.detections.isEmpty())
+    }
+
     // --- event metric aggregation ---
 
     @Test
@@ -100,8 +118,12 @@ class JsonDetectionSessionLoggerTest {
 
         assertEquals(-15.0, entry.maxDbfs, 0.0)
         assertEquals(40.0, entry.maxSpike, 0.0)
-        assertEquals(12.0, entry.maxCrest!!, 0.0)
+        assertEquals(12.0, entry.maxCrestFactorDb!!, 0.0)
         assertEquals(0.1, entry.maxClipRatio, 0.0)
+        // A short, normal event must never be reported as truncated.
+        assertEquals(false, entry.blocksTruncated)
+        assertEquals(3, entry.totalEventBlockCount)
+        assertEquals(entry.blocks.size, entry.recordedBlockCount)
     }
 
     // --- pre-event ring-buffer behavior ---
@@ -121,9 +143,79 @@ class JsonDetectionSessionLoggerTest {
 
         val entry = decode(requireNotNull(logger.exportJson())).detections.single()
         // 5 pre-event context blocks (indices 15..19) + 2 event blocks (20, 21).
-        assertEquals(7, entry.blockCount)
+        assertEquals(7, entry.recordedBlockCount)
+        assertEquals(entry.recordedBlockCount, entry.blocks.size)
         assertEquals(15L, entry.blocks.first().blockIndex)
         assertEquals(21L, entry.blocks.last().blockIndex)
+    }
+
+    @Test
+    fun `a second event starting right after the first never inherits stale pre-event context`() {
+        val logger = JsonDetectionSessionLogger()
+        logger.startTestSession()
+
+        // Fills the ring buffer with blocks that belong to *before* the first event.
+        repeat(5) { logger.onBlock(metrics(it.toLong(), state = DetectionState.IDLE), null) } // indices 0..4
+
+        // First event starts and finishes with no IDLE block in between (as with a short or zero
+        // cooldown configuration) — the ring buffer must be cleared the moment it starts.
+        logger.onBlock(metrics(5, state = DetectionState.DETECTING), null)
+        val firstEvent = DetectionEvent(peakDbfs = -12.0, peakBlockIndex = 5)
+        logger.onBlock(metrics(6, state = DetectionState.COOLDOWN), FinalizedEvent(firstEvent, Instant.parse("2026-01-01T00:00:00Z")))
+
+        // Second event starts immediately — still no IDLE block since the first event began, so
+        // the ring buffer would still hold the stale 0..4 blocks if it were never cleared.
+        logger.onBlock(metrics(7, state = DetectionState.DETECTING), null)
+        val secondEvent = DetectionEvent(peakDbfs = -8.0, peakBlockIndex = 7)
+        logger.onBlock(metrics(8, state = DetectionState.COOLDOWN), FinalizedEvent(secondEvent, Instant.parse("2026-01-01T00:00:05Z")))
+
+        logger.finishSession()
+        val detections = decode(requireNotNull(logger.exportJson())).detections
+        val secondEntry = detections[1]
+
+        assertTrue("second event must not contain any block from before it started", secondEntry.blocks.none { it.blockIndex < 7 })
+        assertEquals(2, secondEntry.blocks.size)
+        assertEquals(7L, secondEntry.blocks.first().blockIndex)
+    }
+
+    // --- bounded retained event detail ---
+
+    @Test
+    fun `an event longer than the detailed-block cap truncates retained blocks but keeps full duration and maximums`() {
+        val logger = JsonDetectionSessionLogger()
+        logger.startTestSession()
+
+        val totalEventBlocks = maxDetailedEventBlocks + 50
+        // The loudest block is deliberately the very last one — well past the cap — to prove
+        // aggregate figures keep updating from every block, not just the retained detail records.
+        for (i in 0 until totalEventBlocks) {
+            val isLast = i == totalEventBlocks - 1
+            val metrics = metrics(
+                blockIndex = i.toLong(),
+                dbfs = if (isLast) -1.0 else -50.0,
+                state = if (isLast) DetectionState.COOLDOWN else DetectionState.DETECTING
+            )
+            val finalized = if (isLast) {
+                FinalizedEvent(DetectionEvent(peakDbfs = -1.0, peakBlockIndex = (totalEventBlocks - 1).toLong()), Instant.EPOCH)
+            } else {
+                null
+            }
+            logger.onBlock(metrics, finalized)
+        }
+        logger.finishSession()
+
+        val entry = decode(requireNotNull(logger.exportJson())).detections.single()
+
+        assertEquals(totalEventBlocks, entry.totalEventBlockCount)
+        assertEquals(true, entry.blocksTruncated)
+        // No pre-event context here (the event starts on the very first block of the test), so
+        // recordedBlockCount is exactly the detail cap.
+        assertEquals(maxDetailedEventBlocks, entry.recordedBlockCount)
+        assertEquals(maxDetailedEventBlocks, entry.blocks.size)
+        // Full span, not just the retained detail records.
+        assertEquals(totalEventBlocks, entry.durationBlocks)
+        // The peak block (past the cap) is still reflected in the aggregate maximum.
+        assertEquals(-1.0, entry.maxDbfs, 0.0)
     }
 
     // --- multiple detections in one session ---
@@ -179,7 +271,7 @@ class JsonDetectionSessionLoggerTest {
         assertEquals(1, decode(requireNotNull(secondExport)).detections.size)
     }
 
-    // --- replacement of an active session ---
+    // --- replacement of an active/completed session (prepared vs. genuinely activated) ---
 
     @Test
     fun `starting a new session discards an unfinished previous session's in-progress data`() {
@@ -197,17 +289,48 @@ class JsonDetectionSessionLoggerTest {
     }
 
     @Test
-    fun `starting a new session clears a previously completed session until the new one finishes`() {
+    fun `starting a new session does not discard the previous completed session until the new one activates`() {
         val logger = JsonDetectionSessionLogger()
         logger.startTestSession()
         logger.onBlock(metrics(0), null)
         logger.finishSession()
         assertEquals(true, logger.hasCompletedSession.value)
+        val previousJson = requireNotNull(logger.exportJson())
+
+        logger.startTestSession() // only prepared — no block has arrived for it yet
+
+        assertEquals(true, logger.hasCompletedSession.value)
+        assertEquals(previousJson, logger.exportJson())
+    }
+
+    @Test
+    fun `the first real block after startSession activates it, only then replacing the previous completed session`() {
+        val logger = JsonDetectionSessionLogger()
+        logger.startTestSession()
+        logger.onBlock(metrics(0), null)
+        logger.finishSession()
+        check(logger.hasCompletedSession.value)
 
         logger.startTestSession()
+        logger.onBlock(metrics(0, state = DetectionState.IDLE), null) // the genuine activation
 
         assertEquals(false, logger.hasCompletedSession.value)
         assertNull(logger.exportJson())
+    }
+
+    @Test
+    fun `a capture attempt that never activates preserves the previous completed session through finishSession`() {
+        val logger = JsonDetectionSessionLogger()
+        logger.startTestSession()
+        logger.onBlock(metrics(0), null)
+        logger.finishSession()
+        val previousJson = requireNotNull(logger.exportJson())
+
+        logger.startTestSession() // e.g. AudioRecorder is about to start
+        logger.finishSession() // capture failed (or was stopped) before any block ever arrived
+
+        assertEquals(true, logger.hasCompletedSession.value)
+        assertEquals(previousJson, logger.exportJson())
     }
 
     // --- valid JSON serialization ---
