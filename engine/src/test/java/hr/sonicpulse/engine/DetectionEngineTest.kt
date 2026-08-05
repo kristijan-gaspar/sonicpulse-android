@@ -31,18 +31,33 @@ class DetectionEngineTest {
     private fun clippedPlateauBlock(size: Int = config.blockSize): ShortArray =
         ShortArray(size) { index -> if (index < 600) 32_700 else 0 }
 
-    /**
-     * Against a baseline pinned at [EngineConfig.dbfsFloor] (via [feedSilence] during warmup),
-     * this short, quiet burst lands at roughly -110 dBFS — a spike of ~10 relative to that
-     * baseline. That clears the default releaseSpikeMin (6.0), so the block counts as "still
-     * active", but falls well short of spikeMin (15.0), so it can never satisfy the strict onset
-     * trigger on its own regardless of its crest or clip ratio.
-     */
-    private fun releaseActiveButBelowOnsetBlock(size: Int = config.blockSize): ShortArray {
-        val burstSize = 11
-        val amplitude: Short = 1
-        return ShortArray(size) { index -> if (index < burstSize) amplitude else 0 }
+    /** Computed dBFS of a block containing [burstSize] samples of [amplitude] and silence
+     * elsewhere in a [size]-sample block — the exact shape [impulseBlock] uses, exposed as a
+     * reusable formula for tests that need to reason about dBFS in absolute terms rather than
+     * relative to a baseline. */
+    private fun burstDbfs(amplitude: Int, burstSize: Int, size: Int = config.blockSize): Double {
+        val rms = amplitude * sqrt(burstSize.toDouble() / size)
+        return 20.0 * log10(rms / 32768.0)
     }
+
+    /** [impulseBlock]'s own dBFS level, in absolute terms — the typical onset/peak level used
+     * throughout this file. */
+    private val impulseDbfs = burstDbfs(amplitude = 20_000, burstSize = 32)
+
+    /** A flat (constant-amplitude, crest ~0) block at a precisely controlled [dbfs] level. A
+     * block this flat can never satisfy the strict onset trigger on its own regardless of how
+     * loud [dbfs] is (crestMin requires a real impulse shape) — safe to use for release-only
+     * scenarios without accidentally starting a *new* candidate. */
+    private fun flatBlockAt(dbfs: Double, size: Int = config.blockSize): ShortArray {
+        val amplitude = (32_768.0 * 10.0.pow(dbfs / 20.0)).toInt().coerceIn(1, 32_767)
+        return ShortArray(size) { amplitude.toShort() }
+    }
+
+    /** A flat block [dropFromPeakDb] below [peakDbfs] — clears the peak-relative release
+     * condition as long as [dropFromPeakDb] is less than [EngineConfig.releaseDropDb], while
+     * (per [flatBlockAt]) never satisfying the full onset trigger on its own. */
+    private fun releaseActiveFlatBlock(peakDbfs: Double, dropFromPeakDb: Double = 10.0): ShortArray =
+        flatBlockAt(peakDbfs - dropFromPeakDb)
 
     private fun feedSilence(engine: DetectionEngine, count: Int) {
         repeat(count) { engine.process(silenceBlock()) }
@@ -259,9 +274,11 @@ class DetectionEngineTest {
         }
 
         engine.process(burstBlock(impulseAmplitude))
-        val closingEvents = (0 until config.endSilenceBlocks).mapNotNull {
-            engine.process(ShortArray(config.blockSize) { seedAmplitude.toShort() })
-        }
+        // Closes with silence, not another seedAmplitude ("ambient") block: under the
+        // peak-relative release condition, a block only ~15 dB below the onset peak (as
+        // seedAmplitude blocks are here) still counts as release-active, so silence —
+        // dramatically below any realistic peak — is what genuinely closes the candidate.
+        val closingEvents = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
 
         assertEquals(1, closingEvents.size)
     }
@@ -294,10 +311,10 @@ class DetectionEngineTest {
         val plateauIndex = impulseIndex + 1
         engine.process(loudPlateauBlock())
 
-        // The plateau clears releaseSpikeMin (it is release-active), so it resets the inactive
-        // counter to zero — closing the event now needs the *full* endSilenceBlocks count of
-        // trailing inactive blocks, not one fewer as it would if the plateau had merely been
-        // ignored.
+        // The plateau is within releaseDropDb of the (old) peak — in fact louder than it — so it
+        // is release-active and resets the inactive counter to zero; closing the event now needs
+        // the *full* endSilenceBlocks count of trailing inactive blocks, not one fewer as it
+        // would if the plateau had merely been ignored.
         val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
 
         assertEquals(1, events.size)
@@ -552,10 +569,10 @@ class DetectionEngineTest {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
-        engine.process(impulseBlock()) // onset -> DETECTING
+        engine.process(impulseBlock()) // onset -> DETECTING, peak = impulseDbfs
         engine.process(silenceBlock()) // 1st of endSilenceBlocks inactive confirmation blocks
 
-        val stillOpen = engine.process(releaseActiveButBelowOnsetBlock())
+        val stillOpen = engine.process(releaseActiveFlatBlock(peakDbfs = impulseDbfs))
         assertNull(stillOpen) // fails the full onset trigger, but stays active — event remains open
 
         // If the inactive counter had not been reset by the release-active block above, only
@@ -567,6 +584,78 @@ class DetectionEngineTest {
         // ...the full endSilenceBlocks count, counted fresh from the reset, is required.
         val closing = engine.process(silenceBlock())
         assertNotNull(closing)
+    }
+
+    // --- peak-relative release (releaseDropDb) ---
+
+    @Test
+    fun `a candidate closes after exactly endSilenceBlocks blocks more than releaseDropDb below its peak`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // onset, peak = impulseDbfs
+        val belowRelease = flatBlockAt(impulseDbfs - config.releaseDropDb - 5.0) // comfortably beyond the drop
+        val results = (0 until config.endSilenceBlocks).map { engine.process(belowRelease) }
+
+        assertEquals(config.endSilenceBlocks - 1, results.count { it == null })
+        assertNotNull(results.last())
+    }
+
+    @Test
+    fun `a very low frozen baseline does not keep a completed short impulse active`() {
+        // Reproduces the reported bug directly: a background baseline pinned near dbfsFloor
+        // (silence during warmup), followed by an impulse, then blocks at a realistic room-noise
+        // level that is comfortably above the OLD baseline-relative releaseSpikeMin threshold —
+        // spike here would be roughly 60 relative to the frozen -120 dBFS baseline, far above the
+        // old 6.0 threshold — but well more than releaseDropDb below the candidate's own peak.
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+        check(engine.currentBaseline == config.dbfsFloor)
+
+        engine.process(impulseBlock()) // onset, peak = impulseDbfs (~-19.3 dBFS)
+        val roomNoise = flatBlockAt(-60.0) // far louder than the frozen baseline, far quieter than the peak
+        val results = (0 until config.endSilenceBlocks).mapNotNull { engine.process(roomNoise) }
+
+        assertEquals(1, results.size)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+    }
+
+    @Test
+    fun `a block at or just below the release boundary is inactive`() {
+        // flatBlockAt() converts a requested dBFS value into an integer PCM amplitude
+        // (truncating toward zero), so the block it generates lands at or slightly below the
+        // requested level, never above it — this proves the boundary is not still-active, not
+        // that the comparison is exact to the floating-point boundary.
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // onset, peak = impulseDbfs
+        val atOrBelowBoundary = flatBlockAt(impulseDbfs - config.releaseDropDb)
+        val results = (0 until config.endSilenceBlocks).map { engine.process(atOrBelowBoundary) }
+
+        assertEquals(config.endSilenceBlocks - 1, results.count { it == null })
+        assertNotNull(results.last())
+    }
+
+    @Test
+    fun `a sustained signal that stays within releaseDropDb of its peak still reaches the hard duration limit and is rejected TOO_LONG`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // block 1 of the span, peak = impulseDbfs
+        val sustainedNearPeak = flatBlockAt(impulseDbfs - 5.0) // within releaseDropDb (20.0) of the peak throughout
+        val upToCap = (1 until config.maxEventDurationBlocks).map { engine.process(sustainedNearPeak) } // blocks 2..30
+        assertTrue(upToCap.all { it == null })
+        assertNull(engine.lastCandidateCompletion)
+
+        val result = engine.process(sustainedNearPeak) // block 31: duration 31 -> rejected
+
+        assertNull(result)
+        val rejected = engine.lastCandidateCompletion
+        assertTrue(rejected is CandidateCompletion.Rejected)
+        rejected as CandidateCompletion.Rejected
+        assertEquals(CandidateRejectionReason.TOO_LONG, rejected.reason)
+        assertEquals(config.maxEventDurationBlocks + 1, rejected.durationBlocks)
     }
 
     @Test

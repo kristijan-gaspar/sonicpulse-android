@@ -522,7 +522,7 @@ class JsonDetectionSessionLoggerTest {
     // --- valid JSON serialization ---
 
     @Test
-    fun `exported JSON is valid, pretty-printed and round-trips with schema version exactly 2`() {
+    fun `exported JSON is valid, pretty-printed and round-trips with schema version exactly 3`() {
         val logger = JsonDetectionSessionLogger()
         logger.startTestSession()
         logger.onBlock(metrics(0), null)
@@ -532,8 +532,21 @@ class JsonDetectionSessionLoggerTest {
 
         assertTrue("expected pretty-printed output to contain newlines", json.contains("\n"))
         val document = decode(json) // throws on invalid JSON
-        assertEquals(2, SESSION_LOG_SCHEMA_VERSION)
+        assertEquals(3, SESSION_LOG_SCHEMA_VERSION)
         assertEquals(SESSION_LOG_SCHEMA_VERSION, document.schemaVersion)
+    }
+
+    @Test
+    fun `exported JSON contains releaseDropDb and never releaseSpikeMin`() {
+        val logger = JsonDetectionSessionLogger()
+        logger.startTestSession()
+        logger.onBlock(metrics(0), null)
+        logger.finishSession()
+
+        val json = requireNotNull(logger.exportJson())
+
+        assertTrue(json.contains("releaseDropDb"))
+        assertTrue(!json.contains("releaseSpikeMin"))
     }
 
     @Test
@@ -563,7 +576,7 @@ class JsonDetectionSessionLoggerTest {
             alphaUp = 0.05,
             dbfsMin = -18.0,
             spikeMin = 12.0,
-            releaseSpikeMin = 5.0,
+            releaseDropDb = 18.0,
             crestMin = 8.0,
             crestWindowBlocks = 4,
             clipLevel = 30_000,
@@ -587,7 +600,7 @@ class JsonDetectionSessionLoggerTest {
         assertEquals(customConfig.alphaUp, snapshot.alphaUp, 0.0)
         assertEquals(customConfig.dbfsMin, snapshot.dbfsMin, 0.0)
         assertEquals(customConfig.spikeMin, snapshot.spikeMin, 0.0)
-        assertEquals(customConfig.releaseSpikeMin, snapshot.releaseSpikeMin, 0.0)
+        assertEquals(customConfig.releaseDropDb, snapshot.releaseDropDb, 0.0)
         assertEquals(customConfig.crestMin, snapshot.crestMin, 0.0)
         assertEquals(customConfig.crestWindowBlocks, snapshot.crestWindowBlocks)
         assertEquals(customConfig.clipLevel, snapshot.clipLevel)
