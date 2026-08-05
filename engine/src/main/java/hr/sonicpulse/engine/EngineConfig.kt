@@ -7,11 +7,13 @@ data class EngineConfig(
     val alphaUp: Double = 0.02,
     val dbfsMin: Double = -20.0,
     val spikeMin: Double = 15.0,
+    val releaseSpikeMin: Double = 6.0,
     val crestMin: Double = 10.0,
     val crestWindowBlocks: Int = 3,
     val clipLevel: Int = 32_000,
     val clipRatioMin: Double = 0.02,
     val endSilenceBlocks: Int = 3,
+    val maxEventDurationBlocks: Int = 30,
     val cooldownBlocks: Int = 30,
     val warmupBlocks: Int = 43,
     val dbfsFloor: Double = -120.0
@@ -45,6 +47,12 @@ data class EngineConfig(
         require(spikeMin.isFinite() && spikeMin > 0.0) {
             "spikeMin must be finite and positive, was $spikeMin."
         }
+        require(releaseSpikeMin.isFinite() && releaseSpikeMin >= 0.0) {
+            "releaseSpikeMin must be finite and non-negative, was $releaseSpikeMin."
+        }
+        require(releaseSpikeMin < spikeMin) {
+            "releaseSpikeMin must be lower than spikeMin ($spikeMin), was $releaseSpikeMin."
+        }
         require(crestMin.isFinite() && crestMin >= 0.0) {
             "crestMin must be finite and non-negative, was $crestMin."
         }
@@ -61,6 +69,9 @@ data class EngineConfig(
 
         require(endSilenceBlocks > 0) {
             "endSilenceBlocks must be positive, was $endSilenceBlocks."
+        }
+        require(maxEventDurationBlocks > 0) {
+            "maxEventDurationBlocks must be positive, was $maxEventDurationBlocks."
         }
         require(cooldownBlocks >= 0) {
             "cooldownBlocks must not be negative, was $cooldownBlocks."

@@ -22,7 +22,7 @@ class NoOpDetectionSessionLoggerTest {
             rms = 0.0, dbfs = -10.0, baseline = -60.0, spike = 50.0, crest = 10.0,
             clipRatio = 0.0, state = DetectionState.DETECTING, blockIndex = 0
         )
-        logger.onBlock(metrics, FinalizedEvent(DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0), Instant.EPOCH))
+        logger.onBlock(metrics, FinalizedEvent(DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 1), Instant.EPOCH))
         logger.finishSession()
 
         assertEquals(false, logger.hasCompletedSession.value)
