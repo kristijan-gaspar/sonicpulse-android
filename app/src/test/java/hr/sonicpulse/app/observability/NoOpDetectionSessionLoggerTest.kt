@@ -1,6 +1,8 @@
 package hr.sonicpulse.app.observability
 
 import hr.sonicpulse.engine.BlockMetrics
+import hr.sonicpulse.engine.CandidateCompletion
+import hr.sonicpulse.engine.CandidateRejectionReason
 import hr.sonicpulse.engine.DetectionEvent
 import hr.sonicpulse.engine.DetectionState
 import hr.sonicpulse.engine.EngineConfig
@@ -22,10 +24,30 @@ class NoOpDetectionSessionLoggerTest {
             rms = 0.0, dbfs = -10.0, baseline = -60.0, spike = 50.0, crest = 10.0,
             clipRatio = 0.0, state = DetectionState.DETECTING, blockIndex = 0
         )
-        logger.onBlock(metrics, FinalizedEvent(DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 1), Instant.EPOCH))
+        val completion = CandidateCompletion.Accepted(DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 1))
+        logger.onBlock(metrics, FinalizedCandidate(completion, Instant.EPOCH))
         logger.finishSession()
 
         assertEquals(false, logger.hasCompletedSession.value)
+    }
+
+    @Test
+    fun `a rejected completion also leaves hasCompletedSession false and exportJson null`() {
+        val logger = NoOpDetectionSessionLogger()
+
+        logger.startSession(EngineConfig())
+        val metrics = BlockMetrics(
+            rms = 0.0, dbfs = -10.0, baseline = -60.0, spike = 20.0, crest = 10.0,
+            clipRatio = 0.0, state = DetectionState.COOLDOWN, blockIndex = 30
+        )
+        val completion = CandidateCompletion.Rejected(
+            reason = CandidateRejectionReason.TOO_LONG, peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 31
+        )
+        logger.onBlock(metrics, FinalizedCandidate(completion, Instant.EPOCH))
+        logger.finishSession()
+
+        assertEquals(false, logger.hasCompletedSession.value)
+        assertNull(logger.exportJson())
     }
 
     @Test

@@ -25,7 +25,6 @@ import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
 import hr.sonicpulse.app.observability.DetectionSessionLogger
-import hr.sonicpulse.app.observability.FinalizedEvent
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
 import hr.sonicpulse.engine.EngineConfig
@@ -250,6 +249,11 @@ class MonitoringService : Service() {
         val startInstant = firstBlockInstant ?: Instant.now().also { firstBlockInstant = it }
 
         val event = engine.process(block)
+        // Read immediately after process(): both only describe the block just processed, and a
+        // later engine.process() call (the next block) would overwrite them.
+        val completion = engine.lastCandidateCompletion
+        val metrics = engine.lastBlockMetrics
+
         // Computed once, here, regardless of which of the two consumers below end up using it —
         // same instant either way, just hoisted so onBlock() and sessionDetectionFor() below both
         // reuse it instead of (potentially) computing it twice.
@@ -257,11 +261,12 @@ class MonitoringService : Service() {
             PeakTimeCalculator.calculate(startInstant, it.peakBlockIndex, engineConfig.sampleRate, engineConfig.blockSize)
         }
 
-        val metrics = engine.lastBlockMetrics
         if (metrics != null) {
             monitoringStateRepository.publishMetrics(metrics)
-            val finalizedEvent = if (event != null && peakTimeClient != null) FinalizedEvent(event, peakTimeClient) else null
-            detectionSessionLogger.onBlock(metrics, finalizedEvent)
+            val finalizedCandidate = completion?.let {
+                finalizedCandidateFor(it, startInstant, engineConfig.sampleRate, engineConfig.blockSize)
+            }
+            detectionSessionLogger.onBlock(metrics, finalizedCandidate)
         }
 
         if (event != null) {
