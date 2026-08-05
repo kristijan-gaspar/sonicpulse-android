@@ -109,7 +109,7 @@ class JsonDetectionSessionLoggerTest {
 
         logger.onBlock(metrics(1, dbfs = -20.0, spike = 30.0, crest = 10.0, clipRatio = 0.0, state = DetectionState.DETECTING), null)
         logger.onBlock(metrics(2, dbfs = -15.0, spike = 40.0, crest = 12.0, clipRatio = 0.1, state = DetectionState.DETECTING), null)
-        val event = DetectionEvent(peakDbfs = -15.0, peakBlockIndex = 2)
+        val event = DetectionEvent(peakDbfs = -15.0, peakBlockIndex = 2, durationBlocks = 1)
         val finalized = FinalizedEvent(event, Instant.parse("2026-01-01T00:00:00Z"))
         logger.onBlock(metrics(3, dbfs = -18.0, spike = 20.0, crest = 8.0, clipRatio = 0.05, state = DetectionState.COOLDOWN), finalized)
 
@@ -137,7 +137,7 @@ class JsonDetectionSessionLoggerTest {
         repeat(20) { logger.onBlock(metrics(it.toLong(), state = DetectionState.IDLE), null) }
 
         logger.onBlock(metrics(20, state = DetectionState.DETECTING), null)
-        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 20)
+        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 20, durationBlocks = 1)
         logger.onBlock(metrics(21, state = DetectionState.COOLDOWN), FinalizedEvent(event, Instant.EPOCH))
         logger.finishSession()
 
@@ -160,13 +160,13 @@ class JsonDetectionSessionLoggerTest {
         // First event starts and finishes with no IDLE block in between (as with a short or zero
         // cooldown configuration) — the ring buffer must be cleared the moment it starts.
         logger.onBlock(metrics(5, state = DetectionState.DETECTING), null)
-        val firstEvent = DetectionEvent(peakDbfs = -12.0, peakBlockIndex = 5)
+        val firstEvent = DetectionEvent(peakDbfs = -12.0, peakBlockIndex = 5, durationBlocks = 1)
         logger.onBlock(metrics(6, state = DetectionState.COOLDOWN), FinalizedEvent(firstEvent, Instant.parse("2026-01-01T00:00:00Z")))
 
         // Second event starts immediately — still no IDLE block since the first event began, so
         // the ring buffer would still hold the stale 0..4 blocks if it were never cleared.
         logger.onBlock(metrics(7, state = DetectionState.DETECTING), null)
-        val secondEvent = DetectionEvent(peakDbfs = -8.0, peakBlockIndex = 7)
+        val secondEvent = DetectionEvent(peakDbfs = -8.0, peakBlockIndex = 7, durationBlocks = 1)
         logger.onBlock(metrics(8, state = DetectionState.COOLDOWN), FinalizedEvent(secondEvent, Instant.parse("2026-01-01T00:00:05Z")))
 
         logger.finishSession()
@@ -196,7 +196,10 @@ class JsonDetectionSessionLoggerTest {
                 state = if (isLast) DetectionState.COOLDOWN else DetectionState.DETECTING
             )
             val finalized = if (isLast) {
-                FinalizedEvent(DetectionEvent(peakDbfs = -1.0, peakBlockIndex = (totalEventBlocks - 1).toLong()), Instant.EPOCH)
+                FinalizedEvent(
+                    DetectionEvent(peakDbfs = -1.0, peakBlockIndex = (totalEventBlocks - 1).toLong(), durationBlocks = totalEventBlocks),
+                    Instant.EPOCH
+                )
             } else {
                 null
             }
@@ -226,12 +229,12 @@ class JsonDetectionSessionLoggerTest {
         logger.startTestSession()
 
         logger.onBlock(metrics(0, state = DetectionState.DETECTING), null)
-        val firstEvent = DetectionEvent(peakDbfs = -12.0, peakBlockIndex = 0)
+        val firstEvent = DetectionEvent(peakDbfs = -12.0, peakBlockIndex = 0, durationBlocks = 1)
         logger.onBlock(metrics(1, state = DetectionState.COOLDOWN), FinalizedEvent(firstEvent, Instant.parse("2026-01-01T00:00:00Z")))
         logger.onBlock(metrics(2, state = DetectionState.IDLE), null)
 
         logger.onBlock(metrics(3, state = DetectionState.DETECTING), null)
-        val secondEvent = DetectionEvent(peakDbfs = -8.0, peakBlockIndex = 3)
+        val secondEvent = DetectionEvent(peakDbfs = -8.0, peakBlockIndex = 3, durationBlocks = 1)
         logger.onBlock(metrics(4, state = DetectionState.COOLDOWN), FinalizedEvent(secondEvent, Instant.parse("2026-01-01T00:00:05Z")))
 
         logger.finishSession()
@@ -259,7 +262,7 @@ class JsonDetectionSessionLoggerTest {
         val logger = JsonDetectionSessionLogger()
         logger.startTestSession()
         logger.onBlock(metrics(0, state = DetectionState.DETECTING), null)
-        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0)
+        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 1)
         logger.onBlock(metrics(1, state = DetectionState.COOLDOWN), FinalizedEvent(event, Instant.EPOCH))
 
         logger.finishSession()
@@ -402,7 +405,7 @@ class JsonDetectionSessionLoggerTest {
 
         logger.onBlock(metrics(10, state = DetectionState.DETECTING), null)
         logger.onBlock(metrics(11, state = DetectionState.DETECTING), null)
-        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 11)
+        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 11, durationBlocks = 1)
         logger.onBlock(metrics(12, state = DetectionState.COOLDOWN), FinalizedEvent(event, Instant.EPOCH))
         logger.finishSession()
 
@@ -419,7 +422,7 @@ class JsonDetectionSessionLoggerTest {
         logger.startTestSession(EngineConfig(sampleRate = 44_100, blockSize = 1024))
 
         logger.onBlock(metrics(0, state = DetectionState.DETECTING), null)
-        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0)
+        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 1)
         logger.onBlock(metrics(1, state = DetectionState.COOLDOWN), FinalizedEvent(event, Instant.EPOCH))
         logger.finishSession()
 

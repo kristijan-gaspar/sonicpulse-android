@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.log10
 import kotlin.math.pow
@@ -29,6 +30,19 @@ class DetectionEngineTest {
     /** A sustained loud plateau: clips heavily, but its flat shape keeps crest low. */
     private fun clippedPlateauBlock(size: Int = config.blockSize): ShortArray =
         ShortArray(size) { index -> if (index < 600) 32_700 else 0 }
+
+    /**
+     * Against a baseline pinned at [EngineConfig.dbfsFloor] (via [feedSilence] during warmup),
+     * this short, quiet burst lands at roughly -110 dBFS — a spike of ~10 relative to that
+     * baseline. That clears the default releaseSpikeMin (6.0), so the block counts as "still
+     * active", but falls well short of spikeMin (15.0), so it can never satisfy the strict onset
+     * trigger on its own regardless of its crest or clip ratio.
+     */
+    private fun releaseActiveButBelowOnsetBlock(size: Int = config.blockSize): ShortArray {
+        val burstSize = 11
+        val amplitude: Short = 1
+        return ShortArray(size) { index -> if (index < burstSize) amplitude else 0 }
+    }
 
     private fun feedSilence(engine: DetectionEngine, count: Int) {
         repeat(count) { engine.process(silenceBlock()) }
@@ -253,7 +267,7 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `a later louder block that fails the full trigger still becomes the tracked peak`() {
+    fun `a later louder release-active block becomes the event peak`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
@@ -280,7 +294,11 @@ class DetectionEngineTest {
         val plateauIndex = impulseIndex + 1
         engine.process(loudPlateauBlock())
 
-        val events = (0 until config.endSilenceBlocks - 1).mapNotNull { engine.process(silenceBlock()) }
+        // The plateau clears releaseSpikeMin (it is release-active), so it resets the inactive
+        // counter to zero — closing the event now needs the *full* endSilenceBlocks count of
+        // trailing inactive blocks, not one fewer as it would if the plateau had merely been
+        // ignored.
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
 
         assertEquals(1, events.size)
         assertEquals(plateauDbfs, events.single().peakDbfs, 1e-9)
@@ -311,7 +329,7 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `one non-trigger block does not end an open detection`() {
+    fun `one inactive block does not end an open detection`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
@@ -322,7 +340,7 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `endSilenceBlocks minus one consecutive non-trigger blocks do not end an open detection`() {
+    fun `endSilenceBlocks minus one consecutive inactive blocks do not end an open detection`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
@@ -333,7 +351,7 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `exactly endSilenceBlocks consecutive non-trigger blocks end the detection`() {
+    fun `exactly endSilenceBlocks consecutive inactive blocks end the detection`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
@@ -345,15 +363,15 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `a new trigger before reaching endSilenceBlocks resets the non-trigger counter`() {
+    fun `a release-active block before reaching endSilenceBlocks resets the inactive counter`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
         engine.process(impulseBlock())
-        engine.process(silenceBlock()) // 1 non-trigger block toward the count
-        engine.process(impulseBlock()) // re-triggers mid-DETECTING, resets the counter to 0
+        engine.process(silenceBlock()) // 1 inactive block toward the count
+        engine.process(impulseBlock()) // release-active block mid-DETECTING, resets the inactive counter to 0
 
-        val stillOpen = engine.process(silenceBlock()) // this is only the 1st non-trigger block since the reset
+        val stillOpen = engine.process(silenceBlock()) // this is only the 1st inactive block since the reset
         val closing = (0 until config.endSilenceBlocks - 1).mapNotNull { engine.process(silenceBlock()) }
 
         assertNull(stillOpen)
@@ -525,5 +543,250 @@ class DetectionEngineTest {
         repeat(zeroCooldownConfig.endSilenceBlocks) { engine.process(silenceBlock()) }
 
         assertEquals(DetectionState.IDLE, engine.lastBlockMetrics!!.state)
+    }
+
+    // --- release-active semantics, event duration and candidate completions ---
+
+    @Test
+    fun `a release-active block that fails onset keeps the event open and resets the inactive counter`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // onset -> DETECTING
+        engine.process(silenceBlock()) // 1st of endSilenceBlocks inactive confirmation blocks
+
+        val stillOpen = engine.process(releaseActiveButBelowOnsetBlock())
+        assertNull(stillOpen) // fails the full onset trigger, but stays active — event remains open
+
+        // If the inactive counter had not been reset by the release-active block above, only
+        // 2 more inactive blocks (endSilenceBlocks - 1) would be needed to close it. Supplying
+        // exactly that many must NOT close the event...
+        val notYetClosed = (0 until config.endSilenceBlocks - 1).mapNotNull { engine.process(silenceBlock()) }
+        assertEquals(emptyList<DetectionEvent>(), notYetClosed)
+
+        // ...the full endSilenceBlocks count, counted fresh from the reset, is required.
+        val closing = engine.process(silenceBlock())
+        assertNotNull(closing)
+    }
+
+    @Test
+    fun `durationBlocks excludes the trailing inactive confirmation blocks`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // the only active block of this event
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        assertEquals(1, events.size)
+        assertEquals(1, events.single().durationBlocks)
+    }
+
+    @Test
+    fun `an internal inactive gap shorter than endSilenceBlocks is included in the duration span`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // onset: block 1 of the span
+        engine.process(impulseBlock()) // active: block 2
+        engine.process(silenceBlock()) // internal gap, 1 of 2 — strictly shorter than endSilenceBlocks (3)
+        engine.process(silenceBlock()) // internal gap, 2 of 2 — still short of endSilenceBlocks
+        engine.process(impulseBlock()) // active again: block 5 (the gap did not close the event)
+
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        assertEquals(1, events.size)
+        // 5 blocks span (onset through the last active block), even though 2 of them were the
+        // internal inactive gap.
+        assertEquals(5, events.single().durationBlocks)
+    }
+
+    @Test
+    fun `an internal inactive gap can push a candidate's span past maxEventDurationBlocks, rejecting it as TOO_LONG`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // onset: block 1 of the span
+        engine.process(silenceBlock()) // internal gap, 1 of 2 — strictly shorter than endSilenceBlocks (3)
+        engine.process(silenceBlock()) // internal gap, 2 of 2 — still short of endSilenceBlocks; event stays open
+
+        // Blocks 3..29 of the span: all active, none individually checked past the gap. Only 27
+        // of these calls are active blocks, yet the span (which also counts the 2 gap blocks
+        // above) reaches exactly maxEventDurationBlocks (30) here — not rejected.
+        val upToCap = (3 until config.maxEventDurationBlocks).map { engine.process(impulseBlock()) }
+        assertTrue(upToCap.all { it == null })
+        assertNull(engine.lastCandidateCompletion)
+
+        // The next active block extends the span to maxEventDurationBlocks + 1 (31) — even though
+        // the internal gap means only 28 blocks so far were ever individually active. This is the
+        // block that gets rejected immediately.
+        val result = engine.process(impulseBlock())
+
+        assertNull(result)
+        val rejected = engine.lastCandidateCompletion
+        assertTrue(rejected is CandidateCompletion.Rejected)
+        rejected as CandidateCompletion.Rejected
+        assertEquals(CandidateRejectionReason.TOO_LONG, rejected.reason)
+        assertEquals(config.maxEventDurationBlocks + 1, rejected.durationBlocks)
+
+        // The engine must have left DETECTING (default cooldownBlocks > 0 -> COOLDOWN).
+        assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `a candidate spanning exactly maxEventDurationBlocks is never rejected`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // block 1 of the span
+        val results = (1 until config.maxEventDurationBlocks).map { engine.process(impulseBlock()) } // blocks 2..30
+
+        assertTrue(results.all { it == null })
+        assertNull(engine.lastCandidateCompletion)
+    }
+
+    @Test
+    fun `a candidate with exactly the maximum duration finishes normally once the required inactive blocks follow`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // block 1
+        repeat(config.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) } // blocks 2..30
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        assertEquals(1, events.size)
+        assertEquals(config.maxEventDurationBlocks, events.single().durationBlocks)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+    }
+
+    @Test
+    fun `CandidateCompletion Accepted contains the exact DetectionEvent returned by process()`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val event = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }.single()
+
+        val completion = engine.lastCandidateCompletion
+        assertTrue(completion is CandidateCompletion.Accepted)
+        assertEquals(event, (completion as CandidateCompletion.Accepted).event)
+    }
+
+    @Test
+    fun `an active block that pushes duration past maxEventDurationBlocks is rejected immediately`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // block 1
+        repeat(config.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) } // blocks 2..30, duration 30: not rejected
+        val result = engine.process(impulseBlock()) // block 31: duration 31 -> rejected
+
+        assertNull(result)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
+    }
+
+    @Test
+    fun `a rejected TOO_LONG candidate reports the reason, the tracked peak and the duration at rejection`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        val onsetIndex = config.warmupBlocks.toLong()
+        val peakIndex = onsetIndex + 1
+        val plateauDbfs = 20.0 * log10((32_700.0 * sqrt(600.0 / config.blockSize)) / 32768.0)
+
+        engine.process(impulseBlock())          // onset: block 1 of the span
+        engine.process(clippedPlateauBlock())   // active, louder: becomes the tracked peak (block 2)
+        // blocks 3..30: still active, all quieter than the plateau, so the peak does not move.
+        repeat(config.maxEventDurationBlocks - 2) { engine.process(impulseBlock()) }
+        val result = engine.process(impulseBlock()) // block 31: duration 31 -> rejected
+
+        assertNull(result) // process() returns null for a rejected candidate
+
+        val rejected = engine.lastCandidateCompletion
+        assertTrue(rejected is CandidateCompletion.Rejected)
+        rejected as CandidateCompletion.Rejected
+        assertEquals(CandidateRejectionReason.TOO_LONG, rejected.reason)
+        assertEquals(plateauDbfs, rejected.peakDbfs, 1e-6)
+        assertEquals(peakIndex, rejected.peakBlockIndex)
+        assertEquals(31, rejected.durationBlocks)
+
+        // The engine must have left DETECTING (default cooldownBlocks > 0 -> COOLDOWN).
+        assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `a rejected candidate transitions directly to IDLE when cooldownBlocks is zero`() {
+        val zeroCooldownConfig = EngineConfig(cooldownBlocks = 0)
+        val engine = DetectionEngine(zeroCooldownConfig)
+        feedSilence(engine, zeroCooldownConfig.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(zeroCooldownConfig.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) }
+        val result = engine.process(impulseBlock()) // duration 31 -> rejected
+
+        assertNull(result)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
+        assertEquals(DetectionState.IDLE, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `a new impulse is accepted normally after a rejected candidate completes its cooldown`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(config.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) } // reach duration 30
+        val rejectingResult = engine.process(impulseBlock()) // duration 31 -> rejected, enters COOLDOWN
+        check(rejectingResult == null)
+        check(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
+
+        repeat(config.cooldownBlocks) { engine.process(silenceBlock()) } // exhaust cooldown -> IDLE
+
+        val secondOnset = engine.process(impulseBlock())
+        val secondEvents = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        assertNull(secondOnset)
+        assertEquals(1, secondEvents.size)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+    }
+
+    @Test
+    fun `lastCandidateCompletion resets to null on the next ordinary block after a completion`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+        check(events.size == 1)
+        check(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+
+        engine.process(silenceBlock()) // an ordinary block, well into COOLDOWN
+
+        assertNull(engine.lastCandidateCompletion)
+    }
+
+    @Test
+    fun `lastCandidateCompletion stays null on an ordinary block that neither opens nor closes an event`() {
+        val engine = DetectionEngine(config)
+
+        engine.process(silenceBlock())
+
+        assertNull(engine.lastCandidateCompletion)
+    }
+
+    @Test
+    fun `an invalid block does not clear a completion set by the previous valid block`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+        check(events.size == 1)
+        check(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            engine.process(ShortArray(config.blockSize - 1))
+        }
+
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
     }
 }

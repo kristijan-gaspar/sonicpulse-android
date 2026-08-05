@@ -16,11 +16,13 @@ class EngineConfigTest {
         assertEquals(0.02, config.alphaUp, 0.0)
         assertEquals(-20.0, config.dbfsMin, 0.0)
         assertEquals(15.0, config.spikeMin, 0.0)
+        assertEquals(6.0, config.releaseSpikeMin, 0.0)
         assertEquals(10.0, config.crestMin, 0.0)
         assertEquals(3, config.crestWindowBlocks)
         assertEquals(32_000, config.clipLevel)
         assertEquals(0.02, config.clipRatioMin, 0.0)
         assertEquals(3, config.endSilenceBlocks)
+        assertEquals(30, config.maxEventDurationBlocks)
         assertEquals(30, config.cooldownBlocks)
         assertEquals(43, config.warmupBlocks)
         assertEquals(-120.0, config.dbfsFloor, 0.0)
@@ -99,6 +101,30 @@ class EngineConfigTest {
     }
 
     @Test
+    fun `rejects non-finite releaseSpikeMin`() {
+        assertRejected { EngineConfig(releaseSpikeMin = Double.NaN) }
+        assertRejected { EngineConfig(releaseSpikeMin = Double.POSITIVE_INFINITY) }
+    }
+
+    @Test
+    fun `rejects negative releaseSpikeMin`() {
+        assertRejected { EngineConfig(releaseSpikeMin = -1.0) }
+    }
+
+    @Test
+    fun `rejects releaseSpikeMin equal to or greater than spikeMin`() {
+        assertRejected { EngineConfig(releaseSpikeMin = 15.0, spikeMin = 15.0) }
+        assertRejected { EngineConfig(releaseSpikeMin = 16.0, spikeMin = 15.0) }
+    }
+
+    @Test
+    fun `accepts releaseSpikeMin of zero`() {
+        val config = EngineConfig(releaseSpikeMin = 0.0)
+
+        assertEquals(0.0, config.releaseSpikeMin, 0.0)
+    }
+
+    @Test
     fun `rejects non-positive crestWindowBlocks`() {
         assertRejected { EngineConfig(crestWindowBlocks = 0) }
         assertRejected { EngineConfig(crestWindowBlocks = -1) }
@@ -121,6 +147,12 @@ class EngineConfigTest {
     fun `rejects non-positive endSilenceBlocks`() {
         assertRejected { EngineConfig(endSilenceBlocks = 0) }
         assertRejected { EngineConfig(endSilenceBlocks = -1) }
+    }
+
+    @Test
+    fun `rejects non-positive maxEventDurationBlocks`() {
+        assertRejected { EngineConfig(maxEventDurationBlocks = 0) }
+        assertRejected { EngineConfig(maxEventDurationBlocks = -1) }
     }
 
     @Test
