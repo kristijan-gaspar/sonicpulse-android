@@ -16,7 +16,7 @@ class EngineConfigTest {
         assertEquals(0.02, config.alphaUp, 0.0)
         assertEquals(-20.0, config.dbfsMin, 0.0)
         assertEquals(15.0, config.spikeMin, 0.0)
-        assertEquals(6.0, config.releaseSpikeMin, 0.0)
+        assertEquals(20.0, config.releaseDropDb, 0.0)
         assertEquals(10.0, config.crestMin, 0.0)
         assertEquals(3, config.crestWindowBlocks)
         assertEquals(32_000, config.clipLevel)
@@ -101,27 +101,27 @@ class EngineConfigTest {
     }
 
     @Test
-    fun `rejects non-finite releaseSpikeMin`() {
-        assertRejected { EngineConfig(releaseSpikeMin = Double.NaN) }
-        assertRejected { EngineConfig(releaseSpikeMin = Double.POSITIVE_INFINITY) }
+    fun `rejects non-finite releaseDropDb`() {
+        assertRejected { EngineConfig(releaseDropDb = Double.NaN) }
+        assertRejected { EngineConfig(releaseDropDb = Double.POSITIVE_INFINITY) }
+        assertRejected { EngineConfig(releaseDropDb = Double.NEGATIVE_INFINITY) }
     }
 
     @Test
-    fun `rejects negative releaseSpikeMin`() {
-        assertRejected { EngineConfig(releaseSpikeMin = -1.0) }
+    fun `rejects zero or negative releaseDropDb`() {
+        assertRejected { EngineConfig(releaseDropDb = 0.0) }
+        assertRejected { EngineConfig(releaseDropDb = -1.0) }
     }
 
     @Test
-    fun `rejects releaseSpikeMin equal to or greater than spikeMin`() {
-        assertRejected { EngineConfig(releaseSpikeMin = 15.0, spikeMin = 15.0) }
-        assertRejected { EngineConfig(releaseSpikeMin = 16.0, spikeMin = 15.0) }
-    }
+    fun `accepts a releaseDropDb unrelated to spikeMin, in either direction`() {
+        // releaseDropDb is a peak-relative dB drop, not a spike threshold — it has no required
+        // relationship with spikeMin, unlike the old baseline-relative releaseSpikeMin.
+        val lower = EngineConfig(releaseDropDb = 1.0, spikeMin = 15.0)
+        val higher = EngineConfig(releaseDropDb = 50.0, spikeMin = 15.0)
 
-    @Test
-    fun `accepts releaseSpikeMin of zero`() {
-        val config = EngineConfig(releaseSpikeMin = 0.0)
-
-        assertEquals(0.0, config.releaseSpikeMin, 0.0)
+        assertEquals(1.0, lower.releaseDropDb, 0.0)
+        assertEquals(50.0, higher.releaseDropDb, 0.0)
     }
 
     @Test
