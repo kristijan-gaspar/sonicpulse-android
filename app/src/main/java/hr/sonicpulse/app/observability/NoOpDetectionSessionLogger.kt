@@ -20,7 +20,7 @@ class NoOpDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
 
     override fun startSession(config: EngineConfig) = Unit
 
-    override fun onBlock(metrics: BlockMetrics, event: FinalizedEvent?) = Unit
+    override fun onBlock(metrics: BlockMetrics, finalizedCandidate: FinalizedCandidate?) = Unit
 
     override fun finishSession() = Unit
 

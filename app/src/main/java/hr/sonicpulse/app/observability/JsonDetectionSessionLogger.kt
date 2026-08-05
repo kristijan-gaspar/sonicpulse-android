@@ -2,7 +2,7 @@ package hr.sonicpulse.app.observability
 
 import android.os.Build
 import hr.sonicpulse.engine.BlockMetrics
-import hr.sonicpulse.engine.DetectionEvent
+import hr.sonicpulse.engine.CandidateCompletion
 import hr.sonicpulse.engine.DetectionState
 import hr.sonicpulse.engine.EngineConfig
 import java.time.Instant
@@ -15,9 +15,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 
 /**
- * Event-centric [DetectionSessionLogger]: rather than recording every block for an entire
- * session, it keeps only a small ring buffer of recent [BlockMetrics] while no event is in
- * progress, and only actually retains data once the engine enters `DETECTING`.
+ * Candidate-centric [DetectionSessionLogger]: rather than recording every block for an entire
+ * session, it keeps only a small ring buffer of recent [BlockMetrics] while no candidate is in
+ * progress, and only actually retains data once the engine enters `DETECTING`. It records every
+ * finalized [CandidateCompletion] — accepted or rejected alike — not only accepted ones.
  *
  * Threading: [onBlock] runs on the audio capture thread (per
  * [hr.sonicpulse.app.service.MonitoringService]'s own threading contract) and must stay cheap —
@@ -47,39 +48,52 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
          * or, per the brief, any raw PCM samples. */
         const val PRE_EVENT_CONTEXT_BLOCKS = 5
 
-        /** Upper bound on the number of [BlockMetrics] retained in detail for a single event.
+        /** Upper bound on the number of [BlockMetrics] retained in detail for a single candidate.
          * 100 blocks ≈ 2.3s at the default 1024-sample/44.1kHz block duration (~23.2ms/block) —
          * comfortably longer than any genuine impulsive event, which by default ends within
          * [EngineConfig.endSilenceBlocks] (3 blocks, ~70ms) of the trigger stopping. The cap
          * exists for the pathological case: a sustained loud signal (continuous blowing into the
          * mic, prolonged clipping) can keep the engine in `DETECTING` indefinitely, and without a
-         * bound [PendingEvent.eventBlocks] would grow for as long as that lasts. Once the cap is
-         * reached, aggregate figures (max dbfs/spike/crest/clipRatio, total block count, event
-         * duration) keep updating from every block that actually arrives — only the *detailed*
-         * per-block records stop being appended. */
+         * bound [PendingCandidate.detailBlocks] would grow for as long as that lasts — until
+         * [EngineConfig.maxEventDurationBlocks] forces a `TOO_LONG` rejection. Once the cap is
+         * reached, aggregate figures (max dbfs/spike/crest/clipRatio, total block count, duration)
+         * keep updating from every block that actually arrives — only the *detailed* per-block
+         * records stop being appended. */
         const val MAX_DETAILED_EVENT_BLOCKS = 100
+
+        /** Upper bound on the number of [CandidateLogEntry] objects retained for a single session
+         * — see [ActiveSession.canRetainAnotherCandidate]. Every finalized candidate is still
+         * counted past this limit (`SessionLogDocument.totalCandidateCount`, via
+         * [ActiveSession.countDiscardedCandidate]); only the detailed [CandidateLogEntry] objects
+         * themselves stop being built, the same truncation strategy [MAX_DETAILED_EVENT_BLOCKS]
+         * applies within a single candidate — and for the same reason: [onBlock] only ever calls
+         * [PendingCandidate.finalize] (which combines pre-event/detail blocks, maps every
+         * [BlockMetrics] to a [BlockLogEntry], and allocates the resulting [CandidateLogEntry])
+         * while [ActiveSession.canRetainAnotherCandidate] still holds, so a session past the cap
+         * never pays that cost on the audio capture thread only to immediately discard the result.
+         * Exists for the same pathological reason as [MAX_DETAILED_EVENT_BLOCKS]: a noisy
+         * environment could otherwise generate an unbounded number of rejected candidates over a
+         * long session. */
+        const val MAX_RECORDED_CANDIDATES_PER_SESSION = 500
     }
 
-    /** One in-progress detection: pre-event context copied once at DETECTING onset, plus every
-     * block belonging to the event itself (DETECTING and its non-trigger tail) as they arrive —
-     * detailed per-block records capped at [MAX_DETAILED_EVENT_BLOCKS]; aggregates and counts
-     * keep accumulating from every block regardless of the cap. */
-    private class PendingEvent(private val preEventContext: List<BlockMetrics>) {
-        private val eventBlocks = mutableListOf<BlockMetrics>()
-        private var totalEventBlockCount = 0
-        private var firstEventBlockIndex = 0L
-        private var lastEventBlockIndex = 0L
+    /** One in-progress candidate: pre-event context copied once at DETECTING onset, plus every
+     * block belonging to the candidate itself (its release-active blocks, any internal inactive
+     * gaps, and — for an eventually accepted candidate — its trailing inactive confirmation tail)
+     * as they arrive — detailed per-block records capped at [MAX_DETAILED_EVENT_BLOCKS];
+     * aggregates and counts keep accumulating from every block regardless of the cap. */
+    private class PendingCandidate(private val preEventContext: List<BlockMetrics>) {
+        private val detailBlocks = mutableListOf<BlockMetrics>()
+        private var totalBlockCount = 0
         private var maxDbfs = Double.NEGATIVE_INFINITY
         private var maxSpike = Double.NEGATIVE_INFINITY
         private var maxCrestFactorDb: Double? = null
         private var maxClipRatio = 0.0
 
-        fun addEventBlock(metrics: BlockMetrics) {
-            if (totalEventBlockCount == 0) firstEventBlockIndex = metrics.blockIndex
-            lastEventBlockIndex = metrics.blockIndex
-            totalEventBlockCount++
-            if (eventBlocks.size < MAX_DETAILED_EVENT_BLOCKS) {
-                eventBlocks += metrics
+        fun addBlock(metrics: BlockMetrics) {
+            totalBlockCount++
+            if (detailBlocks.size < MAX_DETAILED_EVENT_BLOCKS) {
+                detailBlocks += metrics
             }
             if (metrics.dbfs > maxDbfs) maxDbfs = metrics.dbfs
             if (metrics.spike > maxSpike) maxSpike = metrics.spike
@@ -89,29 +103,53 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
             if (metrics.clipRatio > maxClipRatio) maxClipRatio = metrics.clipRatio
         }
 
-        fun finalize(event: DetectionEvent, peakTimeClient: Instant, sampleRate: Int, blockSize: Int): DetectionLogEntry {
+        /** [completion] supplies the authoritative [peakDbfs]/[peakBlockIndex]/[durationBlocks] —
+         * never recomputed from [detailBlocks] or [totalBlockCount], since the trace may (for an
+         * accepted candidate) include trailing inactive confirmation blocks beyond the engine's
+         * own duration span. */
+        fun finalize(completion: CandidateCompletion, peakTimeClient: Instant, sampleRate: Int, blockSize: Int): CandidateLogEntry {
             val blockDurationMillis = blockSize * 1000.0 / sampleRate
-            // Full event span, from the real first/last block index — not from eventBlocks.size,
-            // which may be capped while the underlying event was longer.
-            val durationBlocks = (lastEventBlockIndex - firstEventBlockIndex + 1).toInt()
-            val allBlocks = preEventContext + eventBlocks
-            return DetectionLogEntry(
+            val outcome: String
+            val rejectionReason: String?
+            val peakDbfs: Double
+            val peakBlockIndex: Long
+            val durationBlocks: Int
+            when (completion) {
+                is CandidateCompletion.Accepted -> {
+                    outcome = "ACCEPTED"
+                    rejectionReason = null
+                    peakDbfs = completion.event.peakDbfs
+                    peakBlockIndex = completion.event.peakBlockIndex
+                    durationBlocks = completion.event.durationBlocks
+                }
+                is CandidateCompletion.Rejected -> {
+                    outcome = "REJECTED"
+                    rejectionReason = completion.reason.name
+                    peakDbfs = completion.peakDbfs
+                    peakBlockIndex = completion.peakBlockIndex
+                    durationBlocks = completion.durationBlocks
+                }
+            }
+            val allBlocks = preEventContext + detailBlocks
+            return CandidateLogEntry(
+                outcome = outcome,
+                rejectionReason = rejectionReason,
                 detectedAt = peakTimeClient.toString(),
-                peakDbfs = event.peakDbfs,
-                peakBlockIndex = event.peakBlockIndex,
+                peakDbfs = peakDbfs,
+                peakBlockIndex = peakBlockIndex,
                 durationBlocks = durationBlocks,
                 durationMillis = (durationBlocks * blockDurationMillis).toLong(),
                 maxDbfs = maxDbfs,
                 maxSpike = maxSpike,
                 maxCrestFactorDb = maxCrestFactorDb,
                 maxClipRatio = maxClipRatio,
-                totalEventBlockCount = totalEventBlockCount,
+                totalEventBlockCount = totalBlockCount,
                 recordedBlockCount = allBlocks.size,
-                blocksTruncated = totalEventBlockCount > eventBlocks.size,
+                blocksTruncated = totalBlockCount > detailBlocks.size,
                 blocks = allBlocks.map { metrics ->
                     BlockLogEntry(
                         blockIndex = metrics.blockIndex,
-                        relativeToPeakMillis = ((metrics.blockIndex - event.peakBlockIndex) * blockDurationMillis).toLong(),
+                        relativeToPeakMillis = ((metrics.blockIndex - peakBlockIndex) * blockDurationMillis).toLong(),
                         rms = metrics.rms,
                         dbfs = metrics.dbfs,
                         baselineDbfs = metrics.baseline,
@@ -130,18 +168,40 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
     private class PreparedSession(val config: EngineConfig, val device: DeviceInfoSnapshot)
 
     /** One genuinely in-progress session: identity/[startedAt] captured at activation (the first
-     * [onBlock] call for it, not [startSession]), accumulating detections and ring-buffer/pending-
-     * event state as further blocks arrive. */
+     * [onBlock] call for it, not [startSession]), accumulating candidates and ring-buffer/pending-
+     * candidate state as further blocks arrive. */
     private class ActiveSession(val sessionId: String, val startedAt: Instant, val config: EngineConfig, val device: DeviceInfoSnapshot) {
         val ringBuffer = ArrayDeque<BlockMetrics>(PRE_EVENT_CONTEXT_BLOCKS)
-        val detections = mutableListOf<DetectionLogEntry>()
-        var pendingEvent: PendingEvent? = null
+        val candidates = mutableListOf<CandidateLogEntry>()
+        var totalCandidateCount = 0
+            private set
+        var pendingCandidate: PendingCandidate? = null
 
         fun pushToRingBuffer(metrics: BlockMetrics) {
             ringBuffer.addLast(metrics)
             if (ringBuffer.size > PRE_EVENT_CONTEXT_BLOCKS) {
                 ringBuffer.removeFirst()
             }
+        }
+
+        /** True while another [CandidateLogEntry] can still be retained — callers must check this
+         * *before* calling [PendingCandidate.finalize], never after, so the expensive conversion
+         * (block-list merge, [BlockLogEntry] mapping, [CandidateLogEntry] allocation) is only ever
+         * performed for a candidate that will actually be kept. */
+        val canRetainAnotherCandidate: Boolean
+            get() = candidates.size < MAX_RECORDED_CANDIDATES_PER_SESSION
+
+        /** Retains [entry] and counts it — only ever called while [canRetainAnotherCandidate]
+         * held at the time [entry] was built. */
+        fun recordCandidate(entry: CandidateLogEntry) {
+            totalCandidateCount++
+            candidates += entry
+        }
+
+        /** Counts a finalized candidate that was never turned into a [CandidateLogEntry] at all —
+         * see [SessionLogDocument.candidatesTruncated]. */
+        fun countDiscardedCandidate() {
+            totalCandidateCount++
         }
     }
 
@@ -172,34 +232,46 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
         }
     }
 
-    override fun onBlock(metrics: BlockMetrics, event: FinalizedEvent?) {
+    override fun onBlock(metrics: BlockMetrics, finalizedCandidate: FinalizedCandidate?) {
         synchronized(lock) {
             val session = activateIfNeeded() ?: return
-            val pending = session.pendingEvent
+            val pending = session.pendingCandidate
             when {
-                pending != null -> pending.addEventBlock(metrics)
+                pending != null -> pending.addBlock(metrics)
                 metrics.state == DetectionState.DETECTING -> {
-                    val started = PendingEvent(preEventContext = session.ringBuffer.toList())
-                    // Cleared, not just copied: without this, a second event starting before the
-                    // ring buffer refills (e.g. short/zero cooldown) would inherit pre-event
-                    // blocks that actually belong to before the *previous* event.
+                    val started = PendingCandidate(preEventContext = session.ringBuffer.toList())
+                    // Cleared, not just copied: without this, a second candidate starting before
+                    // the ring buffer refills (e.g. short/zero cooldown) would inherit pre-event
+                    // blocks that actually belong to before the *previous* candidate.
                     session.ringBuffer.clear()
-                    started.addEventBlock(metrics)
-                    session.pendingEvent = started
+                    started.addBlock(metrics)
+                    session.pendingCandidate = started
                 }
                 else -> session.pushToRingBuffer(metrics)
             }
 
-            if (event != null) {
-                val finished = session.pendingEvent
-                if (finished != null) {
-                    session.detections += finished.finalize(
-                        event.event,
-                        event.peakTimeClient,
-                        session.config.sampleRate,
-                        session.config.blockSize
-                    )
-                    session.pendingEvent = null
+            // Finalizes on any completion — accepted or rejected alike — never only when the
+            // engine's own process() call returned a non-null DetectionEvent.
+            if (finalizedCandidate != null) {
+                val finishedPending = session.pendingCandidate
+                if (finishedPending != null) {
+                    // canRetainAnotherCandidate is checked *before* finalize() runs: past the
+                    // retention cap, finalize()'s block-merge/mapping/allocation work would only
+                    // ever be discarded, so it must never run on the audio thread for a candidate
+                    // that won't be kept — only the count is still incremented.
+                    if (session.canRetainAnotherCandidate) {
+                        session.recordCandidate(
+                            finishedPending.finalize(
+                                finalizedCandidate.completion,
+                                finalizedCandidate.peakTimeClient,
+                                session.config.sampleRate,
+                                session.config.blockSize
+                            )
+                        )
+                    } else {
+                        session.countDiscardedCandidate()
+                    }
+                    session.pendingCandidate = null
                 }
             }
         }
@@ -246,7 +318,10 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
                 sampleRate = session.config.sampleRate,
                 blockSize = session.config.blockSize,
                 engineConfig = session.config.toSnapshot(),
-                detections = session.detections.toList()
+                candidates = session.candidates.toList(),
+                totalCandidateCount = session.totalCandidateCount,
+                recordedCandidateCount = session.candidates.size,
+                candidatesTruncated = session.totalCandidateCount > session.candidates.size
             )
             _hasCompletedSession.value = true
         }
@@ -269,11 +344,13 @@ private fun EngineConfig.toSnapshot(): EngineConfigSnapshot = EngineConfigSnapsh
     alphaUp = alphaUp,
     dbfsMin = dbfsMin,
     spikeMin = spikeMin,
+    releaseSpikeMin = releaseSpikeMin,
     crestMin = crestMin,
     crestWindowBlocks = crestWindowBlocks,
     clipLevel = clipLevel,
     clipRatioMin = clipRatioMin,
     endSilenceBlocks = endSilenceBlocks,
+    maxEventDurationBlocks = maxEventDurationBlocks,
     cooldownBlocks = cooldownBlocks,
     warmupBlocks = warmupBlocks,
     dbfsFloor = dbfsFloor

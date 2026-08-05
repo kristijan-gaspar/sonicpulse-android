@@ -21,7 +21,7 @@ class FakeDetectionSessionLogger(
     override val hasCompletedSession: StateFlow<Boolean> = _hasCompletedSession.asStateFlow()
 
     val startedSessions = mutableListOf<EngineConfig>()
-    val blocks = mutableListOf<Pair<BlockMetrics, FinalizedEvent?>>()
+    val blocks = mutableListOf<Pair<BlockMetrics, FinalizedCandidate?>>()
     var finishSessionCallCount = 0
         private set
 
@@ -37,8 +37,8 @@ class FakeDetectionSessionLogger(
         _hasCompletedSession.value = false
     }
 
-    override fun onBlock(metrics: BlockMetrics, event: FinalizedEvent?) {
-        blocks += metrics to event
+    override fun onBlock(metrics: BlockMetrics, finalizedCandidate: FinalizedCandidate?) {
+        blocks += metrics to finalizedCandidate
     }
 
     override fun finishSession() {
