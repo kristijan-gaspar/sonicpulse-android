@@ -50,6 +50,18 @@ data class EngineConfig(
         require(releaseDropDb.isFinite() && releaseDropDb > 0.0) {
             "releaseDropDb must be finite and strictly positive, was $releaseDropDb."
         }
+        // The quietest possible onset peak sits just above dbfsMin, so a releaseDropDb larger
+        // than the dbfsMin-to-dbfsFloor range would put the release boundary below dbfsFloor —
+        // meaning even digital silence stays "still active" and a candidate could only ever end
+        // via the hard maxEventDurationBlocks/TOO_LONG limit, never a normal release. Equal to
+        // the range is fine: the release comparison is strict `>`, so silence at exactly
+        // dbfsFloor is inactive against a boundary of exactly dbfsFloor.
+        val maxReleaseDropDb = dbfsMin - dbfsFloor
+        require(releaseDropDb <= maxReleaseDropDb) {
+            "releaseDropDb must not exceed the available dBFS range " +
+                "between dbfsMin ($dbfsMin) and dbfsFloor ($dbfsFloor), " +
+                "maximum is $maxReleaseDropDb, was $releaseDropDb."
+        }
         require(crestMin.isFinite() && crestMin >= 0.0) {
             "crestMin must be finite and non-negative, was $crestMin."
         }

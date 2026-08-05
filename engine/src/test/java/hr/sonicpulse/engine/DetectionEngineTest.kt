@@ -621,13 +621,17 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `a block exactly at eventPeakDbfs minus releaseDropDb is inactive because the comparison is strict`() {
+    fun `a block at or just below the release boundary is inactive`() {
+        // flatBlockAt() converts a requested dBFS value into an integer PCM amplitude
+        // (truncating toward zero), so the block it generates lands at or slightly below the
+        // requested level, never above it — this proves the boundary is not still-active, not
+        // that the comparison is exact to the floating-point boundary.
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
         engine.process(impulseBlock()) // onset, peak = impulseDbfs
-        val exactlyAtBoundary = flatBlockAt(impulseDbfs - config.releaseDropDb)
-        val results = (0 until config.endSilenceBlocks).map { engine.process(exactlyAtBoundary) }
+        val atOrBelowBoundary = flatBlockAt(impulseDbfs - config.releaseDropDb)
+        val results = (0 until config.endSilenceBlocks).map { engine.process(atOrBelowBoundary) }
 
         assertEquals(config.endSilenceBlocks - 1, results.count { it == null })
         assertNotNull(results.last())

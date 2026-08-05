@@ -114,6 +114,47 @@ class EngineConfigTest {
     }
 
     @Test
+    fun `rejects releaseDropDb larger than the available dBFS range`() {
+        assertRejected {
+            EngineConfig(
+                dbfsMin = -20.0,
+                dbfsFloor = -120.0,
+                releaseDropDb = 100.1
+            )
+        }
+    }
+
+    @Test
+    fun `accepts releaseDropDb equal to the available dBFS range`() {
+        val config = EngineConfig(
+            dbfsMin = -20.0,
+            dbfsFloor = -120.0,
+            releaseDropDb = 100.0
+        )
+
+        assertEquals(100.0, config.releaseDropDb, 0.0)
+    }
+
+    @Test
+    fun `releaseDropDb upper bound follows configured dbfsMin and dbfsFloor`() {
+        assertRejected {
+            EngineConfig(
+                dbfsMin = -30.0,
+                dbfsFloor = -100.0,
+                releaseDropDb = 70.1
+            )
+        }
+
+        val valid = EngineConfig(
+            dbfsMin = -30.0,
+            dbfsFloor = -100.0,
+            releaseDropDb = 70.0
+        )
+
+        assertEquals(70.0, valid.releaseDropDb, 0.0)
+    }
+
+    @Test
     fun `accepts a releaseDropDb unrelated to spikeMin, in either direction`() {
         // releaseDropDb is a peak-relative dB drop, not a spike threshold — it has no required
         // relationship with spikeMin, unlike the old baseline-relative releaseSpikeMin.
