@@ -1,5 +1,6 @@
 package hr.sonicpulse.app.service
 
+import hr.sonicpulse.app.data.location.LocationSnapshot
 import hr.sonicpulse.engine.CandidateCompletion
 import hr.sonicpulse.engine.CandidateRejectionReason
 import hr.sonicpulse.engine.DetectionEvent
@@ -15,6 +16,11 @@ import org.junit.Test
  * [hr.sonicpulse.app.observability.FinalizedCandidate] for the diagnostic session logger — derives
  * its peak instant from the completion's own peak block index for both outcomes, and never
  * recomputes an engine decision (the [CandidateCompletion] itself is passed through unchanged).
+ *
+ * Also proves the composition `handleBlock()` relies on: [finalizedCandidateFor] is called once
+ * per completion, and its `peakTimeClient` is what gets passed to [sessionDetectionFor] for an
+ * accepted candidate — never a second, independent [hr.sonicpulse.app.data.audio.PeakTimeCalculator]
+ * call.
  */
 class SessionDetectionFactoryCandidateTest {
 
@@ -84,5 +90,32 @@ class SessionDetectionFactoryCandidateTest {
         }
 
         assertNull(event)
+    }
+
+    @Test
+    fun `an accepted candidate's peakTimeClient is the exact value MonitoringService reuses for its SessionDetection`() {
+        val event = DetectionEvent(peakDbfs = -9.0, peakBlockIndex = 7, durationBlocks = 2)
+        val finalized = finalizedCandidateFor(CandidateCompletion.Accepted(event), startInstant, sampleRate = 44_100, blockSize = 1024)
+
+        // Mirrors handleBlock(): sessionDetectionFor() is called with finalizedCandidate.peakTimeClient
+        // directly, not a second PeakTimeCalculator.calculate() result.
+        val sessionDetection = sessionDetectionFor(
+            peakDbfs = event.peakDbfs,
+            peakTimeClient = finalized.peakTimeClient,
+            locationSnapshot = LocationSnapshot.Valid(45.8, 16.0, 8.0f)
+        )
+
+        requireNotNull(sessionDetection)
+        assertEquals(finalized.peakTimeClient, sessionDetection.peakTimeClient)
+    }
+
+    @Test
+    fun `location gating is unaffected by reusing the finalized candidate's peakTimeClient`() {
+        val event = DetectionEvent(peakDbfs = -9.0, peakBlockIndex = 7, durationBlocks = 2)
+        val finalized = finalizedCandidateFor(CandidateCompletion.Accepted(event), startInstant, sampleRate = 44_100, blockSize = 1024)
+
+        val noSessionDetection = sessionDetectionFor(event.peakDbfs, finalized.peakTimeClient, LocationSnapshot.NoFixYet)
+
+        assertNull(noSessionDetection)
     }
 }

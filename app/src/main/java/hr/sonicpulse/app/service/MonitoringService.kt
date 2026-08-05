@@ -20,7 +20,6 @@ import dagger.hilt.android.AndroidEntryPoint
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.audio.AudioRecorder
-import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
@@ -249,23 +248,22 @@ class MonitoringService : Service() {
         val startInstant = firstBlockInstant ?: Instant.now().also { firstBlockInstant = it }
 
         val event = engine.process(block)
-        // Read immediately after process(): both only describe the block just processed, and a
-        // later engine.process() call (the next block) would overwrite them.
+        // Read immediately after process(): all three only describe the block just processed, and
+        // a later engine.process() call (the next block) would overwrite them.
         val completion = engine.lastCandidateCompletion
         val metrics = engine.lastBlockMetrics
 
-        // Computed once, here, regardless of which of the two consumers below end up using it —
-        // same instant either way, just hoisted so onBlock() and sessionDetectionFor() below both
-        // reuse it instead of (potentially) computing it twice.
-        val peakTimeClient = event?.let {
-            PeakTimeCalculator.calculate(startInstant, it.peakBlockIndex, engineConfig.sampleRate, engineConfig.blockSize)
+        // Computed at most once per finalized candidate, from completion's own peak block index
+        // (see finalizedCandidateFor) — completion is Accepted together with a non-null event on
+        // the same block, so finalizedCandidate is guaranteed non-null whenever event is. Its
+        // peakTimeClient is reused below by both onBlock() (diagnostics, every completion) and
+        // sessionDetectionFor() (backend submission, accepted only) — never recalculated.
+        val finalizedCandidate = completion?.let {
+            finalizedCandidateFor(it, startInstant, engineConfig.sampleRate, engineConfig.blockSize)
         }
 
         if (metrics != null) {
             monitoringStateRepository.publishMetrics(metrics)
-            val finalizedCandidate = completion?.let {
-                finalizedCandidateFor(it, startInstant, engineConfig.sampleRate, engineConfig.blockSize)
-            }
             detectionSessionLogger.onBlock(metrics, finalizedCandidate)
         }
 
@@ -274,7 +272,7 @@ class MonitoringService : Service() {
             // the coroutine below, whose scheduling could otherwise let a newer location update
             // arrive first and misrepresent what was actually known when this detection occurred.
             val locationSnapshot = locationProvider.currentSnapshot
-            val sessionDetection = sessionDetectionFor(event.peakDbfs, peakTimeClient!!, locationSnapshot)
+            val sessionDetection = sessionDetectionFor(event.peakDbfs, finalizedCandidate!!.peakTimeClient, locationSnapshot)
             if (sessionDetection != null) {
                 // Published synchronously (MutableStateFlow.update is thread-safe) so the detection
                 // is visibly Pending before any submission attempt is even scheduled — insertion and

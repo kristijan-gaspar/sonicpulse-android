@@ -368,6 +368,47 @@ class JsonDetectionSessionLoggerTest {
     }
 
     @Test
+    fun `pendingCandidate is cleared after a completion past the retention cap, so each discarded candidate is counted separately with no leaked state`() {
+        val logger = JsonDetectionSessionLogger()
+        logger.startTestSession()
+
+        // Fill exactly to the retention cap — all 500 retained.
+        for (i in 0 until maxRecordedCandidates) {
+            val onsetIndex = (i * 2).toLong()
+            logger.onBlock(metrics(onsetIndex, state = DetectionState.DETECTING), null)
+            val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = onsetIndex, durationBlocks = 1)
+            logger.onBlock(metrics(onsetIndex + 1, state = DetectionState.COOLDOWN), accepted(event))
+        }
+
+        // Two more, back to back, both past the cap and both discarded. If pendingCandidate were
+        // left dangling after the first discard, the second one's onset block (state == DETECTING)
+        // would hit the `pending != null -> pending.addBlock(metrics)` branch instead of starting
+        // a fresh PendingCandidate — this would still be discarded either way, but would prove the
+        // state was never actually reset. Two independent completions arriving cleanly (each
+        // incrementing totalCandidateCount by exactly one and neither ever appearing in the
+        // retained list) is the only outcome consistent with a genuinely cleared pendingCandidate.
+        val firstOverflowOnset = (maxRecordedCandidates * 2).toLong()
+        logger.onBlock(metrics(firstOverflowOnset, state = DetectionState.DETECTING), null)
+        val firstOverflowEvent = DetectionEvent(peakDbfs = -1.0, peakBlockIndex = firstOverflowOnset, durationBlocks = 1)
+        logger.onBlock(metrics(firstOverflowOnset + 1, state = DetectionState.COOLDOWN), accepted(firstOverflowEvent))
+
+        val secondOverflowOnset = firstOverflowOnset + 10
+        logger.onBlock(metrics(secondOverflowOnset, state = DetectionState.DETECTING), null)
+        val secondOverflowEvent = DetectionEvent(peakDbfs = -2.0, peakBlockIndex = secondOverflowOnset, durationBlocks = 1)
+        logger.onBlock(metrics(secondOverflowOnset + 1, state = DetectionState.COOLDOWN), accepted(secondOverflowEvent))
+
+        logger.finishSession()
+        val document = decode(requireNotNull(logger.exportJson()))
+
+        assertEquals(maxRecordedCandidates + 2, document.totalCandidateCount)
+        assertEquals(maxRecordedCandidates, document.recordedCandidateCount)
+        assertEquals(maxRecordedCandidates, document.candidates.size)
+        assertEquals(true, document.candidatesTruncated)
+        assertTrue(document.candidates.none { it.peakBlockIndex == firstOverflowOnset })
+        assertTrue(document.candidates.none { it.peakBlockIndex == secondOverflowOnset })
+    }
+
+    @Test
     fun `candidatesTruncated stays false while every candidate is retained`() {
         val logger = JsonDetectionSessionLogger()
         logger.startTestSession()

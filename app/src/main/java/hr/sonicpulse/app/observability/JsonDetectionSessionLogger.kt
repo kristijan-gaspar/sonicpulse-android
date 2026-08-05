@@ -62,12 +62,18 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
         const val MAX_DETAILED_EVENT_BLOCKS = 100
 
         /** Upper bound on the number of [CandidateLogEntry] objects retained for a single session
-         * — see [ActiveSession.recordCandidate]. Every finalized candidate is still counted past
-         * this limit (`SessionLogDocument.totalCandidateCount`); only the detailed
-         * [CandidateLogEntry] objects themselves stop being retained, the same truncation strategy
-         * [MAX_DETAILED_EVENT_BLOCKS] applies within a single candidate. Exists for the same
-         * pathological reason: a noisy environment could otherwise generate an unbounded number of
-         * rejected candidates over a long session. */
+         * — see [ActiveSession.canRetainAnotherCandidate]. Every finalized candidate is still
+         * counted past this limit (`SessionLogDocument.totalCandidateCount`, via
+         * [ActiveSession.countDiscardedCandidate]); only the detailed [CandidateLogEntry] objects
+         * themselves stop being built, the same truncation strategy [MAX_DETAILED_EVENT_BLOCKS]
+         * applies within a single candidate — and for the same reason: [onBlock] only ever calls
+         * [PendingCandidate.finalize] (which combines pre-event/detail blocks, maps every
+         * [BlockMetrics] to a [BlockLogEntry], and allocates the resulting [CandidateLogEntry])
+         * while [ActiveSession.canRetainAnotherCandidate] still holds, so a session past the cap
+         * never pays that cost on the audio capture thread only to immediately discard the result.
+         * Exists for the same pathological reason as [MAX_DETAILED_EVENT_BLOCKS]: a noisy
+         * environment could otherwise generate an unbounded number of rejected candidates over a
+         * long session. */
         const val MAX_RECORDED_CANDIDATES_PER_SESSION = 500
     }
 
@@ -178,14 +184,24 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
             }
         }
 
-        /** Counts every finalized candidate via [totalCandidateCount] regardless of the cap, but
-         * only retains the [CandidateLogEntry] object itself while under
-         * [MAX_RECORDED_CANDIDATES_PER_SESSION] — see [SessionLogDocument.candidatesTruncated]. */
+        /** True while another [CandidateLogEntry] can still be retained — callers must check this
+         * *before* calling [PendingCandidate.finalize], never after, so the expensive conversion
+         * (block-list merge, [BlockLogEntry] mapping, [CandidateLogEntry] allocation) is only ever
+         * performed for a candidate that will actually be kept. */
+        val canRetainAnotherCandidate: Boolean
+            get() = candidates.size < MAX_RECORDED_CANDIDATES_PER_SESSION
+
+        /** Retains [entry] and counts it — only ever called while [canRetainAnotherCandidate]
+         * held at the time [entry] was built. */
         fun recordCandidate(entry: CandidateLogEntry) {
             totalCandidateCount++
-            if (candidates.size < MAX_RECORDED_CANDIDATES_PER_SESSION) {
-                candidates += entry
-            }
+            candidates += entry
+        }
+
+        /** Counts a finalized candidate that was never turned into a [CandidateLogEntry] at all —
+         * see [SessionLogDocument.candidatesTruncated]. */
+        fun countDiscardedCandidate() {
+            totalCandidateCount++
         }
     }
 
@@ -239,14 +255,22 @@ class JsonDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
             if (finalizedCandidate != null) {
                 val finishedPending = session.pendingCandidate
                 if (finishedPending != null) {
-                    session.recordCandidate(
-                        finishedPending.finalize(
-                            finalizedCandidate.completion,
-                            finalizedCandidate.peakTimeClient,
-                            session.config.sampleRate,
-                            session.config.blockSize
+                    // canRetainAnotherCandidate is checked *before* finalize() runs: past the
+                    // retention cap, finalize()'s block-merge/mapping/allocation work would only
+                    // ever be discarded, so it must never run on the audio thread for a candidate
+                    // that won't be kept — only the count is still incremented.
+                    if (session.canRetainAnotherCandidate) {
+                        session.recordCandidate(
+                            finishedPending.finalize(
+                                finalizedCandidate.completion,
+                                finalizedCandidate.peakTimeClient,
+                                session.config.sampleRate,
+                                session.config.blockSize
+                            )
                         )
-                    )
+                    } else {
+                        session.countDiscardedCandidate()
+                    }
                     session.pendingCandidate = null
                 }
             }
