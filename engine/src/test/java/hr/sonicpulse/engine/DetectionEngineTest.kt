@@ -329,7 +329,7 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `one non-trigger block does not end an open detection`() {
+    fun `one inactive block does not end an open detection`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
@@ -340,7 +340,7 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `endSilenceBlocks minus one consecutive non-trigger blocks do not end an open detection`() {
+    fun `endSilenceBlocks minus one consecutive inactive blocks do not end an open detection`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
@@ -351,7 +351,7 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `exactly endSilenceBlocks consecutive non-trigger blocks end the detection`() {
+    fun `exactly endSilenceBlocks consecutive inactive blocks end the detection`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
@@ -363,15 +363,15 @@ class DetectionEngineTest {
     }
 
     @Test
-    fun `a new trigger before reaching endSilenceBlocks resets the non-trigger counter`() {
+    fun `a release-active block before reaching endSilenceBlocks resets the inactive counter`() {
         val engine = DetectionEngine(config)
         feedSilence(engine, config.warmupBlocks)
 
         engine.process(impulseBlock())
-        engine.process(silenceBlock()) // 1 non-trigger block toward the count
-        engine.process(impulseBlock()) // re-triggers mid-DETECTING, resets the counter to 0
+        engine.process(silenceBlock()) // 1 inactive block toward the count
+        engine.process(impulseBlock()) // release-active block mid-DETECTING, resets the inactive counter to 0
 
-        val stillOpen = engine.process(silenceBlock()) // this is only the 1st non-trigger block since the reset
+        val stillOpen = engine.process(silenceBlock()) // this is only the 1st inactive block since the reset
         val closing = (0 until config.endSilenceBlocks - 1).mapNotNull { engine.process(silenceBlock()) }
 
         assertNull(stillOpen)
@@ -598,6 +598,38 @@ class DetectionEngineTest {
         // 5 blocks span (onset through the last active block), even though 2 of them were the
         // internal inactive gap.
         assertEquals(5, events.single().durationBlocks)
+    }
+
+    @Test
+    fun `an internal inactive gap can push a candidate's span past maxEventDurationBlocks, rejecting it as TOO_LONG`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock()) // onset: block 1 of the span
+        engine.process(silenceBlock()) // internal gap, 1 of 2 — strictly shorter than endSilenceBlocks (3)
+        engine.process(silenceBlock()) // internal gap, 2 of 2 — still short of endSilenceBlocks; event stays open
+
+        // Blocks 3..29 of the span: all active, none individually checked past the gap. Only 27
+        // of these calls are active blocks, yet the span (which also counts the 2 gap blocks
+        // above) reaches exactly maxEventDurationBlocks (30) here — not rejected.
+        val upToCap = (3 until config.maxEventDurationBlocks).map { engine.process(impulseBlock()) }
+        assertTrue(upToCap.all { it == null })
+        assertNull(engine.lastCandidateCompletion)
+
+        // The next active block extends the span to maxEventDurationBlocks + 1 (31) — even though
+        // the internal gap means only 28 blocks so far were ever individually active. This is the
+        // block that gets rejected immediately.
+        val result = engine.process(impulseBlock())
+
+        assertNull(result)
+        val rejected = engine.lastCandidateCompletion
+        assertTrue(rejected is CandidateCompletion.Rejected)
+        rejected as CandidateCompletion.Rejected
+        assertEquals(CandidateRejectionReason.TOO_LONG, rejected.reason)
+        assertEquals(config.maxEventDurationBlocks + 1, rejected.durationBlocks)
+
+        // The engine must have left DETECTING (default cooldownBlocks > 0 -> COOLDOWN).
+        assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
     }
 
     @Test

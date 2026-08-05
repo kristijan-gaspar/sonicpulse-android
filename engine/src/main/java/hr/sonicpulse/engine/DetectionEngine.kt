@@ -114,7 +114,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
     }
 
     private fun handleDetecting(stillActive: Boolean, dbfs: Double, blockIndex: Long): DetectionEvent? =
-        if (stillActive) handleActiveBlock(dbfs, blockIndex) else handleInactiveBlock(blockIndex)
+        if (stillActive) handleActiveBlock(dbfs, blockIndex) else handleInactiveBlock()
 
     private fun handleActiveBlock(dbfs: Double, blockIndex: Long): DetectionEvent? {
         lastActiveBlockIndex = blockIndex
@@ -145,7 +145,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
         return null
     }
 
-    private fun handleInactiveBlock(blockIndex: Long): DetectionEvent? {
+    private fun handleInactiveBlock(): DetectionEvent? {
         consecutiveInactiveBlocks++
         if (consecutiveInactiveBlocks < config.endSilenceBlocks) {
             return null
