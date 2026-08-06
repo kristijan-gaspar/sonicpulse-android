@@ -285,6 +285,19 @@ class DefaultMonitoringStateRepositoryTest {
     }
 
     @Test
+    fun `monitoringStarted resets the metrics throttle so a new session's first metric is never throttled by the previous session's`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.publishMetrics(metrics(dbfs = -25.0)) // previous session's last (throttle-consuming) emission
+
+        repository.monitoringStarted()
+        repository.publishMetrics(metrics(dbfs = -5.0)) // new session's first metric
+
+        // Without the reset, this would still be throttled by the emission above (both land in the
+        // same instant under a JVM unit test's stubbed SystemClock.elapsedRealtime()).
+        assertEquals(-5.0, repository.state.value.liveDbfs, 0.0)
+    }
+
+    @Test
     fun `publishMetrics appends the dbfs value to dbfsHistory`() {
         val repository = DefaultMonitoringStateRepository()
 

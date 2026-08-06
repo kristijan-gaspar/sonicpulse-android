@@ -31,6 +31,9 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     override val state: StateFlow<MonitoringState> = _state.asStateFlow()
 
     override fun monitoringStarted() {
+        // A restarted session must never inherit the previous session's throttle timestamp — see
+        // MetricsThrottle.reset()'s KDoc.
+        throttle.reset()
         _state.value = MonitoringState(isMonitoring = true)
     }
 
