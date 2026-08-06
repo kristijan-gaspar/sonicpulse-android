@@ -309,8 +309,8 @@ internal fun MapContent(
             disableLocationDueToServicesUnavailable()
             scope.launch {
                 val result = snackbarHostState.showSnackbar(
-                    message = permissionPermanentlyDeniedMessage,
-                    actionLabel = openSettingsLabel,
+                    message = locationServicesDisabledMessage,
+                    actionLabel = openLocationSettingsLabel,
                     duration = SnackbarDuration.Long
                 )
                 if (result == SnackbarResult.ActionPerformed) {
