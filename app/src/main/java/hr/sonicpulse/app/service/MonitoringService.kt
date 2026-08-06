@@ -17,6 +17,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.AndroidEntryPoint
+import hr.sonicpulse.app.MainActivity
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.audio.AudioRecorder
@@ -557,13 +558,24 @@ class MonitoringService : Service() {
             stopIntent(this),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        // FLAG_ACTIVITY_NEW_TASK: required whenever starting an Activity from a non-Activity
+        // Context (a notification tap) — combined with MainActivity's singleTask launch mode
+        // (manifest), this brings the existing instance to front instead of creating a duplicate
+        // one on top of it, so tapping the notification never produces a second back stack.
+        val contentIntent = Intent(this, MainActivity::class.java)
+            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.notif_monitoring_active))
-            // TODO(design-system): R.mipmap.ic_launcher is a placeholder — must be replaced
-            // with a proper monochrome notification small icon before release.
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
+            .setContentIntent(contentPendingIntent)
             .addAction(0, getString(R.string.action_stop), stopPendingIntent)
             .build()
     }

@@ -770,6 +770,51 @@ class DetectionsViewModelTest {
     }
 
     @Test
+    fun `Today filter follows peakTimeClient, not receivedAtUtc, when peakTimeClient is present`() =
+        runTest(testDispatcher) {
+            // The event actually happened long ago (peakTimeClient), but was only received by the
+            // backend today (receivedAtUtc) — must NOT count as today.
+            val eventLongAgo = detection(
+                peakDbfs = -1.0,
+                receivedAtUtc = Instant.now(),
+                peakTimeClient = Instant.parse("2020-01-01T00:00:00Z")
+            )
+            // The reverse: the event happened today (peakTimeClient) but the backend only recorded
+            // it as received long ago — must count as today.
+            val eventToday = detection(
+                peakDbfs = -2.0,
+                receivedAtUtc = Instant.parse("2020-01-01T00:00:00Z"),
+                peakTimeClient = Instant.now()
+            )
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(null to DetectionPage(items = listOf(eventLongAgo, eventToday), nextCursor = null))
+            }
+            val viewModel = viewModelWithInitialRefresh(repository)
+            advanceUntilIdle()
+
+            viewModel.selectFilter(DetectionsFilter.Today)
+
+            val visible = viewModel.uiState.value.sections.flatMap { it.items }
+            assertEquals(listOf(-2.0), visible.map { it.peakDbfs })
+        }
+
+    @Test
+    fun `Today filter falls back to receivedAtUtc when peakTimeClient is absent`() = runTest(testDispatcher) {
+        val today = detection(peakDbfs = -1.0, receivedAtUtc = Instant.now(), peakTimeClient = null)
+        val longAgo = detection(peakDbfs = -2.0, receivedAtUtc = Instant.parse("2020-01-01T00:00:00Z"), peakTimeClient = null)
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(today, longAgo), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        viewModel.selectFilter(DetectionsFilter.Today)
+
+        val visible = viewModel.uiState.value.sections.flatMap { it.items }
+        assertEquals(listOf(-1.0), visible.map { it.peakDbfs })
+    }
+
+    @Test
     fun `Grouped filter only shows detections with a hotspotId`() = runTest(testDispatcher) {
         val grouped = detection(peakDbfs = -1.0, hotspotId = UUID.randomUUID())
         val ungrouped = detection(peakDbfs = -2.0, hotspotId = null)
@@ -902,6 +947,7 @@ class DetectionsViewModelTest {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(
                 null to DetectionPage(
+                    // peakTimeClient absent on both — proves grouping falls back to receivedAtUtc.
                     items = listOf(detection(receivedAtUtc = day1), detection(receivedAtUtc = day2)),
                     nextCursor = null
                 )
@@ -917,16 +963,90 @@ class DetectionsViewModelTest {
         )
     }
 
+    @Test
+    fun `date grouping follows peakTimeClient's local date, not receivedAtUtc's, when peakTimeClient is present`() =
+        runTest(testDispatcher) {
+            val zone = ZoneId.systemDefault()
+            // The event happened on day2 (peakTimeClient, well before UTC midnight) but was only
+            // received by the backend on day1 (receivedAtUtc, well after UTC midnight) — must
+            // group under day2. The 12-hour gap straddling UTC midnight keeps both instants on
+            // their respective UTC calendar dates across a wide range of local time zones.
+            val peakTime = Instant.parse("2026-08-02T18:00:00Z")
+            val receivedTime = Instant.parse("2026-08-03T06:00:00Z")
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(
+                    null to DetectionPage(
+                        items = listOf(detection(receivedAtUtc = receivedTime, peakTimeClient = peakTime)),
+                        nextCursor = null
+                    )
+                )
+            }
+            val viewModel = viewModelWithInitialRefresh(repository)
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(peakTime.atZone(zone).toLocalDate()),
+                viewModel.uiState.value.sections.map { it.date }
+            )
+        }
+
+    @Test
+    fun `list order is unaffected by eventTime — a detection with an earlier peakTimeClient stays in its page position`() =
+        runTest(testDispatcher) {
+            // first is later by receivedAtUtc (the actual page/pagination order) but earlier by
+            // peakTimeClient — the resulting list must still follow the page order, never resort by
+            // eventTime, since the backend's pagination contract is receivedAtUtc-based.
+            val first = detection(
+                peakDbfs = -1.0,
+                receivedAtUtc = Instant.parse("2026-08-03T12:00:00Z"),
+                peakTimeClient = Instant.parse("2000-01-01T00:00:00Z")
+            )
+            val second = detection(
+                peakDbfs = -2.0,
+                receivedAtUtc = Instant.parse("2026-08-03T11:00:00Z"),
+                peakTimeClient = Instant.parse("2026-08-03T11:00:00Z")
+            )
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(null to DetectionPage(items = listOf(first, second), nextCursor = null))
+            }
+            val viewModel = viewModelWithInitialRefresh(repository)
+            advanceUntilIdle()
+
+            val order = viewModel.uiState.value.sections.flatMap { it.items }.map { it.peakDbfs }
+            assertEquals(listOf(-1.0, -2.0), order)
+        }
+
     // --- Timestamp presentation ---
 
     @Test
-    fun `list and detail timestamps are derived from receivedAtUtc, never peakTimeClient`() = runTest(testDispatcher) {
+    fun `list and detail timestamps follow peakTimeClient when present, not receivedAtUtc`() = runTest(testDispatcher) {
         val receivedAt = Instant.parse("2026-08-03T10:00:00Z")
-        val unrelatedPeakTimeClient = Instant.parse("2020-01-01T00:00:00Z")
+        val peakTimeClient = Instant.parse("2020-01-01T00:00:00Z")
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(
                 null to DetectionPage(
-                    items = listOf(detection(receivedAtUtc = receivedAt, peakTimeClient = unrelatedPeakTimeClient)),
+                    items = listOf(detection(receivedAtUtc = receivedAt, peakTimeClient = peakTimeClient)),
+                    nextCursor = null
+                )
+            )
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        val item = viewModel.uiState.value.sections.single().items.single()
+        val zone = ZoneId.systemDefault()
+        val locale = Locale.getDefault()
+        assertEquals(listTimestampTextFor(peakTimeClient, zone, locale), item.listTimestampText)
+        assertEquals(detailTimestampTextFor(peakTimeClient, zone, locale), item.detailTimestampText)
+    }
+
+    @Test
+    fun `list and detail timestamps fall back to receivedAtUtc when peakTimeClient is absent`() = runTest(testDispatcher) {
+        val receivedAt = Instant.parse("2026-08-03T10:00:00Z")
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(
+                null to DetectionPage(
+                    items = listOf(detection(receivedAtUtc = receivedAt, peakTimeClient = null)),
                     nextCursor = null
                 )
             )

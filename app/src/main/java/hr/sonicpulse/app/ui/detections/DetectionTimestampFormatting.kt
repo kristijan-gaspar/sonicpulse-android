@@ -11,7 +11,8 @@ import java.util.Locale
  * Pure, JVM-testable date/time formatting for the Detections screen — [zone]/[locale] are always
  * parameters (never read from `ZoneId.systemDefault()`/`Locale.getDefault()` internally) so tests
  * can assert against a fixed zone/locale instead of depending on the machine's own settings.
- * Everything here is derived from `receivedAtUtc` (backend-authoritative), never `peakTimeClient`.
+ * Everything here is derived from [hr.sonicpulse.app.domain.model.eventTime] (the on-device peak
+ * instant when the backend has one, falling back to `receivedAtUtc` otherwise) — see its KDoc.
  */
 
 private fun listTimeFormatter(locale: Locale, zone: ZoneId): DateTimeFormatter =

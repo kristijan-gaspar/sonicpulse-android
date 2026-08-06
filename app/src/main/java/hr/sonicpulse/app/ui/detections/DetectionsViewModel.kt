@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import hr.sonicpulse.app.domain.model.Detection
+import hr.sonicpulse.app.domain.model.eventTime
 import hr.sonicpulse.app.repository.DetectionPage
 import hr.sonicpulse.app.repository.DetectionsRepository
 import java.time.LocalDate
@@ -236,18 +237,21 @@ private fun applyFilter(detections: List<Detection>, filter: DetectionsFilter): 
     DetectionsFilter.All -> detections
     DetectionsFilter.Today -> {
         val today = LocalDate.now(ZoneId.systemDefault())
-        detections.filter { it.receivedAtUtc.atZone(ZoneId.systemDefault()).toLocalDate() == today }
+        detections.filter { it.eventTime.atZone(ZoneId.systemDefault()).toLocalDate() == today }
     }
     DetectionsFilter.Grouped -> detections.filter { it.hotspotId != null }
     DetectionsFilter.Ungrouped -> detections.filter { it.hotspotId == null }
 }
 
 /** Kotlin's `groupBy` uses a LinkedHashMap, preserving each key's first-seen order — since
- * [detections] is already newest-to-oldest, the newest date is always the first section. */
+ * [detections] is already newest-to-oldest by the backend's own receivedAtUtc-based pagination
+ * order (deliberately never resorted by eventTime here), the newest date is, in the overwhelming
+ * common case, still the first section; a rare event/received-time crossover near midnight can
+ * only ever reorder entries *within* that existing sequence, never the page order itself. */
 private fun groupByDate(detections: List<Detection>): List<DetectionDateSection> {
     val zone = ZoneId.systemDefault()
     return detections
-        .groupBy { it.receivedAtUtc.atZone(zone).toLocalDate() }
+        .groupBy { it.eventTime.atZone(zone).toLocalDate() }
         .map { (date, items) -> DetectionDateSection(date, items.map(::toUiModel)) }
 }
 
@@ -257,8 +261,8 @@ private fun toUiModel(detection: Detection): DetectionHistoryItemUiModel {
     return DetectionHistoryItemUiModel(
         id = detection.id,
         peakDbfs = detection.peakDbfs,
-        listTimestampText = listTimestampTextFor(detection.receivedAtUtc, zone, locale),
-        detailTimestampText = detailTimestampTextFor(detection.receivedAtUtc, zone, locale),
+        listTimestampText = listTimestampTextFor(detection.eventTime, zone, locale),
+        detailTimestampText = detailTimestampTextFor(detection.eventTime, zone, locale),
         latitudeText = String.format(Locale.US, "%.5f", detection.latitude),
         longitudeText = String.format(Locale.US, "%.5f", detection.longitude),
         grouped = detection.hotspotId != null
