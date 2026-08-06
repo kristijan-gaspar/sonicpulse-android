@@ -937,6 +937,146 @@ class DetectionEngineTest {
         assertNull(engine.lastCandidateCompletion)
     }
 
+    // --- onset-baseline floor on the release threshold (weak impulse above a raised ambient) ---
+
+    /** Seeds the engine's baseline to exactly [dbfs] and holds it there: [BaselineTracker] sets
+     * its value directly (no EMA smoothing) on the very first update it ever receives, and a flat
+     * block repeating that same value leaves it unchanged on every update after. Also advances
+     * the engine past [EngineConfig.warmupBlocks] so a subsequent onset block is eligible to
+     * trigger. */
+    private fun seedBaseline(engine: DetectionEngine, dbfs: Double) {
+        repeat(config.warmupBlocks) { engine.process(flatBlockAt(dbfs)) }
+    }
+
+    @Test
+    fun `a weak impulse above a raised ambient baseline closes on returning to that baseline, not stalling on the peak-relative drop alone`() {
+        val engine = DetectionEngine(config)
+        seedBaseline(engine, -36.0)
+        // flatBlockAt() truncates its PCM amplitude toward zero, so the baseline this seeds is
+        // at or fractionally below -36.0, not exactly equal to it — compare with tolerance.
+        val baselineDbfs = engine.currentBaseline
+        assertEquals(-36.0, baselineDbfs, 0.1)
+
+        val onsetResult = engine.process(impulseBlock())
+        assertNull(onsetResult)
+        val onsetMetrics = engine.lastBlockMetrics!!
+        // Confirms this block actually produces the approximate onset described in the reported
+        // scenario before relying on it: ~-19 dBFS peak, ~17 dB spike over the -36 dBFS baseline,
+        // both clearing dbfsMin/spikeMin. Under the pre-fix peak-relative-only rule, the release
+        // threshold here would be peakDbfs - releaseDropDb = -19.3 - 20 = -39.3 dBFS — below the
+        // -36 dBFS the signal actually returns to, so it would never close on that return alone.
+        assertEquals(-19.34, onsetMetrics.dbfs, 0.1)
+        assertEquals(16.66, onsetMetrics.spike, 0.1)
+        assertTrue(onsetMetrics.dbfs > config.dbfsMin)
+        assertTrue(onsetMetrics.spike > config.spikeMin)
+        check(onsetMetrics.dbfs - config.releaseDropDb < baselineDbfs) {
+            "test setup invalid: peak-relative threshold must sit below the onset baseline " +
+                "for this scenario to exercise the floor"
+        }
+
+        // Returns to the exact onset baseline.
+        val results = (0 until config.endSilenceBlocks).map { engine.process(flatBlockAt(baselineDbfs)) }
+
+        assertEquals(config.endSilenceBlocks - 1, results.count { it == null })
+        val closing = results.last()
+        assertNotNull(closing)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+    }
+
+    @Test
+    fun `a strong impulse still uses the peak-relative threshold when it sits above the onset baseline`() {
+        val engine = DetectionEngine(config)
+        seedBaseline(engine, -36.0)
+
+        engine.process(clippedPlateauBlock()) // loud onset via the clipping branch; peak well above dbfsMin
+        val peakDbfs = engine.lastBlockMetrics!!.dbfs
+        check(peakDbfs - config.releaseDropDb > -36.0) {
+            "test setup invalid: peak-relative threshold (${peakDbfs - config.releaseDropDb}) " +
+                "must sit above the onset baseline (-36.0) for this scenario"
+        }
+
+        // Strictly between the (higher) peak-relative threshold and the (lower) onset baseline.
+        // If the baseline wrongly won out over the peak-relative threshold, this block would
+        // count as active and the candidate would never close within endSilenceBlocks.
+        val betweenThresholds = (peakDbfs - config.releaseDropDb + -36.0) / 2.0
+        val results = (0 until config.endSilenceBlocks).map { engine.process(flatBlockAt(betweenThresholds)) }
+
+        assertEquals(config.endSilenceBlocks - 1, results.count { it == null })
+        assertNotNull(results.last())
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+    }
+
+    @Test
+    fun `a later louder peak raises the peak-relative release threshold above the frozen onset baseline`() {
+        val engine = DetectionEngine(config)
+        seedBaseline(engine, -36.0)
+
+        engine.process(impulseBlock()) // onset, peak ~ -19.3 dBFS
+        engine.process(clippedPlateauBlock()) // release-active, louder: becomes the new peak
+        val newPeakDbfs = engine.lastBlockMetrics!!.dbfs
+        check(newPeakDbfs - config.releaseDropDb > -36.0) {
+            "test setup invalid: the new peak-relative threshold must exceed the onset baseline"
+        }
+
+        // Below the raised peak-relative threshold but above the onset baseline: only correct if
+        // the release threshold tracks the updated peak rather than falling back to the frozen
+        // baseline (which this level would also clear, masking a stale-peak bug).
+        val belowNewThreshold = newPeakDbfs - config.releaseDropDb - 1.0
+        check(belowNewThreshold > -36.0)
+        val results = (0 until config.endSilenceBlocks).map { engine.process(flatBlockAt(belowNewThreshold)) }
+
+        assertEquals(config.endSilenceBlocks - 1, results.count { it == null })
+        assertNotNull(results.last())
+    }
+
+    @Test
+    fun `a new candidate captures its own onset baseline, not the previous candidate's`() {
+        val zeroCooldownConfig = EngineConfig(cooldownBlocks = 0)
+        val engine = DetectionEngine(zeroCooldownConfig)
+        seedBaseline(engine, -36.0)
+        val firstBaselineDbfs = engine.currentBaseline
+
+        // First candidate: opens and closes against firstBaselineDbfs, immediately back to IDLE
+        // (cooldownBlocks = 0).
+        engine.process(impulseBlock())
+        val firstEvents = (0 until zeroCooldownConfig.endSilenceBlocks)
+            .mapNotNull { engine.process(flatBlockAt(firstBaselineDbfs)) }
+        check(firstEvents.size == 1)
+
+        // Ambient rises well above the first candidate's baseline. Enough repeats for the
+        // (unsmoothed-on-first-touch, then EMA) baseline to settle arbitrarily close to -20.0.
+        repeat(200) { engine.process(flatBlockAt(-20.0)) }
+        val secondBaselineDbfs = engine.currentBaseline
+        check(secondBaselineDbfs > firstBaselineDbfs + 10.0) {
+            "test setup invalid: baseline did not rise enough above the first candidate's, " +
+                "was $secondBaselineDbfs vs $firstBaselineDbfs"
+        }
+
+        // Second candidate opens via the clipping branch, so it clears spikeMin regardless of how
+        // close the raised baseline now sits to its peak (a plain impulseBlock() here could lose
+        // spikeMin against a baseline this high and never trigger at all).
+        engine.process(clippedPlateauBlock())
+        val secondPeakDbfs = engine.lastBlockMetrics!!.dbfs
+
+        // Two hypotheses for the release threshold: correct (this candidate's own, freshly
+        // captured baseline) vs. buggy (a leaked baseline from the first candidate). Pick a level
+        // strictly between them so only the correct one closes the candidate within
+        // endSilenceBlocks.
+        val leakedThreshold = maxOf(secondPeakDbfs - zeroCooldownConfig.releaseDropDb, firstBaselineDbfs)
+        val correctThreshold = maxOf(secondPeakDbfs - zeroCooldownConfig.releaseDropDb, secondBaselineDbfs)
+        check(correctThreshold > leakedThreshold + 0.5) {
+            "test setup invalid: correct threshold ($correctThreshold) does not exceed the " +
+                "leaked one ($leakedThreshold) enough to discriminate the bug"
+        }
+        val discriminatingLevel = (correctThreshold + leakedThreshold) / 2.0
+
+        val results = (0 until zeroCooldownConfig.endSilenceBlocks)
+            .map { engine.process(flatBlockAt(discriminatingLevel)) }
+
+        assertEquals(zeroCooldownConfig.endSilenceBlocks - 1, results.count { it == null })
+        assertNotNull(results.last())
+    }
+
     @Test
     fun `an invalid block does not clear a completion set by the previous valid block`() {
         val engine = DetectionEngine(config)
