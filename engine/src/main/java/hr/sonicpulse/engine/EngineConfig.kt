@@ -15,6 +15,7 @@ data class EngineConfig(
     val endSilenceBlocks: Int = 3,
     val maxEventDurationBlocks: Int = 30,
     val cooldownBlocks: Int = 30,
+    val rejectedCooldownBlocks: Int = 5,
     val warmupBlocks: Int = 43,
     val dbfsFloor: Double = -120.0
 ) {
@@ -84,6 +85,9 @@ data class EngineConfig(
         }
         require(cooldownBlocks >= 0) {
             "cooldownBlocks must not be negative, was $cooldownBlocks."
+        }
+        require(rejectedCooldownBlocks >= 0) {
+            "rejectedCooldownBlocks must not be negative, was $rejectedCooldownBlocks."
         }
         require(warmupBlocks >= 0) {
             "warmupBlocks must not be negative, was $warmupBlocks."

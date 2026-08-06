@@ -352,6 +352,7 @@ private fun EngineConfig.toSnapshot(): EngineConfigSnapshot = EngineConfigSnapsh
     endSilenceBlocks = endSilenceBlocks,
     maxEventDurationBlocks = maxEventDurationBlocks,
     cooldownBlocks = cooldownBlocks,
+    rejectedCooldownBlocks = rejectedCooldownBlocks,
     warmupBlocks = warmupBlocks,
     dbfsFloor = dbfsFloor
 )

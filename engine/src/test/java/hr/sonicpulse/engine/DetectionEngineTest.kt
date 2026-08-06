@@ -717,7 +717,7 @@ class DetectionEngineTest {
         assertEquals(CandidateRejectionReason.TOO_LONG, rejected.reason)
         assertEquals(config.maxEventDurationBlocks + 1, rejected.durationBlocks)
 
-        // The engine must have left DETECTING (default cooldownBlocks > 0 -> COOLDOWN).
+        // The engine must have left DETECTING (default rejectedCooldownBlocks > 0 -> COOLDOWN).
         assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
     }
 
@@ -798,23 +798,8 @@ class DetectionEngineTest {
         assertEquals(peakIndex, rejected.peakBlockIndex)
         assertEquals(31, rejected.durationBlocks)
 
-        // The engine must have left DETECTING (default cooldownBlocks > 0 -> COOLDOWN).
+        // The engine must have left DETECTING (default rejectedCooldownBlocks > 0 -> COOLDOWN).
         assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
-    }
-
-    @Test
-    fun `a rejected candidate transitions directly to IDLE when cooldownBlocks is zero`() {
-        val zeroCooldownConfig = EngineConfig(cooldownBlocks = 0)
-        val engine = DetectionEngine(zeroCooldownConfig)
-        feedSilence(engine, zeroCooldownConfig.warmupBlocks)
-
-        engine.process(impulseBlock())
-        repeat(zeroCooldownConfig.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) }
-        val result = engine.process(impulseBlock()) // duration 31 -> rejected
-
-        assertNull(result)
-        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
-        assertEquals(DetectionState.IDLE, engine.lastBlockMetrics!!.state)
     }
 
     @Test
@@ -828,7 +813,9 @@ class DetectionEngineTest {
         check(rejectingResult == null)
         check(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
 
-        repeat(config.cooldownBlocks) { engine.process(silenceBlock()) } // exhaust cooldown -> IDLE
+        // More than enough silence to exhaust rejectedCooldownBlocks (the rejected path's actual
+        // cooldown length) and reach IDLE well before this many blocks pass.
+        repeat(config.cooldownBlocks) { engine.process(silenceBlock()) }
 
         val secondOnset = engine.process(impulseBlock())
         val secondEvents = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
@@ -836,6 +823,94 @@ class DetectionEngineTest {
         assertNull(secondOnset)
         assertEquals(1, secondEvents.size)
         assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+    }
+
+    @Test
+    fun `a rejected candidate uses rejectedCooldownBlocks, not the full cooldownBlocks`() {
+        val shortRejectedCooldownConfig = EngineConfig(cooldownBlocks = 30, rejectedCooldownBlocks = 5)
+        val engine = DetectionEngine(shortRejectedCooldownConfig)
+        feedSilence(engine, shortRejectedCooldownConfig.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(shortRejectedCooldownConfig.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) }
+        val rejectingResult = engine.process(impulseBlock()) // duration 31 -> rejected, enters COOLDOWN
+        check(rejectingResult == null)
+        check(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
+
+        // rejectedCooldownBlocks - 1 processed cooldown blocks: still COOLDOWN, not yet IDLE.
+        repeat(shortRejectedCooldownConfig.rejectedCooldownBlocks - 1) { engine.process(silenceBlock()) }
+        assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
+
+        // The rejectedCooldownBlocks-th cooldown block: state flips to IDLE, well short of the
+        // much longer cooldownBlocks (30) an accepted detection would have required.
+        engine.process(silenceBlock())
+        assertEquals(DetectionState.IDLE, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `an accepted detection still uses the full cooldownBlocks, unaffected by rejectedCooldownBlocks`() {
+        val engine = DetectionEngine(config)
+        feedSilence(engine, config.warmupBlocks)
+
+        engine.process(impulseBlock())
+        val events = (0 until config.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+        check(events.size == 1)
+        check(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+
+        // config.rejectedCooldownBlocks (5) worth of silence is nowhere near enough to exit
+        // COOLDOWN for an accepted detection — only cooldownBlocks (30) governs this path.
+        repeat(config.rejectedCooldownBlocks) { engine.process(silenceBlock()) }
+        assertEquals(DetectionState.COOLDOWN, engine.lastBlockMetrics!!.state)
+
+        repeat(config.cooldownBlocks - config.rejectedCooldownBlocks) { engine.process(silenceBlock()) }
+        assertEquals(DetectionState.IDLE, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `a rejected candidate transitions directly to IDLE when rejectedCooldownBlocks is zero`() {
+        val zeroRejectedCooldownConfig = EngineConfig(rejectedCooldownBlocks = 0)
+        val engine = DetectionEngine(zeroRejectedCooldownConfig)
+        feedSilence(engine, zeroRejectedCooldownConfig.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(zeroRejectedCooldownConfig.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) }
+        val result = engine.process(impulseBlock()) // duration 31 -> rejected
+
+        assertNull(result)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
+        assertEquals(DetectionState.IDLE, engine.lastBlockMetrics!!.state)
+    }
+
+    @Test
+    fun `a new impulse can be detected on the first processable block after rejectedCooldownBlocks, well before the previous shared cooldownBlocks would have ended`() {
+        val shortRejectedCooldownConfig = EngineConfig(cooldownBlocks = 30, rejectedCooldownBlocks = 5)
+        val engine = DetectionEngine(shortRejectedCooldownConfig)
+        feedSilence(engine, shortRejectedCooldownConfig.warmupBlocks)
+
+        engine.process(impulseBlock())
+        repeat(shortRejectedCooldownConfig.maxEventDurationBlocks - 1) { engine.process(impulseBlock()) }
+        val rejectingResult = engine.process(impulseBlock()) // duration 31 -> rejected, enters COOLDOWN
+        check(rejectingResult == null)
+        check(engine.lastCandidateCompletion is CandidateCompletion.Rejected)
+
+        // rejectedCooldownBlocks (5) blocks of cooldown, then the very next block (the 1st
+        // processable block after rejectedCooldownBlocks, i.e. rejectedCooldownBlocks + 1 blocks
+        // after the rejection) is a genuine new impulse.
+        repeat(shortRejectedCooldownConfig.rejectedCooldownBlocks) { engine.process(silenceBlock()) }
+        check(DetectionState.IDLE == engine.lastBlockMetrics!!.state)
+
+        val secondOnset = engine.process(impulseBlock())
+        val secondEvents =
+            (0 until shortRejectedCooldownConfig.endSilenceBlocks).mapNotNull { engine.process(silenceBlock()) }
+
+        assertNull(secondOnset)
+        assertEquals(1, secondEvents.size)
+        assertTrue(engine.lastCandidateCompletion is CandidateCompletion.Accepted)
+
+        // Under the previous shared 30-block cooldown behavior, only rejectedCooldownBlocks + 1
+        // (6) blocks would have passed since the rejection — still well inside a 30-block
+        // cooldown, so this same impulse would still have been ignored.
+        assertTrue(shortRejectedCooldownConfig.rejectedCooldownBlocks + 1 < shortRejectedCooldownConfig.cooldownBlocks)
     }
 
     @Test
