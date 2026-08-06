@@ -9,6 +9,22 @@ import java.time.Instant
  */
 object PeakTimeCalculator {
 
+    /**
+     * Anchors block zero's start instant from the wall-clock instant the *first completed block*
+     * actually arrived — which is already one block duration after capture genuinely began, since
+     * the caller cannot observe a block until [blockSize] samples have been read. Subtracting that
+     * one block's duration corrects for that systematic offset (~23ms at the default 1024/44100
+     * configuration) so [calculate] measures every later peak from the true start of capture,
+     * not from one block-duration late.
+     */
+    fun blockZeroInstant(firstBlockArrivalInstant: Instant, sampleRate: Int, blockSize: Int): Instant {
+        require(sampleRate > 0) { "sampleRate must be positive, was $sampleRate." }
+        require(blockSize > 0) { "blockSize must be positive, was $blockSize." }
+
+        val blockDurationNanos = blockSize.toLong() * 1_000_000_000L / sampleRate
+        return firstBlockArrivalInstant.minusNanos(blockDurationNanos)
+    }
+
     fun calculate(
         firstBlockInstant: Instant,
         peakBlockIndex: Long,

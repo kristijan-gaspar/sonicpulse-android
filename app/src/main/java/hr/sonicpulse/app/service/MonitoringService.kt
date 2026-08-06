@@ -20,6 +20,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.data.audio.AudioCaptureError
 import hr.sonicpulse.app.data.audio.AudioRecorder
+import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
@@ -296,7 +297,14 @@ class MonitoringService : Service() {
     }
 
     private fun handleBlock(engine: DetectionEngine, block: ShortArray) {
-        val startInstant = firstBlockInstant ?: Instant.now().also { firstBlockInstant = it }
+        // The first completed block only becomes observable here one full block duration after
+        // capture actually began (see PeakTimeCalculator.blockZeroInstant) — Instant.now() at
+        // this point is the end of that first block, not its start.
+        val startInstant = firstBlockInstant ?: PeakTimeCalculator.blockZeroInstant(
+            Instant.now(),
+            engineConfig.sampleRate,
+            engineConfig.blockSize
+        ).also { firstBlockInstant = it }
 
         val event = engine.process(block)
         // Read immediately after process(): all three only describe the block just processed, and
