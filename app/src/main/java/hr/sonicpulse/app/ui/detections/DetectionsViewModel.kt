@@ -3,6 +3,8 @@ package hr.sonicpulse.app.ui.detections
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import hr.sonicpulse.app.data.remote.RemoteFailure
+import hr.sonicpulse.app.data.remote.RemoteFailureClassifier
 import hr.sonicpulse.app.domain.model.Detection
 import hr.sonicpulse.app.domain.model.eventTime
 import hr.sonicpulse.app.repository.DetectionPage
@@ -92,7 +94,9 @@ class DetectionsViewModel @Inject constructor(
             isLoadingNextPage = false,
             initialError = false,
             refreshError = false,
-            pagingError = false
+            pagingError = false,
+            initialErrorServerConfiguration = false,
+            refreshErrorServerConfiguration = false
         )
 
         val job = viewModelScope.launch {
@@ -105,10 +109,21 @@ class DetectionsViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
+                val isServerConfiguration = RemoteFailureClassifier.classify(e) is RemoteFailure.Unauthorized
                 if (isFirstLoad) {
-                    publishState(isInitialLoading = false, isRefreshing = false, initialError = true)
+                    publishState(
+                        isInitialLoading = false,
+                        isRefreshing = false,
+                        initialError = true,
+                        initialErrorServerConfiguration = isServerConfiguration
+                    )
                 } else {
-                    publishState(isInitialLoading = false, isRefreshing = false, refreshError = true)
+                    publishState(
+                        isInitialLoading = false,
+                        isRefreshing = false,
+                        refreshError = true,
+                        refreshErrorServerConfiguration = isServerConfiguration
+                    )
                 }
             }
         }
@@ -130,7 +145,7 @@ class DetectionsViewModel @Inject constructor(
 
         isLoadingNextPage = true
         val myGeneration = generation
-        publishState(isLoadingNextPage = true, pagingError = false)
+        publishState(isLoadingNextPage = true, pagingError = false, pagingErrorServerConfiguration = false)
 
         val job = viewModelScope.launch {
             try {
@@ -142,7 +157,8 @@ class DetectionsViewModel @Inject constructor(
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
                 isLoadingNextPage = false
-                publishState(isLoadingNextPage = false, pagingError = true)
+                val isServerConfiguration = RemoteFailureClassifier.classify(e) is RemoteFailure.Unauthorized
+                publishState(isLoadingNextPage = false, pagingError = true, pagingErrorServerConfiguration = isServerConfiguration)
             }
         }
         pagingJob = job
@@ -169,19 +185,23 @@ class DetectionsViewModel @Inject constructor(
             isLoadingNextPage = false,
             initialError = false,
             refreshError = false,
-            pagingError = false
+            pagingError = false,
+            initialErrorServerConfiguration = false,
+            refreshErrorServerConfiguration = false,
+            pagingErrorServerConfiguration = false
         )
     }
 
     /** Merges a later page into what's already loaded. Deliberately leaves
-     * [DetectionsUiState.refreshError] untouched — the default parameters of [publishState] carry
-     * the current value forward, so a stale refresh failure stays visible until the next refresh. */
+     * [DetectionsUiState.refreshError] (and its accompanying …ServerConfiguration flag) untouched
+     * — the default parameters of [publishState] carry the current values forward, so a stale
+     * refresh failure stays visible until the next refresh. */
     private fun applyNextPage(page: DetectionPage) {
         loadedDetections = mergeDedup(loadedDetections, page.items)
         nextCursor = page.nextCursor
         canLoadMore = page.nextCursor != null
         isLoadingNextPage = false
-        publishState(isLoadingNextPage = false, pagingError = false)
+        publishState(isLoadingNextPage = false, pagingError = false, pagingErrorServerConfiguration = false)
     }
 
     private fun publishState(
@@ -190,7 +210,10 @@ class DetectionsViewModel @Inject constructor(
         isLoadingNextPage: Boolean = _uiState.value.isLoadingNextPage,
         initialError: Boolean = _uiState.value.initialError,
         refreshError: Boolean = _uiState.value.refreshError,
-        pagingError: Boolean = _uiState.value.pagingError
+        pagingError: Boolean = _uiState.value.pagingError,
+        initialErrorServerConfiguration: Boolean = _uiState.value.initialErrorServerConfiguration,
+        refreshErrorServerConfiguration: Boolean = _uiState.value.refreshErrorServerConfiguration,
+        pagingErrorServerConfiguration: Boolean = _uiState.value.pagingErrorServerConfiguration
     ) {
         val sections = groupByDate(applyFilter(loadedDetections, selectedFilter))
         val emptyState = when {
@@ -209,6 +232,9 @@ class DetectionsViewModel @Inject constructor(
             initialError = initialError,
             refreshError = refreshError,
             pagingError = pagingError,
+            initialErrorServerConfiguration = initialErrorServerConfiguration,
+            refreshErrorServerConfiguration = refreshErrorServerConfiguration,
+            pagingErrorServerConfiguration = pagingErrorServerConfiguration,
             emptyState = emptyState
         )
     }

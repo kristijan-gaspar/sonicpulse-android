@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import hr.sonicpulse.app.data.datastore.PermissionRequestHistory
+import hr.sonicpulse.app.data.remote.RemoteFailure
+import hr.sonicpulse.app.data.remote.RemoteFailureClassifier
 import hr.sonicpulse.app.domain.model.Hotspot
 import hr.sonicpulse.app.repository.HotspotsRepository
 import javax.inject.Inject
@@ -128,7 +130,9 @@ class MapViewModel @Inject constructor(
             isLoadingSubsequent = !isFirstLoad,
             pendingRange = if (!isFirstLoad && isRangeChange) range else null,
             initialError = false,
-            subsequentError = false
+            subsequentError = false,
+            initialErrorServerConfiguration = false,
+            subsequentErrorServerConfiguration = false
         )
 
         val job = viewModelScope.launch {
@@ -146,12 +150,15 @@ class MapViewModel @Inject constructor(
                     isLoadingSubsequent = false,
                     pendingRange = null,
                     initialError = false,
-                    subsequentError = false
+                    subsequentError = false,
+                    initialErrorServerConfiguration = false,
+                    subsequentErrorServerConfiguration = false
                 )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
+                val isServerConfiguration = RemoteFailureClassifier.classify(e) is RemoteFailure.Unauthorized
                 // committedRange/loadedHotspots are untouched on failure — a failed range change
                 // therefore automatically "reverts" simply by never having been committed.
                 if (isFirstLoad) {
@@ -160,7 +167,8 @@ class MapViewModel @Inject constructor(
                         isInitialLoading = false,
                         isLoadingSubsequent = false,
                         pendingRange = null,
-                        initialError = true
+                        initialError = true,
+                        initialErrorServerConfiguration = isServerConfiguration
                     )
                 } else {
                     failedRequest = if (isRangeChange) FailedMapRequest.RangeChange(range) else FailedMapRequest.Refresh
@@ -168,7 +176,8 @@ class MapViewModel @Inject constructor(
                         isInitialLoading = false,
                         isLoadingSubsequent = false,
                         pendingRange = null,
-                        subsequentError = true
+                        subsequentError = true,
+                        subsequentErrorServerConfiguration = isServerConfiguration
                     )
                 }
             }
@@ -184,7 +193,9 @@ class MapViewModel @Inject constructor(
         isLoadingSubsequent: Boolean,
         pendingRange: HotspotTimeRange?,
         initialError: Boolean = false,
-        subsequentError: Boolean = false
+        subsequentError: Boolean = false,
+        initialErrorServerConfiguration: Boolean = false,
+        subsequentErrorServerConfiguration: Boolean = false
     ) {
         _uiState.value = MapUiState(
             hotspots = loadedHotspots,
@@ -193,7 +204,9 @@ class MapViewModel @Inject constructor(
             isInitialLoading = isInitialLoading,
             isLoadingSubsequent = isLoadingSubsequent,
             initialError = initialError,
-            subsequentError = subsequentError
+            subsequentError = subsequentError,
+            initialErrorServerConfiguration = initialErrorServerConfiguration,
+            subsequentErrorServerConfiguration = subsequentErrorServerConfiguration
         )
     }
 }

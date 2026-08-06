@@ -18,6 +18,11 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.Response as OkHttpResponse
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,6 +30,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import retrofit2.HttpException
+import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DetectionsViewModelTest {
@@ -39,6 +46,17 @@ class DetectionsViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    private fun httpException(code: Int): HttpException {
+        val rawResponse = OkHttpResponse.Builder()
+            .code(code)
+            .message("test")
+            .protocol(Protocol.HTTP_1_1)
+            .request(Request.Builder().url("http://localhost/").build())
+            .build()
+        val body = "{}".toResponseBody("application/json".toMediaType())
+        return HttpException(Response.error<Unit>(body, rawResponse))
     }
 
     private fun detection(
@@ -105,6 +123,43 @@ class DetectionsViewModelTest {
         assertTrue(viewModel.uiState.value.initialError)
         assertFalse(viewModel.uiState.value.isInitialLoading)
         assertFalse(viewModel.uiState.value.refreshError)
+    }
+
+    @Test
+    fun `a 401 initial failure is classified as a server-configuration error`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply { throwOnGetPage = httpException(401) }
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.initialError)
+        assertTrue(state.initialErrorServerConfiguration)
+    }
+
+    @Test
+    fun `a 403 initial failure is classified as a server-configuration error`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply { throwOnGetPage = httpException(403) }
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.initialErrorServerConfiguration)
+    }
+
+    @Test
+    fun `a network initial failure is not classified as a server-configuration error`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply { throwOnGetPage = IOException("boom") }
+        val viewModel = DetectionsViewModel(repository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.initialError)
+        assertFalse(state.initialErrorServerConfiguration)
     }
 
     @Test
@@ -231,6 +286,24 @@ class DetectionsViewModelTest {
 
         assertTrue(viewModel.uiState.value.refreshError)
     }
+
+    @Test
+    fun `a 401 manual-refresh failure is classified as a server-configuration error, distinct from a network failure`() =
+        runTest(testDispatcher) {
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
+            }
+            val viewModel = viewModelWithInitialRefresh(repository)
+            advanceUntilIdle()
+
+            repository.throwOnGetPage = httpException(401)
+            viewModel.refresh()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertTrue(state.refreshError)
+            assertTrue(state.refreshErrorServerConfiguration)
+        }
 
     @Test
     fun `a successful retry after a failed manual refresh replaces the old list and applies the new cursor`() =
@@ -608,6 +681,24 @@ class DetectionsViewModelTest {
         assertEquals(itemsBefore, viewModel.uiState.value.sections.flatMap { it.items })
         assertTrue(viewModel.uiState.value.pagingError)
     }
+
+    @Test
+    fun `a 401 next-page failure is classified as a server-configuration error, distinct from a network failure`() =
+        runTest(testDispatcher) {
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = 1L))
+            }
+            val viewModel = viewModelWithInitialRefresh(repository)
+            advanceUntilIdle()
+
+            repository.throwOnGetPage = httpException(401)
+            viewModel.loadNextPage()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertTrue(state.pagingError)
+            assertTrue(state.pagingErrorServerConfiguration)
+        }
 
     @Test
     fun `retry after a failed next-page request uses the same cursor`() = runTest(testDispatcher) {

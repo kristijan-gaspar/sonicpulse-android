@@ -519,7 +519,7 @@ private fun HotspotControlsAndOverlays(
 ) {
     when {
         uiState.initialError -> {
-            InitialDataErrorOverlay(onRetry = onRefresh)
+            InitialDataErrorOverlay(onRetry = onRefresh, serverConfigurationError = uiState.initialErrorServerConfiguration)
         }
         else -> {
             Column(
@@ -541,7 +541,7 @@ private fun HotspotControlsAndOverlays(
                 MapLegend(modifier = Modifier.padding(start = FilterChipRowHorizontalContentPadding))
                 if (uiState.subsequentError) {
                     Spacer(modifier = Modifier.height(Spacing.sm))
-                    SubsequentErrorBanner(onRetry = onRetry)
+                    SubsequentErrorBanner(onRetry = onRetry, serverConfigurationError = uiState.subsequentErrorServerConfiguration)
                 }
             }
 
@@ -729,11 +729,16 @@ private fun MapLoadingIndicator(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun InitialDataErrorOverlay(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun InitialDataErrorOverlay(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Surface(shape = AppShapes.Card, color = MaterialTheme.colorScheme.surface) {
             Column(modifier = Modifier.padding(Spacing.lg), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = stringResource(R.string.map_error_data_initial), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = stringResource(
+                        if (serverConfigurationError) R.string.error_server_configuration else R.string.map_error_data_initial
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Button(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
             }
@@ -755,14 +760,20 @@ private fun EmptyHotspotsOverlay(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Surface(modifier = modifier.fillMaxWidth(), shape = AppShapes.Card, color = SemanticColors.WarningBg) {
         Row(
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = stringResource(R.string.map_error_data_refresh), style = MaterialTheme.typography.bodySmall, color = SemanticColors.Warning)
+            Text(
+                text = stringResource(
+                    if (serverConfigurationError) R.string.error_server_configuration else R.string.map_error_data_refresh
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = SemanticColors.Warning
+            )
             TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
         }
     }
