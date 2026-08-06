@@ -79,12 +79,52 @@ class HotspotGeometryTest {
     }
 
     @Test
-    fun `zero radius does not crash and produces a degenerate ring at the centroid`() {
+    fun `zero radius renders at the MIN_EFFECTIVE_RADIUS_METERS floor, not a degenerate point`() {
         val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 0.0, 3, 84)
 
-        polygon.ring.forEach { point ->
-            assertEquals(45.8, point.latitude, 1e-9)
-            assertEquals(16.0, point.longitude, 1e-9)
+        polygon.ring.dropLast(1).forEach { point ->
+            val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
+            assertTrue(
+                "expected ~${HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS} m, was $distance m",
+                Math.abs(distance - HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS) < 1.0
+            )
+        }
+    }
+
+    @Test
+    fun `a very small positive radius below the floor also renders at MIN_EFFECTIVE_RADIUS_METERS`() {
+        val tinyRadius = 1.0
+        check(tinyRadius < HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, tinyRadius, 3, 84)
+
+        polygon.ring.dropLast(1).forEach { point ->
+            val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
+            assertTrue(
+                "expected ~${HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS} m, was $distance m",
+                Math.abs(distance - HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS) < 1.0
+            )
+        }
+    }
+
+    @Test
+    fun `a radius already above the floor is rendered at its own real value, unmodified`() {
+        val radius = HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS + 500.0
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3, 84)
+
+        polygon.ring.dropLast(1).forEach { point ->
+            val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
+            assertTrue("expected ~$radius m, was $distance m", Math.abs(distance - radius) < 1.0)
+        }
+    }
+
+    @Test
+    fun `a large valid radius is rendered at its own real value, unmodified`() {
+        val radius = 50_000.0
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3, 84)
+
+        polygon.ring.dropLast(1).forEach { point ->
+            val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
+            assertTrue("expected ~$radius m, was $distance m", Math.abs(distance - radius) < 50.0)
         }
     }
 

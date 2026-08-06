@@ -14,13 +14,18 @@ import kotlin.math.sqrt
  */
 object HotspotHitSelector {
 
-    /** A hotspot is a candidate when the click falls on or inside its radius (`<=`, so a boundary
-     * click counts as inside). Among overlapping candidates, the nearest centroid wins; an exact
-     * tie falls back to hotspot UUID for a deterministic, order-independent result. */
+    /** A hotspot is a candidate when the click falls on or inside its *effective* radius (`<=`,
+     * so a boundary click counts as inside) — [HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS] at
+     * minimum, the same floor [HotspotGeometry.polygonFor] renders with, so the clickable area
+     * always matches what's actually drawn even for a zero/near-zero backend radius. Among
+     * overlapping candidates, the nearest centroid wins; an exact tie falls back to hotspot UUID
+     * for a deterministic, order-independent result. */
     fun select(clickLatitude: Double, clickLongitude: Double, hotspots: List<Hotspot>): Hotspot? =
         hotspots
             .map { it to distanceMeters(clickLatitude, clickLongitude, it.latitude, it.longitude) }
-            .filter { (hotspot, distance) -> distance <= hotspot.radiusMeters }
+            .filter { (hotspot, distance) ->
+                distance <= maxOf(hotspot.radiusMeters, HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS)
+            }
             .minWithOrNull(compareBy({ it.second }, { it.first.id }))
             ?.first
 
