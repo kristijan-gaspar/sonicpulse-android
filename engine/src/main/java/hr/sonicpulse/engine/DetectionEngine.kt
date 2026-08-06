@@ -21,6 +21,11 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
     private var processedBlockIndex = 0L
     private var consecutiveInactiveBlocks = 0
     private var cooldownBlockCount = 0
+    /** How many cooldown blocks the current/most recent [DetectionState.COOLDOWN] run must reach
+     * before returning to IDLE — [EngineConfig.cooldownBlocks] after an accepted detection,
+     * [EngineConfig.rejectedCooldownBlocks] after a rejected candidate. Set once, in
+     * [enterCooldown], when leaving `DETECTING`; [handleCooldown] only ever reads it. */
+    private var activeCooldownTargetBlocks = 0
     private var eventPeakDbfs = Double.NEGATIVE_INFINITY
     private var eventPeakBlockIndex = 0L
     private var eventStartBlockIndex = 0L
@@ -148,7 +153,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             peakBlockIndex = eventPeakBlockIndex,
             durationBlocks = durationBlocks
         )
-        finishEventState()
+        enterCooldown(config.rejectedCooldownBlocks)
         resetEventTracking()
         lastCandidateCompletion = rejection
         return null
@@ -170,7 +175,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             peakBlockIndex = eventPeakBlockIndex,
             durationBlocks = durationBlocks
         )
-        finishEventState()
+        enterCooldown(config.cooldownBlocks)
         resetEventTracking()
         lastCandidateCompletion = CandidateCompletion.Accepted(event)
         return event
@@ -178,15 +183,21 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
 
     private fun handleCooldown(): DetectionEvent? {
         cooldownBlockCount++
-        if (cooldownBlockCount >= config.cooldownBlocks) {
+        if (cooldownBlockCount >= activeCooldownTargetBlocks) {
             state = DetectionState.IDLE
         }
         return null
     }
 
-    /** Leaves `DETECTING` for whichever candidate just finished — accepted or rejected alike. */
-    private fun finishEventState() {
-        state = if (config.cooldownBlocks == 0) DetectionState.IDLE else DetectionState.COOLDOWN
+    /** Leaves `DETECTING` for whichever candidate just finished — accepted or rejected alike.
+     * [targetBlocks] is [EngineConfig.cooldownBlocks] for an accepted detection or
+     * [EngineConfig.rejectedCooldownBlocks] for a rejected one; a rejected candidate was never
+     * emitted or submitted, so it only needs a short cooldown to avoid immediately reopening on
+     * the residual tail of the rejected sound, not the full deduplication window an accepted
+     * detection requires. */
+    private fun enterCooldown(targetBlocks: Int) {
+        activeCooldownTargetBlocks = targetBlocks
+        state = if (targetBlocks == 0) DetectionState.IDLE else DetectionState.COOLDOWN
         cooldownBlockCount = 0
         consecutiveInactiveBlocks = 0
     }
