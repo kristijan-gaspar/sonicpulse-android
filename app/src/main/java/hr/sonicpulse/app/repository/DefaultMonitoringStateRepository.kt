@@ -31,6 +31,9 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
     override val state: StateFlow<MonitoringState> = _state.asStateFlow()
 
     override fun monitoringStarted() {
+        // A restarted session must never inherit the previous session's throttle timestamp — see
+        // MetricsThrottle.reset()'s KDoc.
+        throttle.reset()
         _state.value = MonitoringState(isMonitoring = true)
     }
 
@@ -40,7 +43,19 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
 
     override fun monitoringFailed(error: AudioCaptureError) {
         _state.update {
-            it.copy(isMonitoring = false, captureError = error, startupError = null, errorEventId = it.errorEventId + 1)
+            it.copy(
+                isMonitoring = false,
+                captureError = error,
+                startupError = null,
+                processingError = false,
+                errorEventId = it.errorEventId + 1
+            )
+        }
+    }
+
+    override fun monitoringProcessingFailed() {
+        _state.update {
+            it.copy(isMonitoring = false, processingError = true, captureError = null, startupError = null, errorEventId = it.errorEventId + 1)
         }
     }
 
@@ -50,6 +65,7 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
                 isMonitoring = false,
                 startupError = failure,
                 captureError = null,
+                processingError = false,
                 errorEventId = it.errorEventId + 1,
                 submissionCounters = SubmissionTransitions.incrementPermissionFailuresIfApplicable(it.submissionCounters, failure)
             )

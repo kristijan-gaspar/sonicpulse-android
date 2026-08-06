@@ -36,7 +36,19 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
 
     override fun monitoringFailed(error: AudioCaptureError) {
         _state.update {
-            it.copy(isMonitoring = false, captureError = error, startupError = null, errorEventId = it.errorEventId + 1)
+            it.copy(
+                isMonitoring = false,
+                captureError = error,
+                startupError = null,
+                processingError = false,
+                errorEventId = it.errorEventId + 1
+            )
+        }
+    }
+
+    override fun monitoringProcessingFailed() {
+        _state.update {
+            it.copy(isMonitoring = false, processingError = true, captureError = null, startupError = null, errorEventId = it.errorEventId + 1)
         }
     }
 
@@ -46,6 +58,7 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
                 isMonitoring = false,
                 startupError = failure,
                 captureError = null,
+                processingError = false,
                 errorEventId = it.errorEventId + 1,
                 submissionCounters = SubmissionTransitions.incrementPermissionFailuresIfApplicable(it.submissionCounters, failure)
             )

@@ -21,5 +21,10 @@ data class MapUiState(
     /** A manual refresh or range change (after at least one load already succeeded) failed — the
      * previously loaded hotspots and committed range are preserved unchanged. Never set together
      * with [initialError]. */
-    val subsequentError: Boolean = false
+    val subsequentError: Boolean = false,
+    /** True only alongside [initialError] — an authentication/server-configuration failure (HTTP
+     * 401/403) lets the UI show a more useful message than the generic "couldn't load" text. */
+    val initialErrorServerConfiguration: Boolean = false,
+    /** True only alongside [subsequentError] — see [initialErrorServerConfiguration]. */
+    val subsequentErrorServerConfiguration: Boolean = false
 )

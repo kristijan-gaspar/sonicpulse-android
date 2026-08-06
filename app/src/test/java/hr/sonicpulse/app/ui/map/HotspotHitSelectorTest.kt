@@ -100,4 +100,49 @@ class HotspotHitSelectorTest {
     fun `an empty hotspot list selects none`() {
         assertNull(HotspotHitSelector.select(45.8, 16.0, emptyList()))
     }
+
+    // --- item 12: zero/tiny radius uses the same MIN_EFFECTIVE_RADIUS_METERS floor as rendering ---
+
+    @Test
+    fun `a click near the centroid of a zero-radius hotspot still selects it`() {
+        val target = hotspot(radiusMeters = 0.0)
+        val nearCentroidLat = 45.8 // a click well within MIN_EFFECTIVE_RADIUS_METERS, not exactly on it
+
+        val result = HotspotHitSelector.select(nearCentroidLat, 16.0002, listOf(target))
+
+        assertEquals(target, result)
+    }
+
+    @Test
+    fun `a click well outside the minimum hit target of a zero-radius hotspot selects none`() {
+        val target = hotspot(radiusMeters = 0.0)
+        // Far beyond MIN_EFFECTIVE_RADIUS_METERS (25 m) — roughly 7.8 km away at this latitude.
+        val result = HotspotHitSelector.select(45.8, 16.1, listOf(target))
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `a click within the minimum hit target but beyond a tiny positive radius still selects it`() {
+        val tinyRadius = 1.0
+        check(tinyRadius < HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS)
+        val target = hotspot(radiusMeters = tinyRadius)
+
+        val result = HotspotHitSelector.select(45.8, 16.0002, listOf(target))
+
+        assertEquals(target, result)
+    }
+
+    @Test
+    fun `a click just outside a normal (above-floor) radius is not pulled in by the minimum hit target`() {
+        // radiusMeters already exceeds MIN_EFFECTIVE_RADIUS_METERS, so the floor must have no effect
+        // — a click just past the hotspot's own real radius must still miss.
+        val radius = HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS + 10.0
+        val target = hotspot(latitude = 0.0, longitude = 0.0, radiusMeters = radius)
+        val justOutsideLongitude = Math.toDegrees((radius + 5.0) / HotspotGeometry.EARTH_RADIUS_METERS)
+
+        val result = HotspotHitSelector.select(0.0, justOutsideLongitude, listOf(target))
+
+        assertNull(result)
+    }
 }

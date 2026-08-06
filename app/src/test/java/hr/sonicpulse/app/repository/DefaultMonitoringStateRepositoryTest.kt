@@ -140,6 +140,63 @@ class DefaultMonitoringStateRepositoryTest {
     }
 
     @Test
+    fun `monitoringProcessingFailed sets isMonitoring false and the processing error flag`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringStarted()
+
+        repository.monitoringProcessingFailed()
+
+        val state = repository.state.value
+        assertFalse(state.isMonitoring)
+        assertTrue(state.processingError)
+    }
+
+    @Test
+    fun `monitoringProcessingFailed clears any previous capture or startup error so none are set together`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        repository.monitoringProcessingFailed()
+
+        val state = repository.state.value
+        assertNull(state.captureError)
+        assertNull(state.startupError)
+        assertTrue(state.processingError)
+    }
+
+    @Test
+    fun `monitoringFailed clears a previous processing error so both are never set together`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringProcessingFailed()
+
+        repository.monitoringFailed(AudioCaptureError.PermissionDenied)
+
+        val state = repository.state.value
+        assertFalse(state.processingError)
+        assertEquals(AudioCaptureError.PermissionDenied, state.captureError)
+    }
+
+    @Test
+    fun `monitoringStarted clears a previous processing error`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.monitoringProcessingFailed()
+
+        repository.monitoringStarted()
+
+        assertFalse(repository.state.value.processingError)
+    }
+
+    @Test
+    fun `monitoringProcessingFailed bumps errorEventId`() {
+        val repository = DefaultMonitoringStateRepository()
+        val firstId = repository.state.value.errorEventId
+
+        repository.monitoringProcessingFailed()
+
+        assertEquals(firstId + 1, repository.state.value.errorEventId)
+    }
+
+    @Test
     fun `monitoringStartupFailed clears a previous capture error so both are never set together`() {
         val repository = DefaultMonitoringStateRepository()
         repository.monitoringFailed(AudioCaptureError.PermissionDenied)
@@ -225,6 +282,19 @@ class DefaultMonitoringStateRepositoryTest {
         repository.publishMetrics(metrics(dbfs = -5.0))
 
         assertEquals(-25.0, repository.state.value.liveDbfs, 0.0)
+    }
+
+    @Test
+    fun `monitoringStarted resets the metrics throttle so a new session's first metric is never throttled by the previous session's`() {
+        val repository = DefaultMonitoringStateRepository()
+        repository.publishMetrics(metrics(dbfs = -25.0)) // previous session's last (throttle-consuming) emission
+
+        repository.monitoringStarted()
+        repository.publishMetrics(metrics(dbfs = -5.0)) // new session's first metric
+
+        // Without the reset, this would still be throttled by the emission above (both land in the
+        // same instant under a JVM unit test's stubbed SystemClock.elapsedRealtime()).
+        assertEquals(-5.0, repository.state.value.liveDbfs, 0.0)
     }
 
     @Test

@@ -3,8 +3,8 @@ package hr.sonicpulse.app.data.audio
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
+import android.util.Log
 import hr.sonicpulse.engine.EngineConfig
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,7 +36,7 @@ class AudioRecorder(
         @Volatile var stopRequested = false
         @Volatile var workerThread: Thread? = null
         val cleanedUp = AtomicBoolean(false)
-        val finished = CountDownLatch(1)
+        val shutdownGate = AudioCaptureShutdownGate()
     }
 
     private val lock = Any()
@@ -89,7 +89,7 @@ class AudioRecorder(
                 if (session === newSession) {
                     session = null
                 }
-                newSession.finished.countDown()
+                newSession.shutdownGate.signalFinished()
                 onError(AudioCaptureError.Unexpected(e))
             }
         }
@@ -205,13 +205,19 @@ class AudioRecorder(
         try {
             while (!session.stopRequested) {
                 val samplesRead = session.record.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
-                if (samplesRead < 0) {
-                    if (!session.stopRequested) {
-                        onError(AudioCaptureError.ReadFailure(samplesRead))
+                // record.stop() (called by stop()) unblocks a thread parked here in
+                // READ_BLOCKING and can make read() return a normal, positive sample count —
+                // AudioReadDecision re-checks stopRequested against this exact result, so a
+                // block that only became available because Stop was requested is never
+                // delivered to the engine.
+                when (val decision = AudioReadDecision.decide(session.stopRequested, samplesRead)) {
+                    AudioReadDecision.StopRequested -> break
+                    is AudioReadDecision.ReadError -> {
+                        onError(AudioCaptureError.ReadFailure(decision.samplesRead))
+                        break
                     }
-                    break
+                    AudioReadDecision.Deliver -> accumulator.accumulate(readBuffer, samplesRead, onBlock)
                 }
-                accumulator.accumulate(readBuffer, samplesRead, onBlock)
             }
         } catch (e: SecurityException) {
             // e.g. RECORD_AUDIO permission revoked mid-capture.
@@ -235,7 +241,7 @@ class AudioRecorder(
                     // Last operation in this block: a new start() can only proceed once
                     // this synchronized block exits, so by then the latch is already open
                     // too — the previous worker is guaranteed to have fully completed.
-                    session.finished.countDown()
+                    session.shutdownGate.signalFinished()
                 }
             }
         }
@@ -259,12 +265,18 @@ class AudioRecorder(
     }
 
     /**
-     * Ends the current session, if any. Blocks until the dedicated read thread has fully
-     * exited — unless called from that same thread (e.g. from within [onError] triggered
-     * by a read failure), in which case waiting for itself would deadlock. Safe to call
-     * multiple times, and safe to call when no session is running. Does not itself release
-     * resources or clear session ownership — that is always the worker's own responsibility,
-     * so a session is never considered finished until it truly has.
+     * Ends the current session, if any. Waits up to [STOP_TIMEOUT_MILLIS] for the dedicated
+     * read thread to fully exit — unless called from that same thread (e.g. from within
+     * [onError] triggered by a read failure), in which case waiting for itself would deadlock.
+     * The wait is bounded, never indefinite: an OEM [AudioRecord.read] or [AudioRecord.stop]
+     * that never returns must not hang the caller forever. Safe to call multiple times, and
+     * safe to call when no session is running. Does not itself release resources or clear
+     * session ownership — that is always the worker's own responsibility, so a session is
+     * never considered finished until it truly has.
+     *
+     * Callers must never invoke this from the Android main thread directly — the bounded wait
+     * still blocks whichever thread calls it, so callers are expected to do so from a
+     * background dispatcher/thread (see [MonitoringService][hr.sonicpulse.app.service.MonitoringService]).
      */
     fun stop() {
         val current: Session
@@ -274,11 +286,22 @@ class AudioRecorder(
         }
         try {
             current.record.stop() // unblocks a thread parked in READ_BLOCKING
-        } catch (e: IllegalStateException) {
-            // Already stopped; the read loop will exit on its own.
+        } catch (e: RuntimeException) {
+            // Already stopped, never started, or another platform quirk — the read loop will
+            // exit on its own via stopRequested, and must not prevent the wait/cleanup below.
+            Log.w(
+                TAG,
+                "AudioRecord.stop() failed while requesting shutdown",
+                e
+            )
         }
-        if (Thread.currentThread() != current.workerThread) {
-            current.finished.await()
+        when (current.shutdownGate.awaitUpTo(STOP_TIMEOUT_MILLIS, Thread.currentThread(), current.workerThread)) {
+            AudioCaptureShutdownGate.AwaitResult.TIMED_OUT ->
+                Log.w(TAG, "Timed out after ${STOP_TIMEOUT_MILLIS}ms waiting for the capture thread to finish")
+            AudioCaptureShutdownGate.AwaitResult.INTERRUPTED ->
+                Log.w(TAG, "Interrupted while waiting for the capture thread to finish")
+            AudioCaptureShutdownGate.AwaitResult.FINISHED,
+            AudioCaptureShutdownGate.AwaitResult.CALLED_FROM_WORKER_THREAD -> Unit
         }
     }
 
@@ -290,5 +313,13 @@ class AudioRecorder(
         }
         stop()
         executor.shutdown()
+    }
+
+    private companion object {
+        private const val TAG = "AudioRecorder"
+
+        /** Bounds [stop]'s wait for the capture thread — long enough for a normal
+         * read()/stop() cycle to unwind, short enough to never look like a hang to the caller. */
+        private const val STOP_TIMEOUT_MILLIS = 3_000L
     }
 }

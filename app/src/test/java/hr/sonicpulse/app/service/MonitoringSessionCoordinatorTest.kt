@@ -11,12 +11,14 @@ import org.junit.Test
 class MonitoringSessionCoordinatorTest {
 
     @Test
-    fun `a synchronous startup failure leaves the final state as failed, not monitoring`() {
+    fun `a synchronously reported capture error is forwarded to onCaptureError, never published to the repository`() {
         val repository = FakeMonitoringStateRepository()
         val coordinator = MonitoringSessionCoordinator(repository)
         var forwardedError: AudioCaptureError? = null
 
         // Simulates AudioRecorder.start() invoking onError synchronously before it returns.
+        // The coordinator itself must not decide ownership or touch the repository for it —
+        // that is MonitoringService.handleCaptureError's job now.
         coordinator.startSession(
             startCapture = { _, onError -> onError(AudioCaptureError.PermissionDenied) },
             onBlock = { },
@@ -24,8 +26,8 @@ class MonitoringSessionCoordinatorTest {
         )
 
         val state = repository.state.value
-        assertFalse(state.isMonitoring)
-        assertEquals(AudioCaptureError.PermissionDenied, state.captureError)
+        assertTrue("monitoringStarted() must still have run before startCapture()", state.isMonitoring)
+        assertNull("the coordinator must never publish monitoringFailed() itself", state.captureError)
         assertEquals(AudioCaptureError.PermissionDenied, forwardedError)
     }
 

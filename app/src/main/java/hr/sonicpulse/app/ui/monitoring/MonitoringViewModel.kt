@@ -112,6 +112,7 @@ private fun isPreciseLocationRequired(state: MonitoringState): Boolean =
 
 private fun errorMessageRes(state: MonitoringState): Int? {
     state.captureError?.let { return captureErrorMessageRes(it) }
+    if (state.processingError) return R.string.error_processing_generic
     state.startupError?.let { return startupErrorMessageRes(it) }
     state.locationRefreshError?.let { return locationRefreshErrorMessageRes(it) }
     return null

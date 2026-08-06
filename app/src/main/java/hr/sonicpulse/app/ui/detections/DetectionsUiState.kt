@@ -18,5 +18,13 @@ data class DetectionsUiState(
     /** A loadNextPage() attempt failed — already-loaded items are preserved; a retry reuses the
      * same cursor (loadNextPage() never advances the cursor on failure). */
     val pagingError: Boolean = false,
+    /** True only alongside [initialError]/[refreshError]/[pagingError] respectively — an
+     * authentication/server-configuration failure (HTTP 401/403) lets the UI show a more useful
+     * message than the generic "couldn't load" text for that one specific error slot, without
+     * affecting the other two (each independently tracks its own cause, same as the error flags
+     * themselves). */
+    val initialErrorServerConfiguration: Boolean = false,
+    val refreshErrorServerConfiguration: Boolean = false,
+    val pagingErrorServerConfiguration: Boolean = false,
     val emptyState: DetectionsEmptyState? = null
 )

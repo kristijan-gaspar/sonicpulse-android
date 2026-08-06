@@ -84,6 +84,16 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests {
+            // JVM unit tests have no Robolectric shadow for android.* platform calls — a handful
+            // of classes call android.util.Log for best-effort diagnostics (e.g.
+            // DefaultPermissionRequestHistory, SettingsViewModel) and would otherwise throw
+            // "not mocked" on every such call. Returning defaults (a no-op for Log) is the
+            // standard AGP option for exactly this, without pulling in Robolectric.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

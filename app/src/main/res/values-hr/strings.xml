@@ -66,6 +66,7 @@
 
     <!-- Monitoring — transient error snackbar -->
     <string name="error_capture_generic">Snimanje zvuka je prekinuto</string>
+    <string name="error_processing_generic">Nadzor je zaustavljen zbog interne pogreške</string>
     <string name="error_startup_microphone_denied">Dozvola za mikrofon nije odobrena</string>
     <string name="error_startup_location_denied">Dozvola za lokaciju nije odobrena</string>
     <string name="error_startup_location_services_disabled">Lokacijske usluge su isključene</string>
