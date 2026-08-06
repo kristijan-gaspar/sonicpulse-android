@@ -1,15 +1,16 @@
 package hr.sonicpulse.app.service
 
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Job
 
 /**
  * Thread-safe registry of in-flight submission jobs, keyed by `SessionDetection.localEventId`.
- * [register] is called from wherever a submission coroutine is launched (in practice, the audio
+ * [register] is called from wherever a submission coroutine is created (in practice, the audio
  * capture thread — see [MonitoringService]); a job removes itself via [Job.invokeOnCompletion],
  * which can run on whatever dispatcher completed it. That's genuine concurrent access from more
- * than one thread, hence [ConcurrentHashMap] rather than a plain [MutableMap].
+ * than one thread, so every operation — including a job removing itself on completion — runs
+ * under [lock]: "is registration open," "insert," "close," and "snapshot" are one serialized
+ * mechanism, not four independent checks that could interleave.
  *
  * Exists to fix a Stop/submission race: marking every still-`Pending` detection `Cancelled` the
  * instant Stop is pressed can race a submission whose HTTP response is about to arrive — this
@@ -19,25 +20,33 @@ import kotlinx.coroutines.Job
  */
 class SubmissionJobTracker {
 
-    private val jobs = ConcurrentHashMap<UUID, Job>()
-
-    @Volatile
+    private val lock = Any()
+    private val jobs = HashMap<UUID, Job>()
     private var closed = false
 
-    /** No-op once [close] has been called — shutdown has begun, so a new submission started
-     * after that point must not be waited for (there would be nothing left to wait with it). */
-    fun register(localEventId: UUID, job: Job) {
-        if (closed) return
+    /**
+     * Registers [job] and returns `true` if registration was still open — `false` (a no-op) once
+     * [closeAndSnapshot] has already run, meaning shutdown has begun and there is nothing left to
+     * wait for this job with. The completion handler that removes [job] once it finishes is
+     * attached under the same lock as the insert, so "insert" and "will remove itself on
+     * completion" are never observably separate steps.
+     */
+    fun register(localEventId: UUID, job: Job): Boolean = synchronized(lock) {
+        if (closed) return@synchronized false
         jobs[localEventId] = job
-        job.invokeOnCompletion { jobs.remove(localEventId, job) }
+        job.invokeOnCompletion { synchronized(lock) { jobs.remove(localEventId) } }
+        true
     }
 
-    /** A concurrency-safe point-in-time copy of the currently tracked jobs — not a live view. */
-    fun snapshot(): List<Job> = jobs.values.toList()
-
-    /** Stops accepting new [register] calls. Idempotent, and safe to call with jobs still
-     * in-flight — closing does not itself cancel or wait for anything. */
-    fun close() {
+    /**
+     * Atomically closes registration (every subsequent [register] call returns `false`) and
+     * returns a point-in-time copy of every job still tracked at that instant — never a separate
+     * close-then-snapshot pair that could let a job register or complete in between. Idempotent:
+     * calling this again once already closed simply returns whatever (if anything) is still
+     * tracked, without reopening or double-closing anything.
+     */
+    fun closeAndSnapshot(): List<Job> = synchronized(lock) {
         closed = true
+        jobs.values.toList()
     }
 }

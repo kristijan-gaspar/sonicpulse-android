@@ -205,10 +205,16 @@ class AudioRecorder(
         try {
             while (!session.stopRequested) {
                 val samplesRead = session.record.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
+                // record.stop() (called by stop()) unblocks a thread parked here in
+                // READ_BLOCKING and can make read() return a normal, positive sample count —
+                // checked again here, immediately after read() returns and before this result
+                // ever reaches accumulate()/onBlock(), so a block that only became available
+                // because Stop was requested is never delivered to the engine.
+                if (session.stopRequested) {
+                    break
+                }
                 if (samplesRead < 0) {
-                    if (!session.stopRequested) {
-                        onError(AudioCaptureError.ReadFailure(samplesRead))
-                    }
+                    onError(AudioCaptureError.ReadFailure(samplesRead))
                     break
                 }
                 accumulator.accumulate(readBuffer, samplesRead, onBlock)

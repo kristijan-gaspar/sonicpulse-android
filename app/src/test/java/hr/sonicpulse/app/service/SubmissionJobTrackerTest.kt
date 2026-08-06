@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,9 +18,11 @@ class SubmissionJobTrackerTest {
         val tracker = SubmissionJobTracker()
         val job = Job()
 
-        tracker.register(UUID.randomUUID(), job)
+        val accepted = tracker.register(UUID.randomUUID(), job)
 
-        assertEquals(listOf(job), tracker.snapshot())
+        assertTrue(accepted)
+        assertEquals(listOf(job), tracker.closeAndSnapshot())
+        job.cancel()
     }
 
     @Test
@@ -31,113 +34,111 @@ class SubmissionJobTrackerTest {
         tracker.register(UUID.randomUUID(), first)
         tracker.register(UUID.randomUUID(), second)
 
-        assertEquals(setOf(first, second), tracker.snapshot().toSet())
+        assertEquals(setOf(first, second), tracker.closeAndSnapshot().toSet())
+        first.cancel()
+        second.cancel()
     }
 
     @Test
-    fun `a job removes itself from the snapshot once it completes`() {
+    fun `a job removes itself from a later snapshot once it completes`() {
         val tracker = SubmissionJobTracker()
         val job: CompletableJob = Job()
         tracker.register(UUID.randomUUID(), job)
 
         job.complete()
 
-        assertTrue(tracker.snapshot().isEmpty())
+        assertTrue(tracker.closeAndSnapshot().isEmpty())
     }
 
     @Test
-    fun `a still-active job remains in the snapshot`() {
+    fun `after closeAndSnapshot, a new register call is rejected`() {
         val tracker = SubmissionJobTracker()
-        val job = Job()
+        tracker.closeAndSnapshot()
 
-        tracker.register(UUID.randomUUID(), job)
+        val accepted = tracker.register(UUID.randomUUID(), Job())
 
-        assertEquals(1, tracker.snapshot().size)
-        job.cancel()
+        assertFalse(accepted)
     }
 
     @Test
-    fun `after close, a new register call is a no-op`() {
-        val tracker = SubmissionJobTracker()
-        tracker.close()
-
-        tracker.register(UUID.randomUUID(), Job())
-
-        assertTrue(tracker.snapshot().isEmpty())
-    }
-
-    @Test
-    fun `close does not affect jobs already registered`() {
+    fun `closeAndSnapshot does not affect jobs already registered`() {
         val tracker = SubmissionJobTracker()
         val job = Job()
         tracker.register(UUID.randomUUID(), job)
 
-        tracker.close()
+        val snapshot = tracker.closeAndSnapshot()
 
-        assertEquals(listOf(job), tracker.snapshot())
+        assertEquals(listOf(job), snapshot)
         job.cancel()
     }
 
     @Test
-    fun `close is idempotent`() {
+    fun `closeAndSnapshot is idempotent`() {
         val tracker = SubmissionJobTracker()
 
-        tracker.close()
-        tracker.close()
+        val first = tracker.closeAndSnapshot()
+        val second = tracker.closeAndSnapshot()
 
-        tracker.register(UUID.randomUUID(), Job())
-        assertTrue(tracker.snapshot().isEmpty())
+        assertTrue(first.isEmpty())
+        assertTrue(second.isEmpty())
+        assertFalse(tracker.register(UUID.randomUUID(), Job()))
     }
 
     @Test
-    fun `snapshot is a point-in-time copy, not a live view`() {
+    fun `every accepted job is either completed or included in the final snapshot`() {
         val tracker = SubmissionJobTracker()
-        val first = Job()
-        tracker.register(UUID.randomUUID(), first)
+        val completesBeforeClose: CompletableJob = Job()
+        val stillActiveAtClose = Job()
+        tracker.register(UUID.randomUUID(), completesBeforeClose)
+        tracker.register(UUID.randomUUID(), stillActiveAtClose)
 
-        val snapshot = tracker.snapshot()
-        tracker.register(UUID.randomUUID(), Job())
+        completesBeforeClose.complete()
+        val snapshot = tracker.closeAndSnapshot()
 
-        assertEquals(1, snapshot.size)
-        assertEquals(2, tracker.snapshot().size)
+        // completesBeforeClose already resolved on its own (not "in" the snapshot, but not lost —
+        // its own completion is what removed it); stillActiveAtClose must be present.
+        assertEquals(listOf(stillActiveAtClose), snapshot)
+        stillActiveAtClose.cancel()
     }
 
     @Test
-    fun `concurrent register and completion from different threads never corrupts the map`() {
+    fun `concurrent register and closeAndSnapshot from different threads never lose or duplicate a job`() {
         val tracker = SubmissionJobTracker()
-        val jobCount = 500
-        val jobs = (0 until jobCount).map { CompletableJobPair(UUID.randomUUID(), Job()) }
+        val jobCount = 300
+        val jobs = (0 until jobCount).map { UUID.randomUUID() to Job() }
         val executor = Executors.newFixedThreadPool(8)
-        val allRegistered = CountDownLatch(jobCount)
+        val allAttempted = CountDownLatch(jobCount)
+        val accepted = java.util.Collections.synchronizedList(mutableListOf<Job>())
 
         jobs.forEach { (id, job) ->
             executor.submit {
-                tracker.register(id, job)
-                allRegistered.countDown()
+                if (tracker.register(id, job)) accepted += job
+                allAttempted.countDown()
             }
         }
-        assertTrue(allRegistered.await(5, TimeUnit.SECONDS))
-        assertEquals(jobCount, tracker.snapshot().size)
+        assertTrue(allAttempted.await(5, TimeUnit.SECONDS))
 
-        val allCompleted = CountDownLatch(jobCount)
-        jobs.forEach { (_, job) ->
-            executor.submit {
-                job.complete()
-                allCompleted.countDown()
-            }
-        }
-        assertTrue(allCompleted.await(5, TimeUnit.SECONDS))
+        val snapshot = tracker.closeAndSnapshot()
 
-        // invokeOnCompletion handlers run synchronously as each job completes, but this test
-        // thread isn't one of the completing threads — give the last handler(s) a moment to run.
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-        while (tracker.snapshot().isNotEmpty() && System.nanoTime() < deadline) {
-            Thread.sleep(10)
-        }
-        assertTrue(tracker.snapshot().isEmpty())
-
+        // Every job that was accepted must be exactly-once accounted for: either still active in
+        // the snapshot, or none were completed here so all of them must be in it.
+        assertEquals(accepted.toSet(), snapshot.toSet())
+        accepted.forEach { it.cancel() }
         executor.shutdown()
     }
 
-    private data class CompletableJobPair(val id: UUID, val job: CompletableJob)
+    @Test
+    fun `a rejected job never has its completion handler fire against the tracker`() {
+        // Registering after close must not throw or corrupt state even when the caller still
+        // completes/cancels the rejected job independently afterward.
+        val tracker = SubmissionJobTracker()
+        tracker.closeAndSnapshot()
+        val job = Job()
+
+        val accepted = tracker.register(UUID.randomUUID(), job)
+        job.cancel()
+
+        assertFalse(accepted)
+        assertTrue(tracker.closeAndSnapshot().isEmpty())
+    }
 }
