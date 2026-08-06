@@ -99,14 +99,24 @@ class MonitoringService : Service() {
      * this triggers is still pending. Reset per session in [startAudioCapture]. */
     private val processingFailureReported = AtomicBoolean(false)
 
+    /** Tracks each detection's in-flight submission job so shutdown can wait briefly for a
+     * genuine server response instead of immediately marking the detection Cancelled — see
+     * [drainSubmissions]. A fresh instance per session (assigned in [startAudioCapture]), so a
+     * new session never inherits a previous one's (by then, already closed) tracker. */
+    private var submissionJobTracker = SubmissionJobTracker()
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startMonitoringIfNeeded()
-            ACTION_STOP -> stopMonitoringAndService()
-            ACTION_REFRESH_LOCATION -> refreshLocation()
-            else -> stopSelf()
+            ACTION_START -> startMonitoringIfNeeded(startId)
+            ACTION_STOP -> stopMonitoringAndService(startId)
+            ACTION_REFRESH_LOCATION -> refreshLocation(startId)
+            // stopSelfResult(startId), not stopSelf(): only actually stops the service if startId
+            // is still the most recently delivered command — a stray/unknown intent must never
+            // terminate a session a newer, valid command has already started (see startId's KDoc
+            // on every other call site below for the same reasoning).
+            else -> stopSelfResult(startId)
         }
         return START_NOT_STICKY
     }
@@ -129,6 +139,10 @@ class MonitoringService : Service() {
                 // earlier) guarantees no onBlock() call can still be in flight.
                 detectionSessionLogger.finishSession()
             }
+            // Waits briefly for genuinely in-flight submissions before resolving whatever is left
+            // — see drainSubmissions(). Outside the StopSession branch (like cancelPendingSubmissions()
+            // below) and idempotent, so repeated or stale Stop/destroy handling stays safe.
+            drainSubmissions()
             // Normal teardown only — gives every still-Pending detection
             // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
             // Idempotent: a no-op if nothing is retained and Pending.
@@ -138,7 +152,7 @@ class MonitoringService : Service() {
         super.onDestroy()
     }
 
-    private fun startMonitoringIfNeeded() {
+    private fun startMonitoringIfNeeded(startId: Int) {
         val effect = lifecycleCoordinator.onActionStart()
         val generation = (effect as? MonitoringLifecycleEffect.StartLocation)?.generation ?: return
 
@@ -149,24 +163,29 @@ class MonitoringService : Service() {
             startForeground = ::tryStartForeground
         )
         when (val result = gate.attemptStartup()) {
-            is MonitoringStartupResult.Failed -> abortStartup(result.failure)
-            MonitoringStartupResult.Proceed -> beginLocationStart(generation)
+            is MonitoringStartupResult.Failed -> abortStartup(startId, result.failure)
+            MonitoringStartupResult.Proceed -> beginLocationStart(startId, generation)
         }
     }
 
-    private fun beginLocationStart(generation: Long) {
+    private fun beginLocationStart(startId: Int, generation: Long) {
         locationProvider.start { result ->
-            serviceScope.launch { handleLocationStartResult(generation, result) }
+            serviceScope.launch { handleLocationStartResult(startId, generation, result) }
         }
     }
 
-    private fun handleLocationStartResult(generation: Long, result: LocationStartResult) {
+    private fun handleLocationStartResult(startId: Int, generation: Long, result: LocationStartResult) {
         when (val effect = lifecycleCoordinator.onLocationStartResult(generation, result)) {
             MonitoringLifecycleEffect.StartAudioCapture -> startAudioCapture()
             is MonitoringLifecycleEffect.ReportStartupFailure -> {
                 monitoringStateRepository.monitoringStartupFailed(effect.failure)
                 stopForegroundCompat()
-                stopSelf()
+                // stopSelfResult, not stopSelf: this async location-start attempt belongs to the
+                // ACTION_START command identified by startId. If a newer Start (or Stop) has
+                // already been delivered by the time this callback fires, that command is what
+                // must govern the service's fate now — a stale failure here must not tear down a
+                // session startId no longer represents.
+                stopSelfResult(startId)
             }
             MonitoringLifecycleEffect.None,
             is MonitoringLifecycleEffect.StopSession,
@@ -176,11 +195,11 @@ class MonitoringService : Service() {
 
     /** A synchronous startup-gate failure (permission/location-services/foreground promotion) —
      * nothing async was ever started, but the lifecycle must still return to IDLE. */
-    private fun abortStartup(failure: MonitoringStartupFailure) {
+    private fun abortStartup(startId: Int, failure: MonitoringStartupFailure) {
         lifecycleCoordinator.onStopOrDestroy()
         monitoringStateRepository.monitoringStartupFailed(failure)
         stopForegroundCompat()
-        stopSelf()
+        stopSelfResult(startId)
     }
 
     private fun hasRecordAudioPermission(): Boolean =
@@ -217,6 +236,7 @@ class MonitoringService : Service() {
     private fun startAudioCapture() {
         firstBlockInstant = null
         processingFailureReported.set(false)
+        submissionJobTracker = SubmissionJobTracker()
         // Only prepares the log session — it is not genuinely activated (and does not disturb a
         // previously completed, still-exportable session) until the first real block arrives via
         // onBlock() in handleBlock() below. See DetectionSessionLogger's KDoc.
@@ -338,9 +358,14 @@ class MonitoringService : Service() {
                 // submission are deliberately not both inside the launched coroutine below, so a
                 // cancelled/never-started submission coroutine can never leave the detection unlisted.
                 monitoringStateRepository.localDetectionOccurred(sessionDetection)
-                serviceScope.launch {
+                val submissionJob = serviceScope.launch {
                     detectionSubmitter.submit(sessionDetection)
                 }
+                // Registered after launch() so the tracker only ever holds real, already-started
+                // Jobs — register() itself is a no-op once shutdown has begun (see
+                // SubmissionJobTracker), so a submission racing a Stop either gets tracked and
+                // waited for, or (if shutdown had already begun) simply proceeds untracked.
+                submissionJobTracker.register(sessionDetection.localEventId, submissionJob)
             }
         }
     }
@@ -361,6 +386,13 @@ class MonitoringService : Service() {
         tearDownCaptureAndLocation()
         detectionSessionLogger.finishSession()
         stopForegroundCompat()
+        // Plain stopSelf(), not stopSelfResult(startId): unlike the command-triggered call sites
+        // above, this failure isn't a response to any particular onStartCommand() — it can
+        // happen at any point during an ACTIVE session, driven by the capture thread. There is no
+        // startId to compare against, and none is needed: the lifecycleCoordinator.onStopOrDestroy()
+        // guard above already ensures this only proceeds once per session (StopSession is
+        // returned exactly once), so this can never race a later Stop the way a stale
+        // command-completion could.
         stopSelf()
     }
 
@@ -376,7 +408,7 @@ class MonitoringService : Service() {
         tearDownCaptureAndLocation()
         detectionSessionLogger.finishSession()
         stopForegroundCompat()
-        stopSelf()
+        stopSelf() // see handleCaptureError()'s KDoc comment above stopSelf() for why plain stopSelf() is correct here too.
     }
 
     /**
@@ -391,11 +423,13 @@ class MonitoringService : Service() {
      * stale intent reaching an instance where nothing is running must do no monitoring work and
      * stop that instance, not silently no-op and leave it dangling.
      */
-    private fun refreshLocation() {
+    private fun refreshLocation(startId: Int) {
         val effect = refreshCoordinator.onRefreshRequested(lifecycleCoordinator.state)
         val generation = (effect as? MonitoringRefreshEffect.Begin)?.generation
         if (generation == null) {
-            stopSelf()
+            // stopSelfResult, not stopSelf: this stale-refresh instance must only be stopped if
+            // no newer command has been delivered since this one.
+            stopSelfResult(startId)
             return
         }
         locationProvider.stop()
@@ -436,7 +470,7 @@ class MonitoringService : Service() {
         }
     }
 
-    private fun stopMonitoringAndService() {
+    private fun stopMonitoringAndService(startId: Int) {
         val effect = lifecycleCoordinator.onStopOrDestroy()
         refreshCoordinator.invalidate()
         // Dispatched onto serviceScope for the same reason as onDestroy(): tearDownCaptureAndLocation()
@@ -451,13 +485,21 @@ class MonitoringService : Service() {
                 detectionSessionLogger.finishSession()
             }
             // Capture/location are stopped above first, so the audio thread cannot publish another
-            // detection after this point — only then is it safe to give every still-Pending detection
-            // a terminal Failed(Cancelled) result. Outside the StopSession branch (and thus independent
-            // of it) and idempotent, so repeated or stale Stop handling stays safe; onDestroy() below
-            // still calls this too, as a defensive fallback for teardown paths that don't go through here.
+            // detection after this point — only then is it safe to wait for in-flight submissions
+            // (drainSubmissions()) and give every still-unresolved detection a terminal
+            // Failed(Cancelled) result. Outside the StopSession branch (and thus independent of it)
+            // and idempotent, so repeated or stale Stop handling stays safe; onDestroy() below still
+            // calls both, as a defensive fallback for teardown paths that don't go through here.
+            drainSubmissions()
             monitoringStateRepository.cancelPendingSubmissions()
             stopForegroundCompat()
-            stopSelf()
+            // stopSelfResult, not stopSelf: this async teardown belongs to the ACTION_STOP command
+            // identified by startId — if a newer Start (or Stop) has already been delivered by the
+            // time this coroutine finishes, that command now owns the service's fate, and this
+            // stale completion must not tear down the session it started. This is the exact fix
+            // for the Start A / Stop A (async) / Start B / Stop A finishes race: Stop A's eventual
+            // stopSelfResult(startId) is ignored once Start B has been delivered.
+            stopSelfResult(startId)
         }
     }
 
@@ -476,6 +518,27 @@ class MonitoringService : Service() {
         withContext(Dispatchers.IO) {
             recorder?.close()
         }
+    }
+
+    /**
+     * Waits briefly for genuinely in-flight submissions to reach their real result before
+     * [MonitoringStateRepository.cancelPendingSubmissions] marks whatever is left `Cancelled` —
+     * fixes a race where Stop could mark a detection `Cancelled` moments before its actual
+     * server response arrived, which the repository's first-wins rule would then discard as
+     * stale. Must only be called after audio/location capture has already stopped (see call
+     * sites): that guarantees no *new* submission job can be registered once
+     * [SubmissionJobTracker.close] runs here, so this always sees the complete, final set of
+     * jobs for the session. Never blocks the calling (main) thread — the wait is a coroutine
+     * suspension, not a thread block — and is idempotent: a second call (e.g. from onDestroy()
+     * after an explicit Stop already ran this) finds an already-closed, already-empty tracker
+     * and returns immediately.
+     */
+    private suspend fun drainSubmissions() {
+        submissionJobTracker.close()
+        // DetectionSubmitter never catches CancellationException, so a job SubmissionDrain has to
+        // cancel here never itself reports a terminal result — its detection is left Pending for
+        // cancelPendingSubmissions() below to resolve.
+        SubmissionDrain.await(submissionJobTracker.snapshot(), SUBMISSION_DRAIN_TIMEOUT_MILLIS)
     }
 
     private fun createNotificationChannelIfNeeded() {
@@ -517,6 +580,10 @@ class MonitoringService : Service() {
         private const val ACTION_STOP = "hr.sonicpulse.app.action.STOP_MONITORING"
         private const val ACTION_REFRESH_LOCATION = "hr.sonicpulse.app.action.REFRESH_LOCATION"
         private const val LOCATION_POLL_INTERVAL_MILLIS = 1_000L
+
+        /** Bounds [drainSubmissions]'s wait for in-flight submissions during shutdown — long
+         * enough for a normal HTTP round trip, short enough that Stop still feels immediate. */
+        private const val SUBMISSION_DRAIN_TIMEOUT_MILLIS = 3_000L
 
         fun startIntent(context: Context): Intent =
             Intent(context, MonitoringService::class.java).setAction(ACTION_START)
