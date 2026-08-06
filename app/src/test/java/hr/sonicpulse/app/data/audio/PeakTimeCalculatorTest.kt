@@ -1,6 +1,7 @@
 package hr.sonicpulse.app.data.audio
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.math.BigInteger
 import java.time.Instant
@@ -9,6 +10,42 @@ class PeakTimeCalculatorTest {
 
     private val sampleRate = 44_100
     private val blockSize = 1_024
+
+    @Test
+    fun `blockZeroInstant subtracts exactly one block duration from the arrival instant`() {
+        val arrivalInstant = Instant.parse("2026-01-01T00:00:01Z")
+        val expectedNanos = blockSize * 1_000_000_000L / sampleRate
+
+        val result = PeakTimeCalculator.blockZeroInstant(arrivalInstant, sampleRate, blockSize)
+
+        assertEquals(arrivalInstant.minusNanos(expectedNanos), result)
+    }
+
+    @Test
+    fun `blockZeroInstant combined with calculate reproduces the arrival instant for peak block index one`() {
+        // The arrival instant of the first block IS the instant block index 1 begins (one block
+        // after block zero) — round-tripping through both functions must land back on it exactly.
+        val arrivalInstant = Instant.parse("2026-01-01T00:00:01Z")
+
+        val blockZero = PeakTimeCalculator.blockZeroInstant(arrivalInstant, sampleRate, blockSize)
+        val result = PeakTimeCalculator.calculate(blockZero, peakBlockIndex = 1, sampleRate, blockSize)
+
+        assertEquals(arrivalInstant, result)
+    }
+
+    @Test
+    fun `blockZeroInstant rejects a non-positive sample rate`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            PeakTimeCalculator.blockZeroInstant(Instant.EPOCH, sampleRate = 0, blockSize)
+        }
+    }
+
+    @Test
+    fun `blockZeroInstant rejects a non-positive block size`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            PeakTimeCalculator.blockZeroInstant(Instant.EPOCH, sampleRate, blockSize = 0)
+        }
+    }
 
     @Test
     fun `peak block index zero returns the first block instant unchanged`() {

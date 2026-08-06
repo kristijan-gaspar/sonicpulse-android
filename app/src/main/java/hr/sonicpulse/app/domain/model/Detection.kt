@@ -21,3 +21,13 @@ data class Detection(
     val peakTimeClient: Instant?,
     val hotspotId: UUID?
 )
+
+/**
+ * The single instant to use for filtering, grouping, and display (list/detail timestamps) — the
+ * on-device peak instant when the backend has one (closer to when the sound actually happened),
+ * falling back to [Detection.receivedAtUtc] for older records submitted before `peakTimeClient`
+ * existed. Never used for list/page ordering: the backend paginates by `receivedAtUtc`, and
+ * resorting client-side by this instead would break that contract — use [Detection.receivedAtUtc]
+ * directly wherever ordering matters.
+ */
+val Detection.eventTime: Instant get() = peakTimeClient ?: receivedAtUtc

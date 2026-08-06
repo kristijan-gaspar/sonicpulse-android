@@ -79,6 +79,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.domain.model.Hotspot
+import java.util.UUID
 import hr.sonicpulse.app.ui.components.FilterChipRow
 import hr.sonicpulse.app.ui.components.FilterChipRowHorizontalContentPadding
 import hr.sonicpulse.app.ui.permissions.PermissionDecisionEvaluator
@@ -189,7 +190,32 @@ internal fun MapContent(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var selectedHotspot by remember { mutableStateOf<Hotspot?>(null) }
+    val locationDeniedMessage =
+        stringResource(R.string.map_location_denied)
+
+    val permissionPermanentlyDeniedMessage =
+        stringResource(R.string.permission_permanently_denied_message)
+
+    val openSettingsLabel =
+        stringResource(R.string.action_open_settings)
+
+    val locationServicesDisabledMessage =
+        stringResource(R.string.map_location_services_disabled)
+
+    val openLocationSettingsLabel =
+        stringResource(R.string.action_open_location_settings)
+
+    val locationUnavailableMessage =
+        stringResource(R.string.map_location_unavailable)
+
+    var selectedHotspotId by remember { mutableStateOf<UUID?>(null) }
+
+    LaunchedEffect(uiState.hotspots, selectedHotspotId) {
+        selectedHotspotId = retainedSelectedHotspotId(
+            hotspots = uiState.hotspots,
+            selectedId = selectedHotspotId
+        )
+    }
 
     // --- Map (style/tile) render state — independent of hotspot backend state (§4/§16). Retry
     // recreates the map instance (via mapInstanceKey); onMapLoadFinished/onMapLoadFailed verify
@@ -200,10 +226,6 @@ internal fun MapContent(
 
     val cameraState = rememberCameraState(firstPosition = DefaultCameraPosition)
 
-    // Fits the camera to the successfully committed dataset exactly once per dataset. Keyed
-    // directly on uiState.hotspots — MapViewModel only ever replaces that list on a *successful*
-    // load, so a failed request (which republishes the same list reference) or ordinary
-    // recomposition never re-triggers this, and manual panning is never fought.
     LaunchedEffect(uiState.hotspots) {
         when (val target = HotspotCamera.targetFor(uiState.hotspots)) {
             HotspotCameraTarget.KeepCurrent -> Unit
@@ -264,12 +286,12 @@ internal fun MapContent(
         when (MapLocationPermissionEvaluator.evaluate(fineLocation, coarseLocation)) {
             MapLocationPermissionOutcome.Granted -> beginLocatingAttempt()
             MapLocationPermissionOutcome.Denied -> scope.launch {
-                snackbarHostState.showSnackbar(context.getString(R.string.map_location_denied))
+                snackbarHostState.showSnackbar(locationDeniedMessage)
             }
             MapLocationPermissionOutcome.PermanentlyDenied -> scope.launch {
                 val result = snackbarHostState.showSnackbar(
-                    message = context.getString(R.string.permission_permanently_denied_message),
-                    actionLabel = context.getString(R.string.action_open_settings),
+                    message = permissionPermanentlyDeniedMessage,
+                    actionLabel = openSettingsLabel,
                     duration = SnackbarDuration.Long
                 )
                 if (result == SnackbarResult.ActionPerformed) {
@@ -287,8 +309,8 @@ internal fun MapContent(
             disableLocationDueToServicesUnavailable()
             scope.launch {
                 val result = snackbarHostState.showSnackbar(
-                    message = context.getString(R.string.map_location_services_disabled),
-                    actionLabel = context.getString(R.string.action_open_location_settings),
+                    message = locationServicesDisabledMessage,
+                    actionLabel = openLocationSettingsLabel,
                     duration = SnackbarDuration.Long
                 )
                 if (result == SnackbarResult.ActionPerformed) {
@@ -330,7 +352,7 @@ internal fun MapContent(
         delay(LOCATION_FIX_TIMEOUT_MILLIS)
         if (locatingCoordinator.complete(generation)) {
             locatingVersion++
-            snackbarHostState.showSnackbar(context.getString(R.string.map_location_unavailable))
+            snackbarHostState.showSnackbar(locationUnavailableMessage)
         }
     }
 
@@ -416,7 +438,7 @@ internal fun MapContent(
                 onMapClick = { position: Position, _ ->
                     val hit = HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
                     if (hit != null) {
-                        selectedHotspot = hit
+                        selectedHotspotId = hit.id
                         ClickResult.Consume
                     } else {
                         ClickResult.Pass
@@ -495,8 +517,11 @@ internal fun MapContent(
         )
     }
 
+    // Re-derived from the latest uiState.hotspots on every recomposition — see selectedHotspotId's
+    // KDoc above. null here (id set but no longer present in the list) simply closes the sheet.
+    val selectedHotspot = selectedHotspotFrom(uiState.hotspots, selectedHotspotId)
     selectedHotspot?.let { hotspot ->
-        HotspotDetailBottomSheet(hotspot = hotspot, onDismiss = { selectedHotspot = null })
+        HotspotDetailBottomSheet(hotspot = hotspot, onDismiss = { selectedHotspotId = null })
     }
 }
 
@@ -519,7 +544,7 @@ private fun HotspotControlsAndOverlays(
 ) {
     when {
         uiState.initialError -> {
-            InitialDataErrorOverlay(onRetry = onRefresh)
+            InitialDataErrorOverlay(onRetry = onRefresh, serverConfigurationError = uiState.initialErrorServerConfiguration)
         }
         else -> {
             Column(
@@ -541,7 +566,7 @@ private fun HotspotControlsAndOverlays(
                 MapLegend(modifier = Modifier.padding(start = FilterChipRowHorizontalContentPadding))
                 if (uiState.subsequentError) {
                     Spacer(modifier = Modifier.height(Spacing.sm))
-                    SubsequentErrorBanner(onRetry = onRetry)
+                    SubsequentErrorBanner(onRetry = onRetry, serverConfigurationError = uiState.subsequentErrorServerConfiguration)
                 }
             }
 
@@ -595,6 +620,24 @@ private enum class DeviceCountBucket(val color: Color) {
     Three(SemanticColors.Warning),
     FourOrMore(SemanticColors.Danger)
 }
+
+/**
+ * Re-derives the selected hotspot from the currently loaded [hotspots] by id, rather than trusting
+ * a captured object from the moment it was tapped — so an open detail sheet always reflects the
+ * latest data for that hotspot, and closes on its own (returning null) once the hotspot is no
+ * longer present (removed by a refresh or filtered out by a range change), instead of continuing
+ * to display a stale snapshot. `selectedId == null` (nothing selected) also returns null.
+ */
+internal fun selectedHotspotFrom(hotspots: List<Hotspot>, selectedId: UUID?): Hotspot? =
+    selectedId?.let { id -> hotspots.find { it.id == id } }
+
+internal fun retainedSelectedHotspotId(
+    hotspots: List<Hotspot>,
+    selectedId: UUID?
+): UUID? =
+    selectedId?.takeIf { id ->
+        hotspots.any { hotspot -> hotspot.id == id }
+    }
 
 private fun bucketFor(deviceCount: Int): DeviceCountBucket = when {
     deviceCount <= 2 -> DeviceCountBucket.Two
@@ -729,11 +772,16 @@ private fun MapLoadingIndicator(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun InitialDataErrorOverlay(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun InitialDataErrorOverlay(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Surface(shape = AppShapes.Card, color = MaterialTheme.colorScheme.surface) {
             Column(modifier = Modifier.padding(Spacing.lg), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = stringResource(R.string.map_error_data_initial), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = stringResource(
+                        if (serverConfigurationError) R.string.error_server_configuration else R.string.map_error_data_initial
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Button(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
             }
@@ -755,14 +803,20 @@ private fun EmptyHotspotsOverlay(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Surface(modifier = modifier.fillMaxWidth(), shape = AppShapes.Card, color = SemanticColors.WarningBg) {
         Row(
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = stringResource(R.string.map_error_data_refresh), style = MaterialTheme.typography.bodySmall, color = SemanticColors.Warning)
+            Text(
+                text = stringResource(
+                    if (serverConfigurationError) R.string.error_server_configuration else R.string.map_error_data_refresh
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = SemanticColors.Warning
+            )
             TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
         }
     }

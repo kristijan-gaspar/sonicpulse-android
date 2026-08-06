@@ -138,16 +138,18 @@ internal fun DetectionsContent(
         }
 
         if (uiState.refreshError) {
-            RefreshErrorBanner(onRetry = onRefresh)
+            RefreshErrorBanner(onRetry = onRefresh, serverConfigurationError = uiState.refreshErrorServerConfiguration)
         }
 
         when {
             uiState.isInitialLoading -> FullScreenLoading()
-            uiState.initialError -> FullScreenError(onRetry = onRefresh)
+            uiState.initialError ->
+                FullScreenError(onRetry = onRefresh, serverConfigurationError = uiState.initialErrorServerConfiguration)
             uiState.emptyState != null -> DetectionsEmptyView(
                 emptyState = uiState.emptyState,
                 isLoadingNextPage = uiState.isLoadingNextPage,
                 pagingError = uiState.pagingError,
+                pagingErrorServerConfiguration = uiState.pagingErrorServerConfiguration,
                 pagingActionDisabled = uiState.isRefreshing,
                 onLoadMore = onLoadNextPage
             )
@@ -156,6 +158,7 @@ internal fun DetectionsContent(
                 isLoadingNextPage = uiState.isLoadingNextPage,
                 canLoadMore = uiState.canLoadMore,
                 pagingError = uiState.pagingError,
+                pagingErrorServerConfiguration = uiState.pagingErrorServerConfiguration,
                 pagingActionDisabled = uiState.isRefreshing,
                 onLoadNextPage = onLoadNextPage,
                 onItemClick = { selectedDetection = it }
@@ -169,14 +172,16 @@ internal fun DetectionsContent(
 }
 
 @Composable
-private fun RefreshErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun RefreshErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Row(
         modifier = modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.xs),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = stringResource(R.string.detections_error_refresh),
+            text = stringResource(
+                if (serverConfigurationError) R.string.error_server_configuration else R.string.detections_error_refresh
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = SemanticColors.Warning
         )
@@ -191,6 +196,7 @@ private fun DetectionsList(
     isLoadingNextPage: Boolean,
     canLoadMore: Boolean,
     pagingError: Boolean,
+    pagingErrorServerConfiguration: Boolean,
     pagingActionDisabled: Boolean,
     onLoadNextPage: () -> Unit,
     onItemClick: (DetectionHistoryItemUiModel) -> Unit,
@@ -215,6 +221,7 @@ private fun DetectionsList(
             PagingFooter(
                 isLoadingNextPage = isLoadingNextPage,
                 pagingError = pagingError,
+                pagingErrorServerConfiguration = pagingErrorServerConfiguration,
                 canLoadMore = canLoadMore,
                 pagingActionDisabled = pagingActionDisabled,
                 onLoadNextPage = onLoadNextPage
@@ -232,6 +239,7 @@ private fun DetectionsList(
 private fun PagingFooter(
     isLoadingNextPage: Boolean,
     pagingError: Boolean,
+    pagingErrorServerConfiguration: Boolean,
     canLoadMore: Boolean,
     pagingActionDisabled: Boolean,
     onLoadNextPage: () -> Unit,
@@ -240,7 +248,11 @@ private fun PagingFooter(
     when {
         pagingActionDisabled -> Unit
         isLoadingNextPage -> LoadingFooter(modifier)
-        pagingError -> PagingErrorFooter(onRetry = onLoadNextPage, modifier = modifier)
+        pagingError -> PagingErrorFooter(
+            onRetry = onLoadNextPage,
+            serverConfigurationError = pagingErrorServerConfiguration,
+            modifier = modifier
+        )
         canLoadMore -> LoadMoreFooter(onClick = onLoadNextPage, modifier = modifier)
     }
 }
@@ -325,6 +337,7 @@ private fun DetectionsEmptyView(
     emptyState: DetectionsEmptyState,
     isLoadingNextPage: Boolean,
     pagingError: Boolean,
+    pagingErrorServerConfiguration: Boolean,
     pagingActionDisabled: Boolean,
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier
@@ -351,7 +364,13 @@ private fun DetectionsEmptyView(
                 isLoadingNextPage -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
                 pagingError -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = stringResource(R.string.detections_error_paging),
+                        text = stringResource(
+                            if (pagingErrorServerConfiguration) {
+                                R.string.error_server_configuration
+                            } else {
+                                R.string.detections_error_paging
+                            }
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -371,14 +390,16 @@ private fun FullScreenLoading(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun FullScreenError(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun FullScreenError(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Column(
         modifier = modifier.fillMaxSize().padding(Spacing.lg),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = stringResource(R.string.detections_error_initial_load),
+            text = stringResource(
+                if (serverConfigurationError) R.string.error_server_configuration else R.string.detections_error_initial_load
+            ),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             textAlign = TextAlign.Center
@@ -396,13 +417,15 @@ private fun LoadingFooter(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PagingErrorFooter(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun PagingErrorFooter(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Column(
         modifier = modifier.fillMaxWidth().padding(Spacing.md),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = stringResource(R.string.detections_error_paging),
+            text = stringResource(
+                if (serverConfigurationError) R.string.error_server_configuration else R.string.detections_error_paging
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )

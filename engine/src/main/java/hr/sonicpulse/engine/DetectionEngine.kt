@@ -30,6 +30,13 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
     private var eventPeakBlockIndex = 0L
     private var eventStartBlockIndex = 0L
     private var lastActiveBlockIndex = 0L
+    /** The background baseline as it stood the instant the current/most recent candidate opened
+     * — frozen for the lifetime of that candidate, same as [eventPeakDbfs]. Used as a floor on
+     * the release threshold so a candidate can always close by returning to the level it started
+     * from, even for a weak onset where peak - [EngineConfig.releaseDropDb] would otherwise sit
+     * below that background level. Reset alongside the rest of event tracking so no candidate
+     * ever inherits another's onset baseline. */
+    private var eventBaselineDbfs = Double.NEGATIVE_INFINITY
 
     private val baseline = BaselineTracker(config.alphaDown, config.alphaUp)
     private val crestTracker = CrestFactorTracker(config.crestWindowBlocks)
@@ -66,14 +73,19 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             TriggerEvaluator.shouldTrigger(signal.dbfs, signal.spike, signal.crest, signal.clipRatio, config)
         // The looser release condition — only ever used to decide whether an already-open event
         // is still active; never reapplies the full onset trigger (crest/clip/dbfs) to a
-        // candidate that has already started. Peak-relative, not baseline-relative: a frozen
-        // background baseline can sit far below the real room level, so comparing against it
-        // (as spike does) could keep ordinary room noise "active" long after a short impulse has
-        // actually ended. Comparing against the candidate's own strongest block so far avoids
-        // that regardless of how far off the baseline is. eventPeakDbfs here is still the peak as
-        // it stood *before* this block — handleActiveBlock() below updates it afterward, so a
-        // later, louder active block raises the release boundary for every block that follows it.
-        val stillActive = signal.dbfs > eventPeakDbfs - config.releaseDropDb
+        // candidate that has already started. Primarily peak-relative, not baseline-relative: a
+        // frozen background baseline can sit far below the real room level, so comparing against
+        // it alone (as spike does) could keep ordinary room noise "active" long after a short
+        // impulse has actually ended. Comparing against the candidate's own strongest block so
+        // far avoids that regardless of how far off the baseline is. eventPeakDbfs here is still
+        // the peak as it stood *before* this block — handleActiveBlock() below updates it
+        // afterward, so a later, louder active block raises the release boundary for every block
+        // that follows it. Floored at eventBaselineDbfs (the background level frozen at onset) so
+        // a weak onset — whose peak - releaseDropDb can fall below the level the sound actually
+        // started from — can still close by returning to that starting background, instead of
+        // requiring it to drop even further below its own onset baseline.
+        val releaseThreshold = maxOf(eventPeakDbfs - config.releaseDropDb, eventBaselineDbfs)
+        val stillActive = signal.dbfs > releaseThreshold
 
         // Baseline reflects the established background, not the candidate block itself:
         // a block that starts a detection must not be allowed to raise its own reference.
@@ -118,6 +130,7 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
             lastActiveBlockIndex = blockIndex
             eventPeakDbfs = dbfs
             eventPeakBlockIndex = blockIndex
+            eventBaselineDbfs = baseline.value
             consecutiveInactiveBlocks = 0
         }
         return null
@@ -207,5 +220,6 @@ class DetectionEngine(private val config: EngineConfig = EngineConfig()) {
         lastActiveBlockIndex = 0L
         eventPeakDbfs = Double.NEGATIVE_INFINITY
         eventPeakBlockIndex = 0L
+        eventBaselineDbfs = Double.NEGATIVE_INFINITY
     }
 }

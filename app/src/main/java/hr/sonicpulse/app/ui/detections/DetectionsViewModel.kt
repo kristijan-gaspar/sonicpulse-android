@@ -3,7 +3,10 @@ package hr.sonicpulse.app.ui.detections
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import hr.sonicpulse.app.data.remote.RemoteFailure
+import hr.sonicpulse.app.data.remote.RemoteFailureClassifier
 import hr.sonicpulse.app.domain.model.Detection
+import hr.sonicpulse.app.domain.model.eventTime
 import hr.sonicpulse.app.repository.DetectionPage
 import hr.sonicpulse.app.repository.DetectionsRepository
 import java.time.LocalDate
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.util.Log
 
 private const val PAGE_SIZE = 50
 
@@ -91,7 +95,10 @@ class DetectionsViewModel @Inject constructor(
             isLoadingNextPage = false,
             initialError = false,
             refreshError = false,
-            pagingError = false
+            pagingError = false,
+            initialErrorServerConfiguration = false,
+            refreshErrorServerConfiguration = false,
+            pagingErrorServerConfiguration = false
         )
 
         val job = viewModelScope.launch {
@@ -104,10 +111,22 @@ class DetectionsViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
+                val failure = classifyRemoteFailure(e)
+                val isServerConfiguration = failure is RemoteFailure.Unauthorized
                 if (isFirstLoad) {
-                    publishState(isInitialLoading = false, isRefreshing = false, initialError = true)
+                    publishState(
+                        isInitialLoading = false,
+                        isRefreshing = false,
+                        initialError = true,
+                        initialErrorServerConfiguration = isServerConfiguration
+                    )
                 } else {
-                    publishState(isInitialLoading = false, isRefreshing = false, refreshError = true)
+                    publishState(
+                        isInitialLoading = false,
+                        isRefreshing = false,
+                        refreshError = true,
+                        refreshErrorServerConfiguration = isServerConfiguration
+                    )
                 }
             }
         }
@@ -129,7 +148,7 @@ class DetectionsViewModel @Inject constructor(
 
         isLoadingNextPage = true
         val myGeneration = generation
-        publishState(isLoadingNextPage = true, pagingError = false)
+        publishState(isLoadingNextPage = true, pagingError = false, pagingErrorServerConfiguration = false)
 
         val job = viewModelScope.launch {
             try {
@@ -141,7 +160,9 @@ class DetectionsViewModel @Inject constructor(
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
                 isLoadingNextPage = false
-                publishState(isLoadingNextPage = false, pagingError = true)
+                val failure = classifyRemoteFailure(e)
+                val isServerConfiguration = failure is RemoteFailure.Unauthorized
+                publishState(isLoadingNextPage = false, pagingError = true, pagingErrorServerConfiguration = isServerConfiguration)
             }
         }
         pagingJob = job
@@ -168,19 +189,23 @@ class DetectionsViewModel @Inject constructor(
             isLoadingNextPage = false,
             initialError = false,
             refreshError = false,
-            pagingError = false
+            pagingError = false,
+            initialErrorServerConfiguration = false,
+            refreshErrorServerConfiguration = false,
+            pagingErrorServerConfiguration = false
         )
     }
 
     /** Merges a later page into what's already loaded. Deliberately leaves
-     * [DetectionsUiState.refreshError] untouched — the default parameters of [publishState] carry
-     * the current value forward, so a stale refresh failure stays visible until the next refresh. */
+     * [DetectionsUiState.refreshError] (and its accompanying …ServerConfiguration flag) untouched
+     * — the default parameters of [publishState] carry the current values forward, so a stale
+     * refresh failure stays visible until the next refresh. */
     private fun applyNextPage(page: DetectionPage) {
         loadedDetections = mergeDedup(loadedDetections, page.items)
         nextCursor = page.nextCursor
         canLoadMore = page.nextCursor != null
         isLoadingNextPage = false
-        publishState(isLoadingNextPage = false, pagingError = false)
+        publishState(isLoadingNextPage = false, pagingError = false, pagingErrorServerConfiguration = false)
     }
 
     private fun publishState(
@@ -189,7 +214,10 @@ class DetectionsViewModel @Inject constructor(
         isLoadingNextPage: Boolean = _uiState.value.isLoadingNextPage,
         initialError: Boolean = _uiState.value.initialError,
         refreshError: Boolean = _uiState.value.refreshError,
-        pagingError: Boolean = _uiState.value.pagingError
+        pagingError: Boolean = _uiState.value.pagingError,
+        initialErrorServerConfiguration: Boolean = _uiState.value.initialErrorServerConfiguration,
+        refreshErrorServerConfiguration: Boolean = _uiState.value.refreshErrorServerConfiguration,
+        pagingErrorServerConfiguration: Boolean = _uiState.value.pagingErrorServerConfiguration
     ) {
         val sections = groupByDate(applyFilter(loadedDetections, selectedFilter))
         val emptyState = when {
@@ -208,8 +236,31 @@ class DetectionsViewModel @Inject constructor(
             initialError = initialError,
             refreshError = refreshError,
             pagingError = pagingError,
+            initialErrorServerConfiguration = initialErrorServerConfiguration,
+            refreshErrorServerConfiguration = refreshErrorServerConfiguration,
+            pagingErrorServerConfiguration = pagingErrorServerConfiguration,
             emptyState = emptyState
         )
+    }
+
+    private fun classifyRemoteFailure(
+        throwable: Throwable
+    ): RemoteFailure {
+        val failure = RemoteFailureClassifier.classify(throwable)
+
+        if (failure is RemoteFailure.Unknown) {
+            Log.e(
+                TAG,
+                "Unexpected detections request failure",
+                throwable
+            )
+        }
+
+        return failure
+    }
+
+    private companion object {
+        const val TAG = "DetectionsViewModel"
     }
 }
 
@@ -236,18 +287,21 @@ private fun applyFilter(detections: List<Detection>, filter: DetectionsFilter): 
     DetectionsFilter.All -> detections
     DetectionsFilter.Today -> {
         val today = LocalDate.now(ZoneId.systemDefault())
-        detections.filter { it.receivedAtUtc.atZone(ZoneId.systemDefault()).toLocalDate() == today }
+        detections.filter { it.eventTime.atZone(ZoneId.systemDefault()).toLocalDate() == today }
     }
     DetectionsFilter.Grouped -> detections.filter { it.hotspotId != null }
     DetectionsFilter.Ungrouped -> detections.filter { it.hotspotId == null }
 }
 
 /** Kotlin's `groupBy` uses a LinkedHashMap, preserving each key's first-seen order — since
- * [detections] is already newest-to-oldest, the newest date is always the first section. */
+ * [detections] is already newest-to-oldest by the backend's own receivedAtUtc-based pagination
+ * order (deliberately never resorted by eventTime here), the newest date is, in the overwhelming
+ * common case, still the first section; a rare event/received-time crossover near midnight can
+ * only ever reorder entries *within* that existing sequence, never the page order itself. */
 private fun groupByDate(detections: List<Detection>): List<DetectionDateSection> {
     val zone = ZoneId.systemDefault()
     return detections
-        .groupBy { it.receivedAtUtc.atZone(zone).toLocalDate() }
+        .groupBy { it.eventTime.atZone(zone).toLocalDate() }
         .map { (date, items) -> DetectionDateSection(date, items.map(::toUiModel)) }
 }
 
@@ -257,8 +311,8 @@ private fun toUiModel(detection: Detection): DetectionHistoryItemUiModel {
     return DetectionHistoryItemUiModel(
         id = detection.id,
         peakDbfs = detection.peakDbfs,
-        listTimestampText = listTimestampTextFor(detection.receivedAtUtc, zone, locale),
-        detailTimestampText = detailTimestampTextFor(detection.receivedAtUtc, zone, locale),
+        listTimestampText = listTimestampTextFor(detection.eventTime, zone, locale),
+        detailTimestampText = detailTimestampTextFor(detection.eventTime, zone, locale),
         latitudeText = String.format(Locale.US, "%.5f", detection.latitude),
         longitudeText = String.format(Locale.US, "%.5f", detection.longitude),
         grouped = detection.hotspotId != null

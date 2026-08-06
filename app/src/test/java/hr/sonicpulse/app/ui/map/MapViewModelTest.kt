@@ -16,6 +16,11 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.Response as OkHttpResponse
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,6 +28,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import retrofit2.HttpException
+import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MapViewModelTest {
@@ -37,6 +44,17 @@ class MapViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    private fun httpException(code: Int): HttpException {
+        val rawResponse = OkHttpResponse.Builder()
+            .code(code)
+            .message("test")
+            .protocol(Protocol.HTTP_1_1)
+            .request(Request.Builder().url("http://localhost/").build())
+            .build()
+        val body = "{}".toResponseBody("application/json".toMediaType())
+        return HttpException(Response.error<Unit>(body, rawResponse))
     }
 
     private fun hotspot(deviceCount: Int = 3) = Hotspot(
@@ -99,6 +117,66 @@ class MapViewModelTest {
         assertFalse(viewModel.uiState.value.isInitialLoading)
         assertTrue(viewModel.uiState.value.initialError)
     }
+
+    @Test
+    fun `a 401 initial failure is classified as a server-configuration error`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { throwOnGetHotspots = httpException(401) }
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.initialError)
+        assertTrue(state.initialErrorServerConfiguration)
+    }
+
+    @Test
+    fun `a 403 initial failure is classified as a server-configuration error`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { throwOnGetHotspots = httpException(403) }
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.initialErrorServerConfiguration)
+    }
+
+    @Test
+    fun `a network initial failure is not classified as a server-configuration error`() = runTest(testDispatcher) {
+        val repository = FakeHotspotsRepository().apply { throwOnGetHotspots = IOException("boom") }
+        val viewModel = MapViewModel(repository, FakePermissionRequestHistory())
+
+        viewModel.onScreenEntered()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.initialError)
+        assertFalse(state.initialErrorServerConfiguration)
+    }
+
+    @Test
+    fun `an unexpected initial failure produces a generic error instead of escaping`() =
+        runTest(testDispatcher) {
+            val repository = FakeHotspotsRepository().apply {
+                throwOnGetHotspots =
+                    IllegalStateException("unexpected internal failure")
+            }
+
+            val viewModel = MapViewModel(
+                repository,
+                FakePermissionRequestHistory()
+            )
+
+            viewModel.onScreenEntered()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+
+            assertTrue(state.initialError)
+            assertFalse(state.isInitialLoading)
+            assertFalse(state.initialErrorServerConfiguration)
+        }
 
     @Test
     fun `successful initial load commits 24 hours`() = runTest(testDispatcher) {
@@ -245,6 +323,22 @@ class MapViewModelTest {
         assertNull(state.pendingRange)
         assertTrue(state.subsequentError)
     }
+
+    @Test
+    fun `a 401 subsequent failure is classified as a server-configuration error, distinct from a network failure`() =
+        runTest(testDispatcher) {
+            val repository = FakeHotspotsRepository().apply { hotspots = mapOf(24 to listOf(hotspot())) }
+            val viewModel = viewModelAfterInitialLoad(repository)
+            advanceUntilIdle()
+
+            repository.throwOnGetHotspots = httpException(403)
+            viewModel.selectRange(HotspotTimeRange.Last3Days)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertTrue(state.subsequentError)
+            assertTrue(state.subsequentErrorServerConfiguration)
+        }
 
     // --- Manual refresh ---
 

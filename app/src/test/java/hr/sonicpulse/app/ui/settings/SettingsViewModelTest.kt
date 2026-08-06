@@ -9,6 +9,7 @@ import hr.sonicpulse.app.domain.model.AppSettings
 import hr.sonicpulse.app.domain.model.ThemeMode
 import hr.sonicpulse.app.ui.permissions.FakePermissionChecker
 import hr.sonicpulse.app.ui.theme.FakeAppLanguageController
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -20,6 +21,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -98,6 +100,18 @@ class SettingsViewModelTest {
 
         assertEquals("abc-123", viewModel.uiState.value.installationId)
     }
+
+    @Test
+    fun `an IOException reading the installation id leaves it null instead of crashing the ViewModel`() =
+        runTest(testDispatcher) {
+            val failingRepository = FakeInstallationIdRepository().apply {
+                throwOnGetOrCreate = IOException("disk unavailable")
+            }
+
+            val viewModel = viewModel(installationIdRepository = failingRepository)
+
+            assertNull(viewModel.uiState.value.installationId)
+        }
 
     @Test
     fun `exposes BuildConfig VERSION_NAME`() = runTest(testDispatcher) {

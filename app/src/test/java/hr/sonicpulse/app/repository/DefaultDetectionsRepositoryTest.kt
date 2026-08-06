@@ -78,6 +78,18 @@ class DefaultDetectionsRepositoryTest {
     }
 
     @Test
+    fun `a negative nextCursor throws instead of being silently accepted`() = runTest {
+        val api = FakeDetectionApi().apply {
+            historyResponse = DetectionHistoryPageDto(items = emptyList(), nextCursor = -1L)
+        }
+        val repository = DefaultDetectionsRepository(api, FakeInstallationIdRepository())
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { repository.getDetectionsPage(cursor = null, limit = 50) }
+        }
+    }
+
+    @Test
     fun `an API failure propagates rather than being swallowed`() {
         val api = FakeDetectionApi().apply { throwOnGetHistory = IOException("timeout") }
         val repository = DefaultDetectionsRepository(api, FakeInstallationIdRepository())

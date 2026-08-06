@@ -1,6 +1,7 @@
 package hr.sonicpulse.app.ui.settings
 
 import android.Manifest
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,6 +12,7 @@ import hr.sonicpulse.app.domain.model.AppLanguage
 import hr.sonicpulse.app.domain.model.ThemeMode
 import hr.sonicpulse.app.ui.permissions.PermissionChecker
 import hr.sonicpulse.app.ui.theme.AppLanguageController
+import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -64,7 +66,20 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            _installationId.value = installationIdRepository.getOrCreate()
+            // A read/write failure here (e.g. DataStore's backing file briefly unavailable) must
+            // not crash the app — the installation id simply stays unavailable (null, its default
+            // above) for this screen; DetectionSubmitter has its own, separate handling of the
+            // exact same failure for submission (LocalStorageError), unaffected by this catch.
+            _installationId.value = try {
+                installationIdRepository.getOrCreate()
+            } catch (e: IOException) {
+                Log.w(
+                    TAG,
+                    "Failed to read or create the installation id",
+                    e
+                )
+                null
+            }
         }
     }
 
@@ -91,6 +106,10 @@ class SettingsViewModel @Inject constructor(
         microphoneGranted = permissionChecker.isGranted(Manifest.permission.RECORD_AUDIO),
         preciseLocationGranted = permissionChecker.isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
     )
+
+    private companion object {
+        const val TAG = "SettingsViewModel"
+    }
 }
 
 private data class PermissionStatus(val microphoneGranted: Boolean, val preciseLocationGranted: Boolean)

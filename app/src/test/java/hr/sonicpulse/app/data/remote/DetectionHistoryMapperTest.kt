@@ -14,6 +14,10 @@ class DetectionHistoryMapperTest {
         id: String = "22222222-2222-2222-2222-222222222222",
         sequenceNumber: Long = 123L,
         deviceId: String = "11111111-1111-1111-1111-111111111111",
+        peakDbfs: Double = -8.5,
+        latitude: Double = 45.8,
+        longitude: Double = 16.0,
+        gpsAccuracy: Double = 8.0,
         receivedAtUtc: String = "2026-08-03T10:00:00Z",
         peakTimeClient: String? = "2026-08-03T09:59:59Z",
         hotspotId: String? = "33333333-3333-3333-3333-333333333333"
@@ -21,10 +25,10 @@ class DetectionHistoryMapperTest {
         id = id,
         sequenceNumber = sequenceNumber,
         deviceId = deviceId,
-        peakDbfs = -8.5,
-        latitude = 45.8,
-        longitude = 16.0,
-        gpsAccuracy = 8.0,
+        peakDbfs = peakDbfs,
+        latitude = latitude,
+        longitude = longitude,
+        gpsAccuracy = gpsAccuracy,
         receivedAtUtc = receivedAtUtc,
         peakTimeClient = peakTimeClient,
         hotspotId = hotspotId
@@ -87,5 +91,128 @@ class DetectionHistoryMapperTest {
         assertThrows(DateTimeParseException::class.java) {
             DetectionHistoryMapper.toDomain(dto(peakTimeClient = "not-a-timestamp"))
         }
+    }
+
+    // --- item 14: field-range validation ---
+
+    @Test
+    fun `a negative sequenceNumber throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(sequenceNumber = -1L))
+        }
+    }
+
+    @Test
+    fun `a sequenceNumber of zero is accepted`() {
+        val detection = DetectionHistoryMapper.toDomain(dto(sequenceNumber = 0L))
+
+        assertEquals(0L, detection.sequenceNumber)
+    }
+
+    @Test
+    fun `latitude outside -90 to 90 throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(latitude = 90.1))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(latitude = -90.1))
+        }
+    }
+
+    @Test
+    fun `a non-finite latitude throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(latitude = Double.NaN))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(latitude = Double.POSITIVE_INFINITY))
+        }
+    }
+
+    @Test
+    fun `latitude at the exact -90 and 90 boundaries is accepted`() {
+        assertEquals(90.0, DetectionHistoryMapper.toDomain(dto(latitude = 90.0)).latitude, 0.0)
+        assertEquals(-90.0, DetectionHistoryMapper.toDomain(dto(latitude = -90.0)).latitude, 0.0)
+    }
+
+    @Test
+    fun `longitude outside -180 to 180 throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(longitude = 180.1))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(longitude = -180.1))
+        }
+    }
+
+    @Test
+    fun `a non-finite longitude throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(longitude = Double.NaN))
+        }
+    }
+
+    @Test
+    fun `longitude at the exact -180 and 180 boundaries is accepted`() {
+        assertEquals(180.0, DetectionHistoryMapper.toDomain(dto(longitude = 180.0)).longitude, 0.0)
+        assertEquals(-180.0, DetectionHistoryMapper.toDomain(dto(longitude = -180.0)).longitude, 0.0)
+    }
+
+    @Test
+    fun `zero or negative gpsAccuracy throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(gpsAccuracy = 0.0))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(gpsAccuracy = -5.0))
+        }
+    }
+
+    @Test
+    fun `a non-finite gpsAccuracy throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(gpsAccuracy = Double.NaN))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(gpsAccuracy = Double.POSITIVE_INFINITY))
+        }
+    }
+
+    @Test
+    fun `a tiny strictly-positive gpsAccuracy is accepted`() {
+        val detection = DetectionHistoryMapper.toDomain(dto(gpsAccuracy = 0.001))
+
+        assertEquals(0.001, detection.gpsAccuracy, 0.0)
+    }
+
+    @Test
+    fun `a positive peakDbfs throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(peakDbfs = 0.1))
+        }
+    }
+
+    @Test
+    fun `a non-finite peakDbfs throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(peakDbfs = Double.NaN))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DetectionHistoryMapper.toDomain(dto(peakDbfs = Double.NEGATIVE_INFINITY))
+        }
+    }
+
+    @Test
+    fun `a peakDbfs of exactly 0 dBFS is accepted`() {
+        val detection = DetectionHistoryMapper.toDomain(dto(peakDbfs = 0.0))
+
+        assertEquals(0.0, detection.peakDbfs, 0.0)
+    }
+
+    @Test
+    fun `a very quiet (deeply negative) peakDbfs is accepted, never clamped`() {
+        val detection = DetectionHistoryMapper.toDomain(dto(peakDbfs = -119.9))
+
+        assertEquals(-119.9, detection.peakDbfs, 0.0)
     }
 }

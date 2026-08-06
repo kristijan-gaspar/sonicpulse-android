@@ -400,6 +400,20 @@ class MonitoringViewModelTest {
     }
 
     @Test
+    fun `a processing failure maps to the generic processing error message, distinct from capture errors`() =
+        runTest(testDispatcher) {
+            val repository = FakeMonitoringStateRepository()
+            val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory(), FakeDetectionSessionLogger())
+
+            repository.monitoringProcessingFailed()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertEquals(R.string.error_processing_generic, state.errorMessageRes)
+            assertTrue(!state.microphoneActive)
+        }
+
+    @Test
     fun `a startup failure maps to its specific message`() = runTest(testDispatcher) {
         val repository = FakeMonitoringStateRepository()
         val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory(), FakeDetectionSessionLogger())

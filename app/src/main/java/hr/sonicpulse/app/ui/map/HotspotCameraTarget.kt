@@ -46,6 +46,8 @@ object HotspotCamera {
     fun targetFor(hotspots: List<Hotspot>): HotspotCameraTarget {
         if (hotspots.isEmpty()) return HotspotCameraTarget.KeepCurrent
 
+        // applyMinimumRadius = false: the camera's own degenerate-span detection below must see
+        // hotspots' real, possibly-zero radii — see HotspotGeometry.polygonFor's KDoc.
         val polygons = hotspots.map {
             HotspotGeometry.polygonFor(
                 hotspotId = it.id,
@@ -53,7 +55,8 @@ object HotspotCamera {
                 centerLongitude = it.longitude,
                 radiusMeters = it.radiusMeters,
                 deviceCount = it.deviceCount,
-                confidence = it.confidence
+                confidence = it.confidence,
+                applyMinimumRadius = false
             )
         }
         val span = HotspotBounds.compute(polygons) ?: return HotspotCameraTarget.KeepCurrent
