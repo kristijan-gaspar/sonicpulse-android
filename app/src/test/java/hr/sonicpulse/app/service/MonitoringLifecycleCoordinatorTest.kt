@@ -293,6 +293,56 @@ class MonitoringLifecycleCoordinatorTest {
         assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
     }
 
+    // --- onTeardownFailed ---
+
+    @Test
+    fun `onTeardownFailed from STOPPING with no pending restart moves to IDLE`() {
+        val coordinator = MonitoringLifecycleCoordinator()
+        coordinator.onActionStart()
+        coordinator.onStopOrDestroy()
+
+        coordinator.onTeardownFailed()
+
+        assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
+    }
+
+    @Test
+    fun `onTeardownFailed discards a queued restart instead of honoring it`() {
+        val coordinator = MonitoringLifecycleCoordinator()
+        coordinator.onActionStart()
+        coordinator.onStopOrDestroy()
+        coordinator.onActionStart() // queues a restart
+
+        coordinator.onTeardownFailed()
+
+        assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
+        // A queued restart must not resurface on a later, unrelated onTeardownComplete() call —
+        // there is nothing left pending for it to find.
+        assertEquals(MonitoringLifecycleEffect.None, coordinator.onTeardownComplete())
+    }
+
+    @Test
+    fun `a fresh Start after onTeardownFailed is accepted normally`() {
+        val coordinator = MonitoringLifecycleCoordinator()
+        coordinator.onActionStart()
+        coordinator.onStopOrDestroy()
+        coordinator.onTeardownFailed()
+
+        val effect = coordinator.onActionStart()
+
+        assertTrue(effect is MonitoringLifecycleEffect.StartLocation)
+        assertEquals(MonitoringLifecycleState.STARTING, coordinator.state)
+    }
+
+    @Test
+    fun `onTeardownFailed from any state other than STOPPING is a no-op`() {
+        val coordinator = MonitoringLifecycleCoordinator()
+
+        coordinator.onTeardownFailed()
+
+        assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
+    }
+
     // --- onSynchronousStartupAbort ---
 
     @Test

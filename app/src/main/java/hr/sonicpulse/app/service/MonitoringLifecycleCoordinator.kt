@@ -157,4 +157,20 @@ class MonitoringLifecycleCoordinator {
             MonitoringLifecycleEffect.None
         }
     }
+
+    /**
+     * Called instead of [onTeardownComplete] when the owned teardown itself threw rather than
+     * finishing normally — a broken teardown must never be treated as a success (which could
+     * start a queued restart on top of resources that were never actually released) but must
+     * also never leave [state] wedged in STOPPING forever. Always resolves straight to IDLE and
+     * discards any queued restart — the caller ([MonitoringSessionRunner]) is responsible for
+     * reporting the failure and driving the service's normal idle/failure cleanup path; this only
+     * updates the state machine. A no-op from any state other than STOPPING, for the same
+     * defensive reason as [onTeardownComplete].
+     */
+    fun onTeardownFailed() {
+        if (state != MonitoringLifecycleState.STOPPING) return
+        restartPending = false
+        state = MonitoringLifecycleState.IDLE
+    }
 }

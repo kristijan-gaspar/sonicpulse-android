@@ -1,5 +1,6 @@
 package hr.sonicpulse.app.service
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -19,6 +20,11 @@ import kotlinx.coroutines.launch
  * clears [currentSession] in that same synchronous step, so a newer session (if one is queued and
  * later begins) always gets its own distinct [S] instance and can never be reached, let alone
  * mutated, by an old, still-running [Sessions.tearDown] call.
+ *
+ * A [Sessions.tearDown] that throws is never treated as a successful teardown: [stop] moves the
+ * lifecycle straight back to IDLE (discarding any queued restart) and reports the failure through
+ * [Sessions.onTeardownFailure] instead of resolving a restart on top of resources that may never
+ * have actually been released — see [MonitoringLifecycleCoordinator.onTeardownFailed].
  */
 class MonitoringSessionRunner<S>(
     private val lifecycleCoordinator: MonitoringLifecycleCoordinator,
@@ -43,7 +49,10 @@ class MonitoringSessionRunner<S>(
         suspend fun tearDown(session: S?, wasActive: Boolean)
 
         /** Called once teardown finishes with nothing queued to restart — including when there
-         * was nothing to tear down in the first place. */
+         * was nothing to tear down in the first place, and once after a failed teardown (see
+         * [onTeardownFailure]) has moved the lifecycle back to IDLE — a failed teardown must
+         * still stop the service through the same normal idle cleanup path a successful one
+         * without a queued restart uses. */
         fun onIdle()
 
         /** Called once a queued restart is ready to actually begin, for the fresh [generation]
@@ -51,6 +60,18 @@ class MonitoringSessionRunner<S>(
          * [start] does. [session] is already the new session ([currentSession] has already been
          * updated to it before this runs). */
         fun onRestart(generation: Long, session: S)
+
+        /**
+         * Called instead of [onIdle]/[onRestart] when [tearDown] itself threw rather than
+         * completing normally — any queued restart is discarded (never honored on top of
+         * resources that were never actually released) and the lifecycle is moved back to IDLE
+         * before this runs. Implementations should log [throwable] and perform whatever
+         * best-effort cleanup is still safe (e.g. removing the foreground notification) — never
+         * invent a misleading failure classification for it. [onIdle] is still called
+         * immediately afterward to actually stop the service, exactly as it would be for any
+         * other teardown that ends without a restart.
+         */
+        fun onTeardownFailure(throwable: Throwable)
     }
 
     /** Whichever session is currently starting or active — null while IDLE or STOPPING. The
@@ -97,10 +118,30 @@ class MonitoringSessionRunner<S>(
         currentSession = null
 
         val job = scope.launch {
-            sessions.tearDown(
-                session = sessionToTearDown,
-                wasActive = wasActive
-            )
+            val teardownSucceeded = try {
+                sessions.tearDown(
+                    session = sessionToTearDown,
+                    wasActive = wasActive
+                )
+                true
+            } catch (e: CancellationException) {
+                // Preserve normal cancellation semantics — this must keep propagating — but the
+                // state machine must never be left wedged in STOPPING because of it.
+                lifecycleCoordinator.onTeardownFailed()
+                throw e
+            } catch (e: Throwable) {
+                // A broken teardown must never be treated as a success: onTeardownComplete() is
+                // deliberately not called here, so a queued restart is discarded rather than
+                // honored on top of resources that were never actually released.
+                lifecycleCoordinator.onTeardownFailed()
+                sessions.onTeardownFailure(e)
+                false
+            }
+
+            if (!teardownSucceeded) {
+                sessions.onIdle()
+                return@launch
+            }
 
             when (val resolved = lifecycleCoordinator.onTeardownComplete()) {
                 is MonitoringLifecycleEffect.StartLocation -> {

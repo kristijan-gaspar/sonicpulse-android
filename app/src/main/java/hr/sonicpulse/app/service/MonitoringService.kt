@@ -131,6 +131,15 @@ class MonitoringService : Service() {
             override fun onRestart(generation: Long, session: MonitoringSession) {
                 continueStartup(session)
             }
+
+            override fun onTeardownFailure(throwable: Throwable) {
+                // Best-effort only: the teardown that was supposed to do this itself broke
+                // partway through, so nothing beyond logging and releasing what we safely can
+                // here is guaranteed to still be in a consistent state.
+                Log.e(TAG, "Monitoring session teardown failed", throwable)
+                runCatching { stopForegroundCompat() }
+                runCatching { monitoringStateRepository.cancelPendingSubmissions() }
+            }
         }
     )
 
@@ -305,9 +314,12 @@ class MonitoringService : Service() {
         session.recorder = recorder
         session.submissionTracker = SubmissionJobTracker()
 
-        // MonitoringSessionCoordinator guarantees monitoringStarted() runs before recorder.start()
-        // and that a capture failure (even one AudioRecorder reports synchronously, before its
-        // own start() call returns) always has the last word on repository state.
+        // MonitoringSessionCoordinator guarantees monitoringStarted() runs before recorder.start().
+        // It has no opinion on whether a capture error still belongs to this session — it only
+        // ever forwards one to onCaptureError below, which dispatches onto serviceScope so the
+        // session-identity check and the monitoringFailed() publish in handleCaptureError happen
+        // together, on the service dispatcher, and can never be split by a Stop landing between
+        // them.
         sessionCoordinator.startSession(
             startCapture = { onBlock, onError ->
                 recorder.start(onBlock, onError)
@@ -319,9 +331,6 @@ class MonitoringService : Service() {
                 serviceScope.launch {
                     handleCaptureError(session, error)
                 }
-            },
-            shouldHandleCaptureError = {
-                sessionRunner.currentSession === session
             }
         )
 
@@ -446,16 +455,23 @@ class MonitoringService : Service() {
         }
     }
 
+    /**
+     * MonitoringSessionCoordinator only ever forwards a capture error here — it never decides
+     * ownership or touches the repository itself. The identity check and the monitoringFailed()
+     * publish must happen together, in that order, on this single dispatcher call: a Stop that
+     * lands between "the error was produced on the capture thread" and "this callback actually
+     * runs" already invalidated [session] (cleared sessionRunner.currentSession) by the time this
+     * runs, so the check below makes the whole error a no-op — never a repository mutation that
+     * could overwrite the normal stopped state with a stale captureError.
+     */
     private fun handleCaptureError(session: MonitoringSession, error: AudioCaptureError) {
-        // monitoringFailed(error) has already been published by MonitoringSessionCoordinator
-        // (synchronously, inside the onError it wraps) — this only decides whether this service
-        // should actually tear anything down.
         if (sessionRunner.currentSession !== session) {
             // Already superseded by a newer session (or a Stop that raced ahead of this) —
             // nothing further to do, and unconditionally stopping now could kill a session this
             // failure has nothing to do with.
             return
         }
+        monitoringStateRepository.monitoringFailed(error)
         sessionRunner.stop()
     }
 

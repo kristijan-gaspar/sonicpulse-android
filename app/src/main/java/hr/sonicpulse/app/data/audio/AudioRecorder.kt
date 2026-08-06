@@ -207,17 +207,17 @@ class AudioRecorder(
                 val samplesRead = session.record.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
                 // record.stop() (called by stop()) unblocks a thread parked here in
                 // READ_BLOCKING and can make read() return a normal, positive sample count —
-                // checked again here, immediately after read() returns and before this result
-                // ever reaches accumulate()/onBlock(), so a block that only became available
-                // because Stop was requested is never delivered to the engine.
-                if (session.stopRequested) {
-                    break
+                // AudioReadDecision re-checks stopRequested against this exact result, so a
+                // block that only became available because Stop was requested is never
+                // delivered to the engine.
+                when (val decision = AudioReadDecision.decide(session.stopRequested, samplesRead)) {
+                    AudioReadDecision.StopRequested -> break
+                    is AudioReadDecision.ReadError -> {
+                        onError(AudioCaptureError.ReadFailure(decision.samplesRead))
+                        break
+                    }
+                    AudioReadDecision.Deliver -> accumulator.accumulate(readBuffer, samplesRead, onBlock)
                 }
-                if (samplesRead < 0) {
-                    onError(AudioCaptureError.ReadFailure(samplesRead))
-                    break
-                }
-                accumulator.accumulate(readBuffer, samplesRead, onBlock)
             }
         } catch (e: SecurityException) {
             // e.g. RECORD_AUDIO permission revoked mid-capture.

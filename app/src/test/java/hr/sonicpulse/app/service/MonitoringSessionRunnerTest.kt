@@ -40,13 +40,15 @@ class MonitoringSessionRunnerTest {
      * pause a specific [tearDown] call mid-flight to simulate a Start arriving while a real
      * teardown (audio close, logger finalize, submission drain...) is still running. */
     private class FakeSessions(
-        private val tearDownGate: CompletableDeferred<Unit>? = null
+        private val tearDownGate: CompletableDeferred<Unit>? = null,
+        private val tearDownException: Throwable? = null
     ) : MonitoringSessionRunner.Sessions<FakeSession> {
         val events = mutableListOf<String>()
         val createdGenerations = mutableListOf<Long>()
         var idleCount = 0
         var restartCount = 0
         val tornDownSessions = mutableListOf<FakeSession?>()
+        val teardownFailures = mutableListOf<Throwable>()
 
         override fun create(generation: Long): FakeSession {
             createdGenerations += generation
@@ -59,6 +61,7 @@ class MonitoringSessionRunnerTest {
             tearDownGate?.await()
             tornDownSessions += session
             session?.tornDown = true
+            tearDownException?.let { throw it }
         }
 
         override fun onIdle() {
@@ -69,6 +72,11 @@ class MonitoringSessionRunnerTest {
         override fun onRestart(generation: Long, session: FakeSession) {
             restartCount++
             events += "onRestart($generation)"
+        }
+
+        override fun onTeardownFailure(throwable: Throwable) {
+            teardownFailures += throwable
+            events += "onTeardownFailure"
         }
     }
 
@@ -277,6 +285,57 @@ class MonitoringSessionRunnerTest {
 
         assertTrue(fakeSessions.events.single { it.startsWith("tearDown(") }.contains("wasActive=false"))
     }
+
+    // --- tearDown() throwing must never leave the lifecycle stuck in STOPPING ---
+
+    @Test
+    fun `tearDown throws with no pending restart moves the lifecycle to IDLE and reports the failure exactly once`() =
+        runTest(testDispatcher) {
+            val failure = RuntimeException("boom")
+            val fakeSessions = FakeSessions(tearDownException = failure)
+            val coordinator = MonitoringLifecycleCoordinator()
+            val runner = MonitoringSessionRunner(coordinator, this, fakeSessions)
+            runner.start()
+
+            val job = runner.stop()
+            job.join()
+
+            assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
+            assertNull(runner.currentSession)
+            assertEquals(listOf(failure), fakeSessions.teardownFailures)
+            assertEquals(0, fakeSessions.restartCount)
+            assertEquals(1, fakeSessions.idleCount)
+        }
+
+    @Test
+    fun `a restart queued while teardown is running is discarded when that teardown throws`() =
+        runTest(testDispatcher) {
+            val gate = CompletableDeferred<Unit>()
+            val failure = RuntimeException("boom")
+            val fakeSessions = FakeSessions(tearDownGate = gate, tearDownException = failure)
+            val coordinator = MonitoringLifecycleCoordinator()
+            val runner = MonitoringSessionRunner(coordinator, this, fakeSessions)
+            runner.start()
+
+            val job = runner.stop()
+            testScheduler.runCurrent() // let tearDown() begin and suspend on the gate
+            runner.start() // queues a restart
+
+            gate.complete(Unit)
+            job.join()
+
+            assertEquals("a queued restart must never be honored after a failed teardown", 0, fakeSessions.restartCount)
+            assertEquals("no new session may be created for the discarded restart", 1, fakeSessions.createdGenerations.size)
+            assertEquals(MonitoringLifecycleState.IDLE, coordinator.state)
+            assertNull(runner.currentSession)
+            assertEquals(listOf(failure), fakeSessions.teardownFailures)
+            assertEquals(1, fakeSessions.idleCount)
+
+            // A later, fresh Start is accepted normally — the coordinator is not wedged.
+            val freshSession = runner.start()
+            assertNotNull(freshSession)
+            assertEquals(2, fakeSessions.createdGenerations.size)
+        }
 }
 
 /** A no-op [kotlinx.coroutines.CoroutineScope] for the handful of tests above that never actually
