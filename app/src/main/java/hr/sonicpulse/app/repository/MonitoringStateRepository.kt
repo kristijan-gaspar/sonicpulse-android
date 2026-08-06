@@ -17,6 +17,9 @@ interface MonitoringStateRepository {
     fun monitoringStarted()
     fun monitoringStopped()
     fun monitoringFailed(error: AudioCaptureError)
+    /** A processing-boundary failure (engine/logger/detection construction) — never a genuine
+     * AudioRecorder capture failure, see [hr.sonicpulse.app.data.audio.AudioCaptureError]. */
+    fun monitoringProcessingFailed()
     fun monitoringStartupFailed(failure: MonitoringStartupFailure)
     fun publishMetrics(metrics: BlockMetrics)
     fun localDetectionOccurred(detection: SessionDetection)

@@ -22,6 +22,10 @@ data class MonitoringState(
     val localDetectionCount: Int = 0,
     val captureError: AudioCaptureError? = null,
     val startupError: MonitoringStartupFailure? = null,
+    /** Set when a bug in block processing (engine, session logging, detection construction —
+     * never AudioRecorder itself) forced the session to stop. Kept distinct from [captureError]
+     * so the two are never conflated in diagnostics or in the message shown to the user. */
+    val processingError: Boolean = false,
     /** Bumped on every monitoringFailed/monitoringStartupFailed call, even repeats of the same
      * failure — lets the UI re-show a one-shot error notification instead of keying purely off
      * captureError/startupError's value, which wouldn't change for two identical failures in a row. */

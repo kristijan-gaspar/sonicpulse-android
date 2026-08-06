@@ -68,6 +68,7 @@
 
     <!-- Monitoring — transient error snackbar -->
     <string name="error_capture_generic">Audio capture stopped unexpectedly</string>
+    <string name="error_processing_generic">Monitoring stopped due to an internal error</string>
     <string name="error_startup_microphone_denied">Microphone permission was not granted</string>
     <string name="error_startup_location_denied">Location permission was not granted</string>
     <string name="error_startup_location_services_disabled">Location services are turned off</string>

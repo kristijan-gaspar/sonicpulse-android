@@ -28,7 +28,9 @@ import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
 import hr.sonicpulse.engine.EngineConfig
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,6 +39,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Owns the active monitoring process: audio capture and engine processing run synchronously on
@@ -89,6 +92,12 @@ class MonitoringService : Service() {
     private var firstBlockInstant: Instant? = null
     private var locationPollingJob: Job? = null
 
+    /** Guards against reporting (and tearing down for) more than one processing failure per
+     * session — set on the capture thread the instant one occurs, so every block after it is
+     * skipped instead of being fed to a possibly corrupt engine/logger while the async teardown
+     * this triggers is still pending. Reset per session in [startAudioCapture]. */
+    private val processingFailureReported = AtomicBoolean(false)
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -104,19 +113,27 @@ class MonitoringService : Service() {
     override fun onDestroy() {
         val effect = lifecycleCoordinator.onStopOrDestroy()
         refreshCoordinator.invalidate()
-        if (effect is MonitoringLifecycleEffect.StopSession) {
-            sessionCoordinator.endSession(effect.wasActive)
-            tearDownCaptureAndLocation()
-            // After teardown, not alongside it: tearDownCaptureAndLocation() is what actually
-            // blocks until the audio capture thread has fully drained, so finishing the session
-            // log here (not earlier) guarantees no onBlock() call can still be in flight.
-            detectionSessionLogger.finishSession()
+        // onDestroy() itself cannot suspend, and tearDownCaptureAndLocation() must never block
+        // the main thread it runs on (it waits, off-thread with a bounded timeout, for the
+        // capture thread to drain) — so the actual work is dispatched onto serviceScope and this
+        // callback returns immediately, per the Android contract that Service lifecycle callbacks
+        // must not block. serviceScope.cancel() only runs as the last step of that launched
+        // coroutine (not synchronously here), so it stays alive long enough to finish teardown.
+        serviceScope.launch {
+            if (effect is MonitoringLifecycleEffect.StopSession) {
+                sessionCoordinator.endSession(effect.wasActive)
+                tearDownCaptureAndLocation()
+                // After teardown, not alongside it: tearDownCaptureAndLocation() is what actually
+                // drains the audio capture thread, so finishing the session log here (not
+                // earlier) guarantees no onBlock() call can still be in flight.
+                detectionSessionLogger.finishSession()
+            }
+            // Normal teardown only — gives every still-Pending detection
+            // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
+            // Idempotent: a no-op if nothing is retained and Pending.
+            monitoringStateRepository.cancelPendingSubmissions()
+            serviceScope.cancel()
         }
-        // Normal teardown only — gives every still-Pending detection
-        // a terminal Failed(Cancelled) result before the coroutine scope that would submit it dies.
-        // Idempotent: a no-op if nothing is retained and Pending.
-        monitoringStateRepository.cancelPendingSubmissions()
-        serviceScope.cancel()
         super.onDestroy()
     }
 
@@ -198,6 +215,7 @@ class MonitoringService : Service() {
 
     private fun startAudioCapture() {
         firstBlockInstant = null
+        processingFailureReported.set(false)
         // Only prepares the log session — it is not genuinely activated (and does not disturb a
         // previously completed, still-exportable session) until the first real block arrives via
         // onBlock() in handleBlock() below. See DetectionSessionLogger's KDoc.
@@ -216,15 +234,18 @@ class MonitoringService : Service() {
         // own start() call returns) always has the last word on repository state.
         sessionCoordinator.startSession(
             startCapture = { onBlock, onError -> recorder.start(onBlock, onError) },
-            onBlock = { block -> handleBlock(engine, block) },
+            onBlock = { block -> handleBlockSafely(engine, block) },
             onCaptureError = { error -> serviceScope.launch { handleCaptureError(error) } }
         )
 
         // serviceScope uses Dispatchers.Main.immediate, so a synchronous capture failure (recorder
-        // calling onError before recorder.start() itself returns) runs handleCaptureError() inline
-        // — including tearDownCaptureAndLocation() — before this line, while locationPollingJob is
-        // still null (it's assigned below). That teardown can therefore never cancel a job that
-        // doesn't exist yet: only start polling if the session is genuinely still ACTIVE here.
+        // calling onError before recorder.start() itself returns) runs handleCaptureError() inline,
+        // synchronously, up through its first suspension point — which includes the
+        // lifecycleCoordinator.onStopOrDestroy() call that moves state back to IDLE, so that has
+        // already happened by this line even though the rest of the teardown (which hops onto
+        // Dispatchers.IO to close the recorder) continues asynchronously after it. locationPollingJob
+        // is still null here either way (it's assigned below): only start polling if the session is
+        // genuinely still ACTIVE, which this check reflects correctly regardless.
         if (lifecycleCoordinator.state != MonitoringLifecycleState.ACTIVE) {
             return
         }
@@ -240,6 +261,36 @@ class MonitoringService : Service() {
                     servicesEnabled = locationProvider.areLocationServicesEnabled()
                 )
                 delay(LOCATION_POLL_INTERVAL_MILLIS)
+            }
+        }
+    }
+
+    /**
+     * The boundary between AudioRecorder's dedicated capture thread and this service's own
+     * block-processing logic. AudioRecorder must only ever see genuine capture failures
+     * (init/permission/read/lifecycle) — never a bug in [DetectionEngine.process], the session
+     * logger, or detection construction, which would otherwise escape as
+     * [AudioCaptureError.Unexpected] and be misreported as a microphone hardware failure. Those
+     * are caught here instead and reported through the distinct processing-failure path.
+     *
+     * Runs synchronously on the capture thread, so this itself must stay synchronous; the
+     * teardown it triggers is dispatched onto [serviceScope]. [CancellationException] is never
+     * caught here — coroutine cancellation must keep propagating normally.
+     */
+    private fun handleBlockSafely(engine: DetectionEngine, block: ShortArray) {
+        if (processingFailureReported.get()) {
+            // Already failing and tearing down asynchronously — do not feed a possibly corrupt
+            // engine/logger any further blocks while that teardown is still pending.
+            return
+        }
+        try {
+            handleBlock(engine, block)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (processingFailureReported.compareAndSet(false, true)) {
+                Log.e(TAG, "Block processing failed; stopping the session", e)
+                serviceScope.launch { handleProcessingError() }
             }
         }
     }
@@ -286,7 +337,7 @@ class MonitoringService : Service() {
         }
     }
 
-    private fun handleCaptureError(error: AudioCaptureError) {
+    private suspend fun handleCaptureError(error: AudioCaptureError) {
         // monitoringFailed(error) has already been published by MonitoringSessionCoordinator
         // (synchronously, inside the onError it wraps) — this only does the Service-specific
         // cleanup that must run on this service's own coordinating thread.
@@ -298,6 +349,21 @@ class MonitoringService : Service() {
         }
         // false, not effect.wasActive: an error already fully describes the terminal state via
         // monitoringFailed() above — a monitoringStopped() call here must not run alongside it.
+        sessionCoordinator.endSession(wasActiveBeforeTeardown = false)
+        tearDownCaptureAndLocation()
+        detectionSessionLogger.finishSession()
+        stopForegroundCompat()
+        stopSelf()
+    }
+
+    /** Same shape as [handleCaptureError], for a processing (not capture) failure detected by
+     * [handleBlockSafely] — see its KDoc for why the two are kept distinct. */
+    private suspend fun handleProcessingError() {
+        val effect = lifecycleCoordinator.onStopOrDestroy()
+        if (effect !is MonitoringLifecycleEffect.StopSession) {
+            return
+        }
+        monitoringStateRepository.monitoringProcessingFailed()
         sessionCoordinator.endSession(wasActiveBeforeTeardown = false)
         tearDownCaptureAndLocation()
         detectionSessionLogger.finishSession()
@@ -365,29 +431,43 @@ class MonitoringService : Service() {
     private fun stopMonitoringAndService() {
         val effect = lifecycleCoordinator.onStopOrDestroy()
         refreshCoordinator.invalidate()
-        if (effect is MonitoringLifecycleEffect.StopSession) {
-            sessionCoordinator.endSession(effect.wasActive)
-            tearDownCaptureAndLocation()
-            // See onDestroy(): after teardown, not alongside it, so the audio thread is
-            // guaranteed drained before the session log is finalized.
-            detectionSessionLogger.finishSession()
+        // Dispatched onto serviceScope for the same reason as onDestroy(): tearDownCaptureAndLocation()
+        // must never block the caller (here, whatever thread delivered the Stop intent's
+        // onStartCommand()), so the actual work runs off it entirely.
+        serviceScope.launch {
+            if (effect is MonitoringLifecycleEffect.StopSession) {
+                sessionCoordinator.endSession(effect.wasActive)
+                tearDownCaptureAndLocation()
+                // See onDestroy(): after teardown, not alongside it, so the audio thread is
+                // guaranteed drained before the session log is finalized.
+                detectionSessionLogger.finishSession()
+            }
+            // Capture/location are stopped above first, so the audio thread cannot publish another
+            // detection after this point — only then is it safe to give every still-Pending detection
+            // a terminal Failed(Cancelled) result. Outside the StopSession branch (and thus independent
+            // of it) and idempotent, so repeated or stale Stop handling stays safe; onDestroy() below
+            // still calls this too, as a defensive fallback for teardown paths that don't go through here.
+            monitoringStateRepository.cancelPendingSubmissions()
+            stopForegroundCompat()
+            stopSelf()
         }
-        // Capture/location are stopped above first, so the audio thread cannot publish another
-        // detection after this point — only then is it safe to give every still-Pending detection
-        // a terminal Failed(Cancelled) result. Outside the StopSession branch (and thus independent
-        // of it) and idempotent, so repeated or stale Stop handling stays safe; onDestroy() below
-        // still calls this too, as a defensive fallback for teardown paths that don't go through here.
-        monitoringStateRepository.cancelPendingSubmissions()
-        stopForegroundCompat()
-        stopSelf()
     }
 
-    private fun tearDownCaptureAndLocation() {
+    /**
+     * Stops location updates and closes the audio recorder. [AudioRecorder.close] waits, with a
+     * bounded timeout, for the capture thread to drain — never indefinitely, but still a genuine
+     * wait — so it must never run on the main thread; [withContext] moves just that call onto a
+     * background dispatcher and resumes here once it returns.
+     */
+    private suspend fun tearDownCaptureAndLocation() {
         locationPollingJob?.cancel()
         locationPollingJob = null
         locationProvider.stop()
-        audioRecorder?.close()
+        val recorder = audioRecorder
         audioRecorder = null
+        withContext(Dispatchers.IO) {
+            recorder?.close()
+        }
     }
 
     private fun createNotificationChannelIfNeeded() {
