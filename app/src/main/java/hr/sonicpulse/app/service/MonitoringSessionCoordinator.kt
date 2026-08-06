@@ -21,14 +21,22 @@ class MonitoringSessionCoordinator(
     private val monitoringStateRepository: MonitoringStateRepository
 ) {
     fun startSession(
-        startCapture: (onBlock: (ShortArray) -> Unit, onError: (AudioCaptureError) -> Unit) -> Unit,
+        startCapture: (
+            onBlock: (ShortArray) -> Unit,
+            onError: (AudioCaptureError) -> Unit
+        ) -> Unit,
         onBlock: (ShortArray) -> Unit,
-        onCaptureError: (AudioCaptureError) -> Unit
+        onCaptureError: (AudioCaptureError) -> Unit,
+        shouldHandleCaptureError: () -> Boolean = { true }
     ) {
         monitoringStateRepository.monitoringStarted()
+
         startCapture(onBlock) { error ->
-            monitoringStateRepository.monitoringFailed(error)
-            onCaptureError(error)
+
+            if (shouldHandleCaptureError()) {
+                monitoringStateRepository.monitoringFailed(error)
+                onCaptureError(error)
+            }
         }
     }
 

@@ -77,4 +77,36 @@ class SelectedHotspotFromTest {
     fun `an empty hotspot list with a selection returns null`() {
         assertNull(selectedHotspotFrom(emptyList(), selectedId = UUID.randomUUID()))
     }
+
+    @Test
+    fun `a selection is retained while its hotspot remains loaded`() {
+        val target = hotspot()
+
+        val result = retainedSelectedHotspotId(
+            hotspots = listOf(target),
+            selectedId = target.id
+        )
+
+        assertEquals(target.id, result)
+    }
+
+    @Test
+    fun `a removed selection stays cleared if the same hotspot later reappears`() {
+        val target = hotspot()
+        var selectedId: UUID? = target.id
+
+        selectedId = retainedSelectedHotspotId(
+            hotspots = emptyList(),
+            selectedId = selectedId
+        )
+
+        assertNull(selectedId)
+
+        selectedId = retainedSelectedHotspotId(
+            hotspots = listOf(target),
+            selectedId = selectedId
+        )
+
+        assertNull(selectedId)
+    }
 }

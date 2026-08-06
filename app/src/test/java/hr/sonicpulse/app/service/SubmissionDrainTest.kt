@@ -1,14 +1,16 @@
 package hr.sonicpulse.app.service
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withContext
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.Job
+import org.junit.Assert.assertEquals
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SubmissionDrainTest {
@@ -84,30 +86,73 @@ class SubmissionDrainTest {
     }
 
     @Test
-    fun `a job that never cooperates with cancellation still causes await to return within the grace bound`() = runTest {
-        val job = launch {
-            withContext(NonCancellable) {
-                delay(Long.MAX_VALUE) // ignores the cancel() SubmissionDrain issues after the timeout
-            }
-        }
+    fun `an uncooperative job cannot make the grace wait unbounded`() = runTest {
+        val job = NonCooperativeJob()
+        val startedAt = testScheduler.currentTime
 
-        // Reaching this line at all is the assertion: without a bounded second wait, this would
-        // hang forever waiting for a job that structurally cannot honor cancellation.
-        SubmissionDrain.await(listOf(job), timeoutMillis, graceMillis)
+        SubmissionDrain.await(
+            jobs = listOf(job),
+            timeoutMillis = timeoutMillis,
+            cancellationGraceMillis = graceMillis
+        )
 
-        assertTrue("cancellation was requested even though the job couldn't honor it", job.isCancelled)
-        job.cancel() // let the leftover coroutine actually wind down so runTest's own cleanup succeeds
+        assertTrue(job.cancellationRequested)
+        assertTrue(job.isActive)
+
+        assertEquals(
+            timeoutMillis + graceMillis,
+            testScheduler.currentTime - startedAt
+        )
+
+        job.finish()
     }
 
     @Test
-    fun `the grace wait itself is bounded even when every active job is uncooperative`() = runTest {
+    fun `multiple uncooperative jobs cannot make the grace wait unbounded`() = runTest {
         val jobs = List(3) {
-            launch { withContext(NonCancellable) { delay(Long.MAX_VALUE) } }
+            NonCooperativeJob()
         }
 
-        SubmissionDrain.await(jobs, timeoutMillis, graceMillis)
+        val startedAt = testScheduler.currentTime
 
-        jobs.forEach { assertTrue(it.isCancelled) }
-        jobs.forEach { it.cancel() }
+        SubmissionDrain.await(
+            jobs = jobs,
+            timeoutMillis = timeoutMillis,
+            cancellationGraceMillis = graceMillis
+        )
+
+        jobs.forEach { job ->
+            assertTrue(job.cancellationRequested)
+            assertTrue(job.isActive)
+        }
+
+        assertEquals(
+            timeoutMillis + graceMillis,
+            testScheduler.currentTime - startedAt
+        )
+
+        jobs.forEach { job ->
+            job.finish()
+        }
     }
+    private class NonCooperativeJob(
+        private val delegate: CompletableJob = Job()
+    ) : Job by delegate {
+
+        var cancellationRequested: Boolean = false
+            private set
+
+        /*
+         * Namjerno bilježimo cancellation, ali ne završavamo delegate.
+         * Time simuliramo posao koji ne surađuje s otkazivanjem.
+         */
+        override fun cancel(cause: CancellationException?) {
+            cancellationRequested = true
+        }
+
+        fun finish() {
+            delegate.complete()
+        }
+    }
+
 }

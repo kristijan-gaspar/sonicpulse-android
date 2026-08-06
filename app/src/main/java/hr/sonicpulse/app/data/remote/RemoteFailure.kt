@@ -4,6 +4,7 @@ import java.io.IOException
 import java.time.format.DateTimeParseException
 import kotlinx.serialization.SerializationException
 import retrofit2.HttpException
+import kotlinx.coroutines.CancellationException
 
 /**
  * A remote (HTTP/network/parsing) failure classified into the buckets the UI actually needs to
@@ -33,6 +34,7 @@ sealed interface RemoteFailure {
      * validation (e.g. an out-of-range coordinate) — a backend/protocol problem either way, never
      * silently coerced into a default value. */
     data object InvalidResponse : RemoteFailure
+    data object Unknown : RemoteFailure
 }
 
 /**
@@ -47,18 +49,21 @@ object RemoteFailureClassifier {
     private const val RETRY_AFTER_HEADER = "Retry-After"
 
     fun classify(throwable: Throwable): RemoteFailure = when (throwable) {
+        is CancellationException -> throw throwable
+
         is HttpException -> classifyHttpCode(
             httpCode = throwable.code(),
-            retryAfterHeader = throwable.response()?.headers()?.get(RETRY_AFTER_HEADER)
+            retryAfterHeader = throwable.response()
+                ?.headers()
+                ?.get(RETRY_AFTER_HEADER)
         )
-        // SerializationException extends IllegalArgumentException, so it must be checked first —
-        // both a malformed-JSON parse failure and a mapper's require() validation failure land in
-        // the same InvalidResponse bucket regardless of which one actually threw.
+
         is SerializationException -> RemoteFailure.InvalidResponse
         is IllegalArgumentException -> RemoteFailure.InvalidResponse
         is DateTimeParseException -> RemoteFailure.InvalidResponse
         is IOException -> RemoteFailure.Network
-        else -> throw throwable
+
+        else -> RemoteFailure.Unknown
     }
 
     private fun classifyHttpCode(httpCode: Int, retryAfterHeader: String?): RemoteFailure = when {

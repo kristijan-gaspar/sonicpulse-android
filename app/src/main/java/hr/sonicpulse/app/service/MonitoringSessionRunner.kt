@@ -81,29 +81,50 @@ class MonitoringSessionRunner<S>(
      * launched on [scope].
      */
     fun stop(): Job {
-        teardownJob?.let { existing -> if (existing.isActive) return existing }
 
         val effect = lifecycleCoordinator.onStopOrDestroy()
-        val sessionToTearDown = if (effect is MonitoringLifecycleEffect.StopSession) currentSession else null
-        val wasActive = (effect as? MonitoringLifecycleEffect.StopSession)?.wasActive ?: false
-        // Ownership handoff happens synchronously, right here — before the coroutine below ever
-        // suspends — so currentSession is never the old session by the time anything else could
-        // observe it.
+
+        teardownJob?.let { existing ->
+            if (existing.isActive) {
+                return existing
+            }
+        }
+
+        val stopEffect = effect as? MonitoringLifecycleEffect.StopSession
+        val sessionToTearDown = stopEffect?.let { currentSession }
+        val wasActive = stopEffect?.wasActive ?: false
+
         currentSession = null
 
         val job = scope.launch {
-            sessions.tearDown(sessionToTearDown, wasActive)
+            sessions.tearDown(
+                session = sessionToTearDown,
+                wasActive = wasActive
+            )
+
             when (val resolved = lifecycleCoordinator.onTeardownComplete()) {
                 is MonitoringLifecycleEffect.StartLocation -> {
                     val newSession = sessions.create(resolved.generation)
                     currentSession = newSession
-                    sessions.onRestart(resolved.generation, newSession)
+
+                    sessions.onRestart(
+                        generation = resolved.generation,
+                        session = newSession
+                    )
                 }
+
                 else -> sessions.onIdle()
             }
         }
+
         teardownJob = job
-        job.invokeOnCompletion { if (teardownJob === job) teardownJob = null }
+
+        job.invokeOnCompletion {
+            if (teardownJob === job) {
+                teardownJob = null
+            }
+        }
+
         return job
     }
 
@@ -113,7 +134,9 @@ class MonitoringSessionRunner<S>(
      * [MonitoringLifecycleCoordinator.onSynchronousStartupAbort]). Must only be called
      * synchronously, immediately after a [start] that returned non-null but then failed before
      * anything async began. */
-    fun discardStarting() {
-        currentSession = null
+    fun discardStarting(expectedSession: S) {
+        if (currentSession === expectedSession) {
+            currentSession = null
+        }
     }
 }

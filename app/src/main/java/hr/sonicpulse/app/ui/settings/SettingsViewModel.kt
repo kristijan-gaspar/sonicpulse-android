@@ -73,7 +73,11 @@ class SettingsViewModel @Inject constructor(
             _installationId.value = try {
                 installationIdRepository.getOrCreate()
             } catch (e: IOException) {
-                Log.w(TAG, "Failed to read or create the installation id")
+                Log.w(
+                    TAG,
+                    "Failed to read or create the installation id",
+                    e
+                )
                 null
             }
         }

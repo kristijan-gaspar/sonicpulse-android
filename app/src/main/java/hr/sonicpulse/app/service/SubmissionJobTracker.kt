@@ -34,7 +34,13 @@ class SubmissionJobTracker {
     fun register(localEventId: UUID, job: Job): Boolean = synchronized(lock) {
         if (closed) return@synchronized false
         jobs[localEventId] = job
-        job.invokeOnCompletion { synchronized(lock) { jobs.remove(localEventId) } }
+        job.invokeOnCompletion {
+            synchronized(lock) {
+                if (jobs[localEventId] === job) {
+                    jobs.remove(localEventId)
+                }
+            }
+        }
         true
     }
 

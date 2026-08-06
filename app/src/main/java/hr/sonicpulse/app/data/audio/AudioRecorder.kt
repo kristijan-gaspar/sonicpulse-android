@@ -289,7 +289,11 @@ class AudioRecorder(
         } catch (e: RuntimeException) {
             // Already stopped, never started, or another platform quirk — the read loop will
             // exit on its own via stopRequested, and must not prevent the wait/cleanup below.
-            Log.w(TAG, "AudioRecord.stop() failed while requesting shutdown: ${e.javaClass.simpleName}")
+            Log.w(
+                TAG,
+                "AudioRecord.stop() failed while requesting shutdown",
+                e
+            )
         }
         when (current.shutdownGate.awaitUpTo(STOP_TIMEOUT_MILLIS, Thread.currentThread(), current.workerThread)) {
             AudioCaptureShutdownGate.AwaitResult.TIMED_OUT ->

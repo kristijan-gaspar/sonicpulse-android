@@ -163,6 +163,23 @@ class DetectionsViewModelTest {
     }
 
     @Test
+    fun `an unexpected initial failure produces a generic error instead of escaping`() =
+        runTest(testDispatcher) {
+            val repository = FakeDetectionsRepository().apply {
+                throwOnGetPage = IllegalStateException("unexpected internal failure")
+            }
+            val viewModel = DetectionsViewModel(repository)
+
+            viewModel.refresh()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+
+            assertTrue(state.initialError)
+            assertFalse(state.isInitialLoading)
+            assertFalse(state.initialErrorServerConfiguration)
+        }
+    @Test
     fun `a successful initial load replaces the loading state with data`() = runTest(testDispatcher) {
         val repository = FakeDetectionsRepository().apply {
             pages = mapOf(null to DetectionPage(items = listOf(detection()), nextCursor = null))
@@ -1151,6 +1168,36 @@ class DetectionsViewModelTest {
         assertEquals(listTimestampTextFor(receivedAt, zone, locale), item.listTimestampText)
         assertEquals(detailTimestampTextFor(receivedAt, zone, locale), item.detailTimestampText)
     }
+
+    @Test
+    fun `starting a refresh clears a stale paging server-configuration flag`() =
+        runTest(testDispatcher) {
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(
+                    null to DetectionPage(
+                        items = listOf(detection()),
+                        nextCursor = 1L
+                    )
+                )
+            }
+
+            val viewModel = viewModelWithInitialRefresh(repository)
+            advanceUntilIdle()
+
+            repository.throwOnGetPage = httpException(401)
+
+            viewModel.loadNextPage()
+            advanceUntilIdle()
+
+            check(viewModel.uiState.value.pagingError)
+    check(viewModel.uiState.value.pagingErrorServerConfiguration)
+            viewModel.refresh()
+
+            val state = viewModel.uiState.value
+
+            assertFalse(state.pagingError)
+            assertFalse(state.pagingErrorServerConfiguration)
+        }
 }
 
 /** Lets a test control exactly when each `getDetectionsPage` call resolves, to prove genuine

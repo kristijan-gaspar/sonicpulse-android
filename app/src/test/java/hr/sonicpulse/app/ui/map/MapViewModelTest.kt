@@ -156,6 +156,29 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `an unexpected initial failure produces a generic error instead of escaping`() =
+        runTest(testDispatcher) {
+            val repository = FakeHotspotsRepository().apply {
+                throwOnGetHotspots =
+                    IllegalStateException("unexpected internal failure")
+            }
+
+            val viewModel = MapViewModel(
+                repository,
+                FakePermissionRequestHistory()
+            )
+
+            viewModel.onScreenEntered()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+
+            assertTrue(state.initialError)
+            assertFalse(state.isInitialLoading)
+            assertFalse(state.initialErrorServerConfiguration)
+        }
+
+    @Test
     fun `successful initial load commits 24 hours`() = runTest(testDispatcher) {
         val repository = FakeHotspotsRepository().apply {
             hotspots = mapOf(24 to listOf(hotspot()))

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.util.Log
 
 /** Which operation a failed subsequent (post-initial) load was — so [MapViewModel.retry] repeats
  * the operation that actually failed, rather than always falling back to a plain refresh. */
@@ -158,9 +159,8 @@ class MapViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
-                val isServerConfiguration = RemoteFailureClassifier.classify(e) is RemoteFailure.Unauthorized
-                // committedRange/loadedHotspots are untouched on failure — a failed range change
-                // therefore automatically "reverts" simply by never having been committed.
+                val failure = classifyRemoteFailure(e)
+                val isServerConfiguration = failure is RemoteFailure.Unauthorized
                 if (isFirstLoad) {
                     isInitialRequestActive = false
                     publishState(
@@ -208,5 +208,25 @@ class MapViewModel @Inject constructor(
             initialErrorServerConfiguration = initialErrorServerConfiguration,
             subsequentErrorServerConfiguration = subsequentErrorServerConfiguration
         )
+    }
+
+    private fun classifyRemoteFailure(
+        throwable: Throwable
+    ): RemoteFailure {
+        val failure = RemoteFailureClassifier.classify(throwable)
+
+        if (failure is RemoteFailure.Unknown) {
+            Log.e(
+                TAG,
+                "Unexpected map request failure",
+                throwable
+            )
+        }
+
+        return failure
+    }
+
+    private companion object {
+        const val TAG = "MapViewModel"
     }
 }

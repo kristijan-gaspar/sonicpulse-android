@@ -102,29 +102,71 @@ class SubmissionJobTrackerTest {
     }
 
     @Test
-    fun `concurrent register and closeAndSnapshot from different threads never lose or duplicate a job`() {
+    fun `concurrent register and closeAndSnapshot account for every accepted job exactly once`() {
         val tracker = SubmissionJobTracker()
-        val jobCount = 300
-        val jobs = (0 until jobCount).map { UUID.randomUUID() to Job() }
-        val executor = Executors.newFixedThreadPool(8)
-        val allAttempted = CountDownLatch(jobCount)
-        val accepted = java.util.Collections.synchronizedList(mutableListOf<Job>())
+        val jobCount = 200
+        val jobs = List(jobCount) {
+            UUID.randomUUID() to Job()
+        }
 
-        jobs.forEach { (id, job) ->
+        val executor = Executors.newFixedThreadPool(16)
+        val startGate = CountDownLatch(1)
+        val finished = CountDownLatch(jobCount + 1)
+
+        val acceptedJobs =
+            java.util.Collections.synchronizedList(mutableListOf<Job>())
+
+        val snapshotReference =
+            java.util.concurrent.atomic.AtomicReference<List<Job>>(emptyList())
+
+        fun submitRegistration(id: UUID, job: Job) {
             executor.submit {
-                if (tracker.register(id, job)) accepted += job
-                allAttempted.countDown()
+                try {
+                    startGate.await()
+
+                    if (tracker.register(id, job)) {
+                        acceptedJobs += job
+                    }
+                } finally {
+                    finished.countDown()
+                }
             }
         }
-        assertTrue(allAttempted.await(5, TimeUnit.SECONDS))
 
-        val snapshot = tracker.closeAndSnapshot()
+        jobs.take(8).forEach { (id, job) ->
+            submitRegistration(id, job)
+        }
 
-        // Every job that was accepted must be exactly-once accounted for: either still active in
-        // the snapshot, or none were completed here so all of them must be in it.
-        assertEquals(accepted.toSet(), snapshot.toSet())
-        accepted.forEach { it.cancel() }
-        executor.shutdown()
+        executor.submit {
+            try {
+                startGate.await()
+                snapshotReference.set(tracker.closeAndSnapshot())
+            } finally {
+                finished.countDown()
+            }
+        }
+
+        jobs.drop(8).forEach { (id, job) ->
+            submitRegistration(id, job)
+        }
+
+        startGate.countDown()
+
+        assertTrue(
+            "Concurrent operations did not finish in time",
+            finished.await(5, TimeUnit.SECONDS)
+        )
+
+        val snapshot = snapshotReference.get()
+
+        assertEquals(acceptedJobs.toSet(), snapshot.toSet())
+        assertEquals(acceptedJobs.size, snapshot.size)
+
+        jobs.forEach { (_, job) ->
+            job.cancel()
+        }
+
+        executor.shutdownNow()
     }
 
     @Test
@@ -140,5 +182,29 @@ class SubmissionJobTrackerTest {
 
         assertFalse(accepted)
         assertTrue(tracker.closeAndSnapshot().isEmpty())
+    }
+
+    @Test
+    fun `completion of an older job does not remove a newer job registered with the same id`() {
+        val tracker = SubmissionJobTracker()
+        val localEventId = UUID.randomUUID()
+
+        val olderJob: CompletableJob = Job()
+        val newerJob: CompletableJob = Job()
+
+        assertTrue(tracker.register(localEventId, olderJob))
+        assertTrue(tracker.register(localEventId, newerJob))
+
+        /*
+         * Završetak starijeg Joba ne smije ukloniti noviji Job
+         * koji je u međuvremenu registriran pod istim ID-em.
+         */
+        olderJob.complete()
+
+        val snapshot = tracker.closeAndSnapshot()
+
+        assertEquals(listOf(newerJob), snapshot)
+
+        newerJob.complete()
     }
 }

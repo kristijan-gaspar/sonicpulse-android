@@ -171,6 +171,40 @@ class MonitoringSessionRunnerTest {
     }
 
     @Test
+    fun `Stop during teardown clears a queued restart and reuses the teardown job`() =
+        runTest(testDispatcher) {
+            val gate = CompletableDeferred<Unit>()
+            val fakeSessions = FakeSessions(tearDownGate = gate)
+            val runner = MonitoringSessionRunner(
+                MonitoringLifecycleCoordinator(),
+                this,
+                fakeSessions
+            )
+
+            runner.start()
+
+            val firstStop = runner.stop()
+            testScheduler.runCurrent()
+
+            // Start tijekom teardow­na ne pokreće novu sesiju odmah,
+            // nego samo zapisuje pending restart.
+            runner.start()
+
+            // Drugi Stop mora poništiti taj pending restart,
+            // ali ponovno koristiti već postojeći teardown Job.
+            val secondStop = runner.stop()
+
+            assertSame(firstStop, secondStop)
+
+            gate.complete(Unit)
+            firstStop.join()
+
+            assertNull(runner.currentSession)
+            assertEquals(0, fakeSessions.restartCount)
+            assertEquals(1, fakeSessions.idleCount)
+        }
+
+    @Test
     fun `stop with nothing started is a safe no-op that still resolves to idle`() = runTest(testDispatcher) {
         val fakeSessions = FakeSessions()
         val runner = MonitoringSessionRunner(MonitoringLifecycleCoordinator(), this, fakeSessions)
@@ -183,13 +217,37 @@ class MonitoringSessionRunnerTest {
     }
 
     @Test
-    fun `discardStarting forgets the session without tearing anything down`() {
-        val runner = MonitoringSessionRunner(MonitoringLifecycleCoordinator(), TestScopeStub, FakeSessions())
-        runner.start()
+    fun `discardStarting forgets the expected session without tearing it down`() {
+        val runner = MonitoringSessionRunner(
+            MonitoringLifecycleCoordinator(),
+            TestScopeStub,
+            FakeSessions()
+        )
 
-        runner.discardStarting()
+        val session = runner.start()
+        requireNotNull(session)
+
+        runner.discardStarting(session)
 
         assertNull(runner.currentSession)
+    }
+
+    @Test
+    fun `discardStarting does not remove a different current session`() {
+        val runner = MonitoringSessionRunner(
+            MonitoringLifecycleCoordinator(),
+            TestScopeStub,
+            FakeSessions()
+        )
+
+        val currentSession = runner.start()
+        requireNotNull(currentSession)
+
+        val staleSession = FakeSession(generation = currentSession.generation - 1)
+
+        runner.discardStarting(staleSession)
+
+        assertSame(currentSession, runner.currentSession)
     }
 
     @Test

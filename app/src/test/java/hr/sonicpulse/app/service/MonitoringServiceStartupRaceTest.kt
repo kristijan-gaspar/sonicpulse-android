@@ -17,7 +17,7 @@ import org.junit.Test
 class MonitoringServiceStartupRaceTest {
 
     @Test
-    fun `a synchronous capture failure during startup leaves the coordinator IDLE, not ACTIVE`() {
+    fun `a synchronous capture failure during startup leaves the coordinator STOPPING, not ACTIVE`() {
         val repository = FakeMonitoringStateRepository()
         val lifecycleCoordinator = MonitoringLifecycleCoordinator()
         val sessionCoordinator = MonitoringSessionCoordinator(repository)
@@ -34,7 +34,7 @@ class MonitoringServiceStartupRaceTest {
             onCaptureError = { lifecycleCoordinator.onStopOrDestroy() }
         )
 
-        assertEquals(MonitoringLifecycleState.IDLE, lifecycleCoordinator.state)
+        assertEquals(MonitoringLifecycleState.STOPPING, lifecycleCoordinator.state)
     }
 
     @Test
@@ -55,7 +55,7 @@ class MonitoringServiceStartupRaceTest {
     }
 
     @Test
-    fun `an explicit Stop racing in right after a successful start also leaves the coordinator IDLE`() {
+    fun `an explicit Stop racing in right after a successful start leaves the coordinator STOPPING`() {
         val repository = FakeMonitoringStateRepository()
         val lifecycleCoordinator = MonitoringLifecycleCoordinator()
         val sessionCoordinator = MonitoringSessionCoordinator(repository)
@@ -71,6 +71,6 @@ class MonitoringServiceStartupRaceTest {
         // wiring capture, before this service instance would have checked the guard.
         lifecycleCoordinator.onStopOrDestroy()
 
-        assertEquals(MonitoringLifecycleState.IDLE, lifecycleCoordinator.state)
+        assertEquals(MonitoringLifecycleState.STOPPING, lifecycleCoordinator.state)
     }
 }

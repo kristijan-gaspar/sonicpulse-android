@@ -26,7 +26,11 @@ class DefaultPermissionRequestHistory @Inject constructor(
         try {
             dataStore.data.first()[keyFor(permission)] ?: false
         } catch (e: IOException) {
-            Log.w(TAG, "Failed to read permission request history; treating as not yet requested")
+            Log.w(
+                TAG,
+                "Failed to read permission request history; treating as not yet requested",
+                e
+            )
             false
         }
 
@@ -34,7 +38,11 @@ class DefaultPermissionRequestHistory @Inject constructor(
         try {
             dataStore.edit { it[keyFor(permission)] = true }
         } catch (e: IOException) {
-            Log.w(TAG, "Failed to persist permission request history")
+            Log.w(
+                TAG,
+                "Failed to persist permission request history",
+                e
+            )
         }
     }
 

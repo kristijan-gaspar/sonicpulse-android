@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.util.Log
 
 private const val PAGE_SIZE = 50
 
@@ -96,7 +97,8 @@ class DetectionsViewModel @Inject constructor(
             refreshError = false,
             pagingError = false,
             initialErrorServerConfiguration = false,
-            refreshErrorServerConfiguration = false
+            refreshErrorServerConfiguration = false,
+            pagingErrorServerConfiguration = false
         )
 
         val job = viewModelScope.launch {
@@ -109,7 +111,8 @@ class DetectionsViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
-                val isServerConfiguration = RemoteFailureClassifier.classify(e) is RemoteFailure.Unauthorized
+                val failure = classifyRemoteFailure(e)
+                val isServerConfiguration = failure is RemoteFailure.Unauthorized
                 if (isFirstLoad) {
                     publishState(
                         isInitialLoading = false,
@@ -157,7 +160,8 @@ class DetectionsViewModel @Inject constructor(
             } catch (e: Exception) {
                 if (generation != myGeneration) return@launch
                 isLoadingNextPage = false
-                val isServerConfiguration = RemoteFailureClassifier.classify(e) is RemoteFailure.Unauthorized
+                val failure = classifyRemoteFailure(e)
+                val isServerConfiguration = failure is RemoteFailure.Unauthorized
                 publishState(isLoadingNextPage = false, pagingError = true, pagingErrorServerConfiguration = isServerConfiguration)
             }
         }
@@ -237,6 +241,26 @@ class DetectionsViewModel @Inject constructor(
             pagingErrorServerConfiguration = pagingErrorServerConfiguration,
             emptyState = emptyState
         )
+    }
+
+    private fun classifyRemoteFailure(
+        throwable: Throwable
+    ): RemoteFailure {
+        val failure = RemoteFailureClassifier.classify(throwable)
+
+        if (failure is RemoteFailure.Unknown) {
+            Log.e(
+                TAG,
+                "Unexpected detections request failure",
+                throwable
+            )
+        }
+
+        return failure
+    }
+
+    private companion object {
+        const val TAG = "DetectionsViewModel"
     }
 }
 

@@ -30,6 +30,36 @@ class MonitoringSessionCoordinatorTest {
     }
 
     @Test
+    fun `capture error is ignored when it no longer belongs to the current session`() {
+        val repository = FakeMonitoringStateRepository()
+        val coordinator = MonitoringSessionCoordinator(repository)
+        var errorForwarded = false
+
+        coordinator.startSession(
+            startCapture = { _, onError ->
+                onError(AudioCaptureError.PermissionDenied)
+            },
+            onBlock = { },
+            onCaptureError = {
+                errorForwarded = true
+            },
+            shouldHandleCaptureError = {
+                false
+            }
+        )
+
+        val state = repository.state.value
+
+        /*
+         * monitoringStarted() je pozvan, ali stale error nije smio
+         * promijeniti stanje u failed.
+         */
+        assertTrue(state.isMonitoring)
+        assertNull(state.captureError)
+        assertFalse(errorForwarded)
+    }
+
+    @Test
     fun `a successful capture start leaves monitoring active with no capture error`() {
         val repository = FakeMonitoringStateRepository()
         val coordinator = MonitoringSessionCoordinator(repository)

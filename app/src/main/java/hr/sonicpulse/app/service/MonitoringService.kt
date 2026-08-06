@@ -129,7 +129,7 @@ class MonitoringService : Service() {
             }
 
             override fun onRestart(generation: Long, session: MonitoringSession) {
-                beginLocationStart(generation)
+                continueStartup(session)
             }
         }
     )
@@ -171,6 +171,13 @@ class MonitoringService : Service() {
 
     private fun startMonitoringIfNeeded() {
         val session = sessionRunner.start() ?: return
+        continueStartup(session)
+    }
+
+    private fun continueStartup(session: MonitoringSession) {
+        if (sessionRunner.currentSession !== session) {
+            return
+        }
 
         val gate = MonitoringStartupGate(
             hasRecordAudioPermission = ::hasRecordAudioPermission,
@@ -178,9 +185,15 @@ class MonitoringService : Service() {
             areLocationServicesEnabled = locationProvider::areLocationServicesEnabled,
             startForeground = ::tryStartForeground
         )
+
         when (val result = gate.attemptStartup()) {
-            is MonitoringStartupResult.Failed -> abortStartup(result.failure)
-            MonitoringStartupResult.Proceed -> beginLocationStart(session.generation)
+            is MonitoringStartupResult.Failed -> {
+                abortStartup(session, result.failure)
+            }
+
+            MonitoringStartupResult.Proceed -> {
+                beginLocationStart(session.generation)
+            }
         }
     }
 
@@ -188,9 +201,16 @@ class MonitoringService : Service() {
      * nothing async was ever started, so there is nothing to tear down: goes straight back to
      * IDLE via [MonitoringLifecycleCoordinator.onSynchronousStartupAbort], never through
      * [sessionRunner]'s async teardown-then-resolve machinery. */
-    private fun abortStartup(failure: MonitoringStartupFailure) {
+    private fun abortStartup(
+        session: MonitoringSession,
+        failure: MonitoringStartupFailure
+    ) {
+        if (sessionRunner.currentSession !== session) {
+            return
+        }
+
         lifecycleCoordinator.onSynchronousStartupAbort()
-        sessionRunner.discardStarting()
+        sessionRunner.discardStarting(session)
         monitoringStateRepository.monitoringStartupFailed(failure)
         stopForegroundCompat()
         stopSelfResult(latestStartId)
@@ -233,18 +253,30 @@ class MonitoringService : Service() {
         }
     }
 
-    private fun handleLocationStartResult(generation: Long, result: LocationStartResult) {
+    private fun handleLocationStartResult(
+        generation: Long,
+        result: LocationStartResult
+    ) {
+        val session = sessionRunner.currentSession
+        if (session == null || session.generation != generation) {
+            return
+        }
+
         when (val effect = lifecycleCoordinator.onLocationStartResult(generation, result)) {
-            MonitoringLifecycleEffect.StartAudioCapture -> startAudioCapture(generation)
+            MonitoringLifecycleEffect.StartAudioCapture -> {
+                startAudioCapture(generation)
+            }
+
             is MonitoringLifecycleEffect.ReportStartupFailure -> {
                 monitoringStateRepository.monitoringStartupFailed(effect.failure)
                 stopForegroundCompat()
-                sessionRunner.discardStarting() // this generation never reached ACTIVE
+                sessionRunner.discardStarting(session)
                 stopSelfResult(latestStartId)
             }
+
             MonitoringLifecycleEffect.None,
             is MonitoringLifecycleEffect.StopSession,
-            is MonitoringLifecycleEffect.StartLocation -> Unit // stale callback or not applicable here; ignore
+            is MonitoringLifecycleEffect.StartLocation -> Unit
         }
     }
 
@@ -277,9 +309,20 @@ class MonitoringService : Service() {
         // and that a capture failure (even one AudioRecorder reports synchronously, before its
         // own start() call returns) always has the last word on repository state.
         sessionCoordinator.startSession(
-            startCapture = { onBlock, onError -> recorder.start(onBlock, onError) },
-            onBlock = { block -> handleBlockSafely(session, engine, block) },
-            onCaptureError = { error -> serviceScope.launch { handleCaptureError(session, error) } }
+            startCapture = { onBlock, onError ->
+                recorder.start(onBlock, onError)
+            },
+            onBlock = { block ->
+                handleBlockSafely(session, engine, block)
+            },
+            onCaptureError = { error ->
+                serviceScope.launch {
+                    handleCaptureError(session, error)
+                }
+            },
+            shouldHandleCaptureError = {
+                sessionRunner.currentSession === session
+            }
         )
 
         if (lifecycleCoordinator.state != MonitoringLifecycleState.ACTIVE) {

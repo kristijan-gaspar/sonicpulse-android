@@ -190,11 +190,32 @@ internal fun MapContent(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Only the id is retained across recompositions — the actual Hotspot is re-derived from
-    // uiState.hotspots below on every recomposition, so an open detail sheet always reflects
-    // the latest data (or closes outright if the hotspot is no longer in the list) instead of
-    // keeping showing whatever object was captured at the moment of the tap.
+    val locationDeniedMessage =
+        stringResource(R.string.map_location_denied)
+
+    val permissionPermanentlyDeniedMessage =
+        stringResource(R.string.permission_permanently_denied_message)
+
+    val openSettingsLabel =
+        stringResource(R.string.action_open_settings)
+
+    val locationServicesDisabledMessage =
+        stringResource(R.string.map_location_services_disabled)
+
+    val openLocationSettingsLabel =
+        stringResource(R.string.action_open_location_settings)
+
+    val locationUnavailableMessage =
+        stringResource(R.string.map_location_unavailable)
+
     var selectedHotspotId by remember { mutableStateOf<UUID?>(null) }
+
+    LaunchedEffect(uiState.hotspots, selectedHotspotId) {
+        selectedHotspotId = retainedSelectedHotspotId(
+            hotspots = uiState.hotspots,
+            selectedId = selectedHotspotId
+        )
+    }
 
     // --- Map (style/tile) render state — independent of hotspot backend state (§4/§16). Retry
     // recreates the map instance (via mapInstanceKey); onMapLoadFinished/onMapLoadFailed verify
@@ -205,10 +226,6 @@ internal fun MapContent(
 
     val cameraState = rememberCameraState(firstPosition = DefaultCameraPosition)
 
-    // Fits the camera to the successfully committed dataset exactly once per dataset. Keyed
-    // directly on uiState.hotspots — MapViewModel only ever replaces that list on a *successful*
-    // load, so a failed request (which republishes the same list reference) or ordinary
-    // recomposition never re-triggers this, and manual panning is never fought.
     LaunchedEffect(uiState.hotspots) {
         when (val target = HotspotCamera.targetFor(uiState.hotspots)) {
             HotspotCameraTarget.KeepCurrent -> Unit
@@ -269,12 +286,12 @@ internal fun MapContent(
         when (MapLocationPermissionEvaluator.evaluate(fineLocation, coarseLocation)) {
             MapLocationPermissionOutcome.Granted -> beginLocatingAttempt()
             MapLocationPermissionOutcome.Denied -> scope.launch {
-                snackbarHostState.showSnackbar(context.getString(R.string.map_location_denied))
+                snackbarHostState.showSnackbar(locationDeniedMessage)
             }
             MapLocationPermissionOutcome.PermanentlyDenied -> scope.launch {
                 val result = snackbarHostState.showSnackbar(
-                    message = context.getString(R.string.permission_permanently_denied_message),
-                    actionLabel = context.getString(R.string.action_open_settings),
+                    message = permissionPermanentlyDeniedMessage,
+                    actionLabel = openSettingsLabel,
                     duration = SnackbarDuration.Long
                 )
                 if (result == SnackbarResult.ActionPerformed) {
@@ -292,8 +309,8 @@ internal fun MapContent(
             disableLocationDueToServicesUnavailable()
             scope.launch {
                 val result = snackbarHostState.showSnackbar(
-                    message = context.getString(R.string.map_location_services_disabled),
-                    actionLabel = context.getString(R.string.action_open_location_settings),
+                    message = permissionPermanentlyDeniedMessage,
+                    actionLabel = openSettingsLabel,
                     duration = SnackbarDuration.Long
                 )
                 if (result == SnackbarResult.ActionPerformed) {
@@ -335,7 +352,7 @@ internal fun MapContent(
         delay(LOCATION_FIX_TIMEOUT_MILLIS)
         if (locatingCoordinator.complete(generation)) {
             locatingVersion++
-            snackbarHostState.showSnackbar(context.getString(R.string.map_location_unavailable))
+            snackbarHostState.showSnackbar(locationUnavailableMessage)
         }
     }
 
@@ -613,6 +630,14 @@ private enum class DeviceCountBucket(val color: Color) {
  */
 internal fun selectedHotspotFrom(hotspots: List<Hotspot>, selectedId: UUID?): Hotspot? =
     selectedId?.let { id -> hotspots.find { it.id == id } }
+
+internal fun retainedSelectedHotspotId(
+    hotspots: List<Hotspot>,
+    selectedId: UUID?
+): UUID? =
+    selectedId?.takeIf { id ->
+        hotspots.any { hotspot -> hotspot.id == id }
+    }
 
 private fun bucketFor(deviceCount: Int): DeviceCountBucket = when {
     deviceCount <= 2 -> DeviceCountBucket.Two

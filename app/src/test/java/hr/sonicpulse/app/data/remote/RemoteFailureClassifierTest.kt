@@ -115,12 +115,12 @@ class RemoteFailureClassifierTest {
     }
 
     @Test
-    fun `an unrelated exception type is rethrown, not swallowed into a classification`() {
-        val original = IllegalStateException("unexpected bug")
-        val thrown = assertThrows(IllegalStateException::class.java) {
-            RemoteFailureClassifier.classify(original)
-        }
-        assertEquals(original, thrown)
+    fun `an unrelated exception type classifies as Unknown`() {
+        val exception = IllegalStateException("unexpected bug")
+
+        val result = RemoteFailureClassifier.classify(exception)
+
+        assertEquals(RemoteFailure.Unknown, result)
     }
 
     @Test
