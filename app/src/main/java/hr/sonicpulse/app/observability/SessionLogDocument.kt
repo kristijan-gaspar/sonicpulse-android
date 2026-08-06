@@ -63,6 +63,7 @@ data class EngineConfigSnapshot(
     val endSilenceBlocks: Int,
     val maxEventDurationBlocks: Int,
     val cooldownBlocks: Int,
+    val rejectedCooldownBlocks: Int,
     val warmupBlocks: Int,
     val dbfsFloor: Double
 )

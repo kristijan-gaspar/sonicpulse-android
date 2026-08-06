@@ -550,6 +550,18 @@ class JsonDetectionSessionLoggerTest {
     }
 
     @Test
+    fun `exported JSON contains rejectedCooldownBlocks`() {
+        val logger = JsonDetectionSessionLogger()
+        logger.startTestSession()
+        logger.onBlock(metrics(0), null)
+        logger.finishSession()
+
+        val json = requireNotNull(logger.exportJson())
+
+        assertTrue(json.contains("rejectedCooldownBlocks"))
+    }
+
+    @Test
     fun `exported JSON never contains raw audio sample data`() {
         val logger = JsonDetectionSessionLogger()
         logger.startTestSession()
@@ -584,6 +596,7 @@ class JsonDetectionSessionLoggerTest {
             endSilenceBlocks = 4,
             maxEventDurationBlocks = 25,
             cooldownBlocks = 20,
+            rejectedCooldownBlocks = 7,
             warmupBlocks = 30,
             dbfsFloor = -100.0
         )
@@ -608,6 +621,7 @@ class JsonDetectionSessionLoggerTest {
         assertEquals(customConfig.endSilenceBlocks, snapshot.endSilenceBlocks)
         assertEquals(customConfig.maxEventDurationBlocks, snapshot.maxEventDurationBlocks)
         assertEquals(customConfig.cooldownBlocks, snapshot.cooldownBlocks)
+        assertEquals(customConfig.rejectedCooldownBlocks, snapshot.rejectedCooldownBlocks)
         assertEquals(customConfig.warmupBlocks, snapshot.warmupBlocks)
         assertEquals(customConfig.dbfsFloor, snapshot.dbfsFloor, 0.0)
     }

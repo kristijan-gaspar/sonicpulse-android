@@ -2,6 +2,7 @@ package hr.sonicpulse.engine
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EngineConfigTest {
@@ -24,6 +25,7 @@ class EngineConfigTest {
         assertEquals(3, config.endSilenceBlocks)
         assertEquals(30, config.maxEventDurationBlocks)
         assertEquals(30, config.cooldownBlocks)
+        assertEquals(5, config.rejectedCooldownBlocks)
         assertEquals(43, config.warmupBlocks)
         assertEquals(-120.0, config.dbfsFloor, 0.0)
     }
@@ -199,6 +201,30 @@ class EngineConfigTest {
     @Test
     fun `rejects negative cooldownBlocks`() {
         assertRejected { EngineConfig(cooldownBlocks = -1) }
+    }
+
+    @Test
+    fun `rejectedCooldownBlocks of zero is a valid boundary value`() {
+        val config = EngineConfig(rejectedCooldownBlocks = 0)
+
+        assertEquals(0, config.rejectedCooldownBlocks)
+    }
+
+    @Test
+    fun `rejects negative rejectedCooldownBlocks`() {
+        assertRejected { EngineConfig(rejectedCooldownBlocks = -1) }
+    }
+
+    @Test
+    fun `rejectedCooldownBlocks validation error message references rejectedCooldownBlocks`() {
+        val exception = assertThrows(IllegalArgumentException::class.java) {
+            EngineConfig(rejectedCooldownBlocks = -1)
+        }
+
+        assertTrue(
+            "expected message to reference rejectedCooldownBlocks, was: ${exception.message}",
+            exception.message.orEmpty().contains("rejectedCooldownBlocks")
+        )
     }
 
     @Test
