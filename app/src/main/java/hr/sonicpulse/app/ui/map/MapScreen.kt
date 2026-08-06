@@ -79,6 +79,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.domain.model.Hotspot
+import java.util.UUID
 import hr.sonicpulse.app.ui.components.FilterChipRow
 import hr.sonicpulse.app.ui.components.FilterChipRowHorizontalContentPadding
 import hr.sonicpulse.app.ui.permissions.PermissionDecisionEvaluator
@@ -189,7 +190,11 @@ internal fun MapContent(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var selectedHotspot by remember { mutableStateOf<Hotspot?>(null) }
+    // Only the id is retained across recompositions — the actual Hotspot is re-derived from
+    // uiState.hotspots below on every recomposition, so an open detail sheet always reflects
+    // the latest data (or closes outright if the hotspot is no longer in the list) instead of
+    // keeping showing whatever object was captured at the moment of the tap.
+    var selectedHotspotId by remember { mutableStateOf<UUID?>(null) }
 
     // --- Map (style/tile) render state — independent of hotspot backend state (§4/§16). Retry
     // recreates the map instance (via mapInstanceKey); onMapLoadFinished/onMapLoadFailed verify
@@ -416,7 +421,7 @@ internal fun MapContent(
                 onMapClick = { position: Position, _ ->
                     val hit = HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
                     if (hit != null) {
-                        selectedHotspot = hit
+                        selectedHotspotId = hit.id
                         ClickResult.Consume
                     } else {
                         ClickResult.Pass
@@ -495,8 +500,11 @@ internal fun MapContent(
         )
     }
 
+    // Re-derived from the latest uiState.hotspots on every recomposition — see selectedHotspotId's
+    // KDoc above. null here (id set but no longer present in the list) simply closes the sheet.
+    val selectedHotspot = selectedHotspotFrom(uiState.hotspots, selectedHotspotId)
     selectedHotspot?.let { hotspot ->
-        HotspotDetailBottomSheet(hotspot = hotspot, onDismiss = { selectedHotspot = null })
+        HotspotDetailBottomSheet(hotspot = hotspot, onDismiss = { selectedHotspotId = null })
     }
 }
 
@@ -595,6 +603,16 @@ private enum class DeviceCountBucket(val color: Color) {
     Three(SemanticColors.Warning),
     FourOrMore(SemanticColors.Danger)
 }
+
+/**
+ * Re-derives the selected hotspot from the currently loaded [hotspots] by id, rather than trusting
+ * a captured object from the moment it was tapped — so an open detail sheet always reflects the
+ * latest data for that hotspot, and closes on its own (returning null) once the hotspot is no
+ * longer present (removed by a refresh or filtered out by a range change), instead of continuing
+ * to display a stale snapshot. `selectedId == null` (nothing selected) also returns null.
+ */
+internal fun selectedHotspotFrom(hotspots: List<Hotspot>, selectedId: UUID?): Hotspot? =
+    selectedId?.let { id -> hotspots.find { it.id == id } }
 
 private fun bucketFor(deviceCount: Int): DeviceCountBucket = when {
     deviceCount <= 2 -> DeviceCountBucket.Two
