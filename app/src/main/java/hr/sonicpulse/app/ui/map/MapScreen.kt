@@ -496,29 +496,33 @@ internal fun MapContent(
                 }
             ) {
                 polygonsByBucket.forEach { (bucket, polygons) ->
-                    if (polygons.isEmpty()) return@forEach
-                    val source = rememberGeoJsonSource(data = GeoJsonData.JsonString(HotspotGeoJson.featureCollection(polygons)))
-                    // onClick only on the fill (the layer whose rendered area actually spans the
-                    // hotspot's radius) — the outline below is decorative and would only be
-                    // clickable along its thin stroke.
-                    FillLayer(
-                        id = "hotspots-fill-${bucket.name}",
-                        source = source,
-                        color = const(bucket.color),
-                        opacity = const(0.25f),
-                        onClick = onFeatureClick
+                    val polygonGeoJson = remember(polygons) {
+                        HotspotGeoJson.featureCollection(polygons)
+                    }
+
+                    val source = rememberGeoJsonSource(
+                        data = GeoJsonData.JsonString(polygonGeoJson)
                     )
-                    LineLayer(
-                        id = "hotspots-outline-${bucket.name}",
-                        source = source,
-                        color = const(bucket.color),
-                        width = const(2.dp)
-                    )
+
+                    if (polygons.isNotEmpty()) {
+                        FillLayer(
+                            id = "hotspots-fill-${bucket.name}",
+                            source = source,
+                            color = const(bucket.color),
+                            opacity = const(0.25f),
+                            onClick = onFeatureClick
+                        )
+
+                        LineLayer(
+                            id = "hotspots-outline-${bucket.name}",
+                            source = source,
+                            color = const(bucket.color),
+                            width = const(2.dp)
+                        )
+                    }
                 }
 
-                // Fixed screen-space centroid markers — a simple, solid pin-like dot (no text; the
-                // existing legend already explains the color coding), drawn above the geographic
-                // polygons so it stays the clearly visible, primary tap target at any zoom.
+
                 markersByBucket.forEach { (bucket, hotspots) ->
                     val markerGeoJson = remember(hotspots) {
                         HotspotGeoJson.pointFeatureCollection(hotspots)
