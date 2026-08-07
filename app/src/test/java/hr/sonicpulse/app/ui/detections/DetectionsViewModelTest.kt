@@ -65,7 +65,8 @@ class DetectionsViewModelTest {
         peakDbfs: Double = -10.0,
         hotspotId: UUID? = null,
         receivedAtUtc: Instant = Instant.parse("2026-08-03T10:00:00Z"),
-        peakTimeClient: Instant? = null
+        peakTimeClient: Instant? = null,
+        gpsAccuracy: Double = 8.0
     ) = Detection(
         id = id,
         sequenceNumber = sequenceNumber,
@@ -73,7 +74,7 @@ class DetectionsViewModelTest {
         peakDbfs = peakDbfs,
         latitude = 45.8,
         longitude = 16.0,
-        gpsAccuracy = 8.0,
+        gpsAccuracy = gpsAccuracy,
         receivedAtUtc = receivedAtUtc,
         peakTimeClient = peakTimeClient,
         hotspotId = hotspotId
@@ -1167,6 +1168,59 @@ class DetectionsViewModelTest {
         val locale = Locale.getDefault()
         assertEquals(listTimestampTextFor(receivedAt, zone, locale), item.listTimestampText)
         assertEquals(detailTimestampTextFor(receivedAt, zone, locale), item.detailTimestampText)
+    }
+
+    @Test
+    fun `receivedAtServerText always reflects receivedAtUtc, distinct from detailTimestampText when peakTimeClient is present`() =
+        runTest(testDispatcher) {
+            val receivedAt = Instant.parse("2026-08-03T10:00:00Z")
+            val peakTimeClient = Instant.parse("2020-01-01T00:00:00Z")
+            val repository = FakeDetectionsRepository().apply {
+                pages = mapOf(
+                    null to DetectionPage(
+                        items = listOf(detection(receivedAtUtc = receivedAt, peakTimeClient = peakTimeClient)),
+                        nextCursor = null
+                    )
+                )
+            }
+            val viewModel = viewModelWithInitialRefresh(repository)
+            advanceUntilIdle()
+
+            val item = viewModel.uiState.value.sections.single().items.single()
+            val zone = ZoneId.systemDefault()
+            val locale = Locale.getDefault()
+            assertEquals(detailTimestampTextFor(receivedAt, zone, locale), item.receivedAtServerText)
+            assertEquals(detailTimestampTextFor(peakTimeClient, zone, locale), item.detailTimestampText)
+            assertTrue(item.receivedAtServerText != item.detailTimestampText)
+        }
+
+    @Test
+    fun `receivedAtServerText equals detailTimestampText when peakTimeClient is absent`() = runTest(testDispatcher) {
+        val receivedAt = Instant.parse("2026-08-03T10:00:00Z")
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(
+                null to DetectionPage(
+                    items = listOf(detection(receivedAtUtc = receivedAt, peakTimeClient = null)),
+                    nextCursor = null
+                )
+            )
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        val item = viewModel.uiState.value.sections.single().items.single()
+        assertEquals(item.detailTimestampText, item.receivedAtServerText)
+    }
+
+    @Test
+    fun `gpsAccuracyText is the rounded whole-meter value`() = runTest(testDispatcher) {
+        val repository = FakeDetectionsRepository().apply {
+            pages = mapOf(null to DetectionPage(items = listOf(detection(gpsAccuracy = 7.6)), nextCursor = null))
+        }
+        val viewModel = viewModelWithInitialRefresh(repository)
+        advanceUntilIdle()
+
+        assertEquals("8", viewModel.uiState.value.sections.single().items.single().gpsAccuracyText)
     }
 
     @Test

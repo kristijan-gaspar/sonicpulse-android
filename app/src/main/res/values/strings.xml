@@ -107,9 +107,23 @@
 
     <!-- Detections — detail bottom sheet (C) -->
     <string name="detection_detail_title">Detection details</string>
-    <string name="detail_label_timestamp">Timestamp</string>
-    <string name="detail_label_coordinates">Coordinates</string>
     <string name="action_close">Close</string>
+    <string name="section_signal">Signal</string>
+    <string name="section_location">Location</string>
+    <string name="section_time">Time</string>
+    <string name="section_grouping">Grouping</string>
+    <string name="detail_label_peak_level">Peak level</string>
+    <string name="detail_label_status">Status</string>
+    <string name="detail_label_latitude">Latitude</string>
+    <string name="detail_label_longitude">Longitude</string>
+    <string name="detail_label_gps_accuracy">GPS accuracy</string>
+    <string name="detail_label_detected">Detected</string>
+    <string name="detail_label_received_server">Received by server</string>
+    <string name="grouping_assigned">Assigned to hotspot</string>
+    <string name="grouping_not_assigned">Not assigned to a hotspot</string>
+    <!-- GPS accuracy, e.g. "±8 m" — arg is an already-formatted numeric string (see
+         coordinates_format); unit kept identical in every language. -->
+    <string name="gps_accuracy_format">±%1$s m</string>
 
     <!-- Map — time range -->
     <string name="range_last_24_hours">Last 24 hours</string>
@@ -143,10 +157,14 @@
     <string name="hotspot_detail_title">Hotspot details</string>
     <string name="detail_label_devices">Devices</string>
     <string name="detail_label_radius">Radius</string>
-    <string name="detail_label_confidence">Confidence</string>
+    <string name="detail_label_confidence">Confidence score</string>
     <string name="detail_label_time_span">Time span</string>
+    <string name="detail_label_first_detection">First detection</string>
+    <string name="detail_label_last_detection">Last detection</string>
+    <!-- Confidence is a heuristic 0–100 score, not a probability — this caption clarifies that in
+         the hotspot detail sheet, kept visually secondary so it doesn't clutter the map itself. -->
+    <string name="hotspot_detail_confidence_explanation">Heuristic score based on device count and detection timing.</string>
     <string name="unit_meters_short">%1$d m</string>
-    <string name="unit_percent">%1$d%%</string>
     <string name="duration_seconds">%1$d s</string>
     <string name="duration_minutes_seconds">%1$d min %2$d s</string>
     <string name="duration_hours_minutes">%1$d h %2$d min</string>
