@@ -132,11 +132,11 @@ private const val LOCATION_FIX_TIMEOUT_MILLIS = 15_000L
 /** Fixed on-screen marker radius (dp) — deliberately never scaled by geographic zoom, so a hotspot
  * stays clearly visible (and, since hit-testing now goes through the marker's own `CircleLayer`
  * `onClick`, clickable) even zoomed out to a whole-region view. */
-private val MARKER_VISUAL_RADIUS_DP = 10.dp
+private val MARKER_VISUAL_RADIUS_DP = 8.dp
 
 /** Deliberately bold — the marker is meant to read as an obvious, pin-like dot even at a glance,
  * not a subtle outline. */
-private val MARKER_STROKE_WIDTH_DP = 2.dp
+private val MARKER_STROKE_WIDTH_DP = 1.dp
 
 /** Camera zoom used whenever a hotspot is focused — by tapping its marker/polygon or picking it
  * from the hotspot list — within the plan's 15-16 "close enough to see the real radius polygon"
