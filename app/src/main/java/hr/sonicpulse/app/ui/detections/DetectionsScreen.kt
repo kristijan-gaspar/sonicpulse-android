@@ -63,6 +63,7 @@ import hr.sonicpulse.app.ui.theme.Spacing
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 
 @Composable
 fun DetectionsScreen(viewModel: DetectionsViewModel = hiltViewModel()) {
@@ -95,79 +96,78 @@ internal fun DetectionsContent(
 ) {
     var selectedDetection by remember { mutableStateOf<DetectionHistoryItemUiModel?>(null) }
 
-    // Resolved here (a @Composable context) so the label lambda passed below can stay a plain,
-    // non-@Composable (T) -> String — FilterChipRow is a shared component with no @Composable
-    // dependency on any one screen's string resources.
     val allLabel = stringResource(R.string.filter_all)
     val todayLabel = stringResource(R.string.filter_today)
     val groupedLabel = stringResource(R.string.filter_grouped)
     val ungroupedLabel = stringResource(R.string.filter_ungrouped)
-    val refreshLabel = stringResource(R.string.action_refresh)
 
     Column(modifier = modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            FilterChipRow(
-                options = DetectionsFilter.entries,
-                selected = uiState.selectedFilter,
-                onSelect = onSelectFilter,
-                label = { filter ->
-                    when (filter) {
-                        DetectionsFilter.All -> allLabel
-                        DetectionsFilter.Today -> todayLabel
-                        DetectionsFilter.Grouped -> groupedLabel
-                        DetectionsFilter.Ungrouped -> ungroupedLabel
-                    }
-                },
-                modifier = Modifier.weight(1f).padding(vertical = Spacing.sm)
-            )
-            IconButton(
-                onClick = onRefresh,
-                enabled = !uiState.isInitialLoading && !uiState.isRefreshing
-            ) {
-                if (uiState.isRefreshing) {
-                    // Semantics kept identical to the Icon it replaces — without this, a screen
-                    // reader announces this button with no name at all while it is loading.
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp).semantics { contentDescription = refreshLabel },
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(Icons.Filled.Refresh, contentDescription = refreshLabel)
+        FilterChipRow(
+            options = DetectionsFilter.entries,
+            selected = uiState.selectedFilter,
+            onSelect = onSelectFilter,
+            label = { filter ->
+                when (filter) {
+                    DetectionsFilter.All -> allLabel
+                    DetectionsFilter.Today -> todayLabel
+                    DetectionsFilter.Grouped -> groupedLabel
+                    DetectionsFilter.Ungrouped -> ungroupedLabel
                 }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = Spacing.sm)
+        )
+
+        if (uiState.refreshError) {
+            RefreshErrorBanner(
+                onRetry = onRefresh,
+                serverConfigurationError = uiState.refreshErrorServerConfiguration
+            )
+        }
+
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            when {
+                uiState.isInitialLoading -> FullScreenLoading()
+                uiState.initialError ->
+                    FullScreenError(
+                        onRetry = onRefresh,
+                        serverConfigurationError = uiState.initialErrorServerConfiguration
+                    )
+
+                uiState.emptyState != null -> DetectionsEmptyView(
+                    emptyState = uiState.emptyState,
+                    isLoadingNextPage = uiState.isLoadingNextPage,
+                    pagingError = uiState.pagingError,
+                    pagingErrorServerConfiguration = uiState.pagingErrorServerConfiguration,
+                    pagingActionDisabled = uiState.isRefreshing,
+                    onLoadMore = onLoadNextPage
+                )
+
+                else -> DetectionsList(
+                    sections = uiState.sections,
+                    isLoadingNextPage = uiState.isLoadingNextPage,
+                    canLoadMore = uiState.canLoadMore,
+                    pagingError = uiState.pagingError,
+                    pagingErrorServerConfiguration = uiState.pagingErrorServerConfiguration,
+                    pagingActionDisabled = uiState.isRefreshing,
+                    onLoadNextPage = onLoadNextPage,
+                    onItemClick = { selectedDetection = it }
+                )
             }
         }
 
-        if (uiState.refreshError) {
-            RefreshErrorBanner(onRetry = onRefresh, serverConfigurationError = uiState.refreshErrorServerConfiguration)
+        selectedDetection?.let { detection ->
+            DetectionDetailBottomSheet(
+                detection = detection,
+                onDismiss = { selectedDetection = null })
         }
-
-        when {
-            uiState.isInitialLoading -> FullScreenLoading()
-            uiState.initialError ->
-                FullScreenError(onRetry = onRefresh, serverConfigurationError = uiState.initialErrorServerConfiguration)
-            uiState.emptyState != null -> DetectionsEmptyView(
-                emptyState = uiState.emptyState,
-                isLoadingNextPage = uiState.isLoadingNextPage,
-                pagingError = uiState.pagingError,
-                pagingErrorServerConfiguration = uiState.pagingErrorServerConfiguration,
-                pagingActionDisabled = uiState.isRefreshing,
-                onLoadMore = onLoadNextPage
-            )
-            else -> DetectionsList(
-                sections = uiState.sections,
-                isLoadingNextPage = uiState.isLoadingNextPage,
-                canLoadMore = uiState.canLoadMore,
-                pagingError = uiState.pagingError,
-                pagingErrorServerConfiguration = uiState.pagingErrorServerConfiguration,
-                pagingActionDisabled = uiState.isRefreshing,
-                onLoadNextPage = onLoadNextPage,
-                onItemClick = { selectedDetection = it }
-            )
-        }
-    }
-
-    selectedDetection?.let { detection ->
-        DetectionDetailBottomSheet(detection = detection, onDismiss = { selectedDetection = null })
     }
 }
 

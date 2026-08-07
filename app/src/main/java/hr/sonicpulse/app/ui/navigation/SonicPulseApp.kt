@@ -30,9 +30,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.navigation.NavBackStackEntry
 
 @Composable
@@ -47,8 +44,10 @@ fun SonicPulseApp() {
             navController = navController,
             startDestination = SonicPulseDestination.Monitoring.route,
             modifier = Modifier.padding(innerPadding),
-            enterTransition = { sonicPulseEnterTransition() }
-
+            enterTransition = { sonicPulseEnterTransition() },
+            exitTransition = { sonicPulseExitTransition() },
+            popEnterTransition = { sonicPulseEnterTransition() },
+            popExitTransition = { sonicPulseExitTransition() }
         ) {
             composable(SonicPulseDestination.Monitoring.route) {
                 OpaqueDestination { MonitoringScreen() }
