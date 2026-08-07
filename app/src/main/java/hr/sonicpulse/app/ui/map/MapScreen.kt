@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
@@ -95,10 +96,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.compose.camera.rememberCameraState
+import org.maplibre.compose.expressions.dsl.asString
 import org.maplibre.compose.expressions.dsl.const
+import org.maplibre.compose.expressions.dsl.feature
+import org.maplibre.compose.expressions.dsl.format
+import org.maplibre.compose.expressions.dsl.span
 import org.maplibre.compose.gms.rememberFusedLocationProvider
+import org.maplibre.compose.layers.CircleLayer
 import org.maplibre.compose.layers.FillLayer
 import org.maplibre.compose.layers.LineLayer
+import org.maplibre.compose.layers.SymbolLayer
 import org.maplibre.compose.location.LocationPuck
 import org.maplibre.compose.location.rememberUserLocationState
 import org.maplibre.compose.map.MapOptions
@@ -122,6 +129,16 @@ private val DefaultCameraPosition = CameraPosition(target = Position(longitude =
 
 /** A value between 10 and 15 s is acceptable per the plan; 15 s chosen and used consistently. */
 private const val LOCATION_FIX_TIMEOUT_MILLIS = 15_000L
+
+/** Fixed on-screen marker radius (dp) — deliberately never scaled by geographic zoom (see
+ * [HotspotMarkerHitSelector]'s KDoc), so a hotspot stays clearly visible even zoomed out to a
+ * whole-region view. ~24 dp diameter, inside the plan's 20-28 dp range. */
+private val MARKER_VISUAL_RADIUS_DP = 12.dp
+
+/** Camera zoom used whenever a hotspot is focused — by tapping its marker/polygon or picking it
+ * from the hotspot list — within the plan's 15-16 "close enough to see the real radius polygon"
+ * range. */
+private const val HOTSPOT_FOCUS_ZOOM = 15.5
 
 // --- Bottom-edge layout for the map's native ornaments (logo/attribution) and the Compose
 // overlays that share that corner (current-location FAB, snackbar). ---
@@ -211,13 +228,18 @@ internal fun MapContent(
     val locationUnavailableMessage =
         stringResource(R.string.map_location_unavailable)
 
-    var selectedHotspotId by remember { mutableStateOf<UUID?>(null) }
+    // Which of the (mutually exclusive — never two at once) hotspot-related bottom sheets is open.
+    // A single sum-type state instead of two separate booleans/nullable ids so "list open" and
+    // "detail open" can never both be true at the same time by construction, with no manual
+    // sequencing needed when one replaces the other (§7).
+    var hotspotSheet by remember { mutableStateOf<HotspotSheet>(HotspotSheet.None) }
 
-    LaunchedEffect(uiState.hotspots, selectedHotspotId) {
-        selectedHotspotId = retainedSelectedHotspotId(
-            hotspots = uiState.hotspots,
-            selectedId = selectedHotspotId
-        )
+    LaunchedEffect(uiState.hotspots, hotspotSheet) {
+        val current = hotspotSheet
+        if (current is HotspotSheet.Detail) {
+            val retainedId = retainedSelectedHotspotId(hotspots = uiState.hotspots, selectedId = current.hotspotId)
+            if (retainedId == null) hotspotSheet = HotspotSheet.None
+        }
     }
 
     // --- Map (style/tile) render state — independent of hotspot backend state (§4/§16). Retry
@@ -236,6 +258,23 @@ internal fun MapContent(
                 CameraPosition(target = Position(longitude = target.longitude, latitude = target.latitude), zoom = target.zoom)
             )
             is HotspotCameraTarget.Bounds -> cameraState.animateTo(boundingBox = target.boundingBox, padding = PaddingValues(48.dp))
+        }
+    }
+
+    // Shared by a marker/polygon tap and a hotspot-list selection (§3/§7): select the hotspot,
+    // animate the camera to its centroid at a close zoom, and open the existing detail sheet —
+    // never a second, parallel detail implementation. Opening/closing this (or the list sheet)
+    // never touches the fit-all effect above — that effect keys only on uiState.hotspots, so it
+    // cannot fire again just because hotspotSheet changed (§8).
+    fun focusHotspot(hotspot: Hotspot) {
+        hotspotSheet = HotspotSheet.Detail(hotspot.id)
+        scope.launch {
+            cameraState.animateTo(
+                CameraPosition(
+                    target = Position(longitude = hotspot.longitude, latitude = hotspot.latitude),
+                    zoom = HOTSPOT_FOCUS_ZOOM
+                )
+            )
         }
     }
 
@@ -425,6 +464,7 @@ internal fun MapContent(
     }
 
     val polygonsByBucket = remember(uiState.hotspots) { bucketPolygons(uiState.hotspots) }
+    val markersByBucket = remember(uiState.hotspots) { bucketMarkers(uiState.hotspots) }
 
     // No Scaffold here on purpose: the app-level Scaffold in SonicPulseApp already reserves the
     // area between the top bar and the bottom navigation bar, and a nested Scaffold's own default
@@ -439,9 +479,19 @@ internal fun MapContent(
                 cameraState = cameraState,
                 options = MapOptions(ornamentOptions = ornamentOptions),
                 onMapClick = { position: Position, _ ->
-                    val hit = HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
+                    // The fixed-size marker is the primary tap target at any zoom (§3/§4) — its
+                    // geographic hit tolerance depends on the current zoom, so it's tried first;
+                    // the geographic polygon/radius hit-test is the existing fallback. Both funnel
+                    // into the same focusHotspot (§3: "the same general behavior may also be used
+                    // when selecting the geographic hotspot polygon").
+                    val hit = HotspotMarkerHitSelector.select(
+                        clickLatitude = position.latitude,
+                        clickLongitude = position.longitude,
+                        hotspots = uiState.hotspots,
+                        zoom = cameraState.position.zoom
+                    ) ?: HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
                     if (hit != null) {
-                        selectedHotspotId = hit.id
+                        focusHotspot(hit)
                         ClickResult.Consume
                     } else {
                         ClickResult.Pass
@@ -470,6 +520,40 @@ internal fun MapContent(
                         source = source,
                         color = const(bucket.color),
                         width = const(2.dp)
+                    )
+                }
+
+                // Fixed screen-space centroid markers (plan item 2), drawn above the geographic
+                // polygons so they stay the clearly visible, primary tap target at any zoom — see
+                // HotspotMarkerHitSelector's KDoc for why CircleLayer's dp radius doesn't shrink
+                // when zooming out. Tapping is handled entirely by onMapClick above, not a
+                // per-layer onClick here: onClick only receives the tapped features, never the
+                // click's own geographic position, which the deterministic "nearest centroid wins"
+                // tie-break (§4) needs.
+                markersByBucket.forEach { (bucket, hotspots) ->
+                    if (hotspots.isEmpty()) return@forEach
+                    val markerSource = rememberGeoJsonSource(
+                        data = GeoJsonData.JsonString(HotspotGeoJson.pointFeatureCollection(hotspots))
+                    )
+                    CircleLayer(
+                        id = "hotspots-marker-${bucket.name}",
+                        source = markerSource,
+                        radius = const(MARKER_VISUAL_RADIUS_DP),
+                        color = const(bucket.color),
+                        strokeColor = const(Color.White),
+                        strokeWidth = const(2.dp)
+                    )
+                    // Device-count label (plan item 2) — skipped rather than forced if this ever
+                    // turns out to render unreliably; a plain colored marker alone already satisfies
+                    // the plan's fallback ("a clean colored marker is sufficient").
+                    SymbolLayer(
+                        id = "hotspots-marker-label-${bucket.name}",
+                        source = markerSource,
+                        textField = format(span(feature["label"].asString())),
+                        textColor = const(Color.White),
+                        textSize = const(11.sp),
+                        textAllowOverlap = const(true),
+                        textIgnorePlacement = const(true)
                     )
                 }
 
@@ -508,6 +592,7 @@ internal fun MapContent(
                 onRetry = onRetry,
                 onCurrentLocationClick = ::onCurrentLocationClick,
                 isLocating = isLocating,
+                onOpenHotspotList = { hotspotSheet = HotspotSheet.List },
                 onTopControlsMeasured = { topControlsHeightPx = it }
             )
         }
@@ -520,12 +605,31 @@ internal fun MapContent(
         )
     }
 
-    // Re-derived from the latest uiState.hotspots on every recomposition — see selectedHotspotId's
-    // KDoc above. null here (id set but no longer present in the list) simply closes the sheet.
-    val selectedHotspot = selectedHotspotFrom(uiState.hotspots, selectedHotspotId)
-    selectedHotspot?.let { hotspot ->
-        HotspotDetailBottomSheet(hotspot = hotspot, onDismiss = { selectedHotspotId = null })
+    // hotspotSheet drives at most one of these — never both at once (§7).
+    when (val sheet = hotspotSheet) {
+        HotspotSheet.None -> Unit
+        HotspotSheet.List -> HotspotListBottomSheet(
+            hotspots = uiState.hotspots,
+            onDismiss = { hotspotSheet = HotspotSheet.None },
+            onSelectHotspot = { hotspot -> focusHotspot(hotspot) }
+        )
+        is HotspotSheet.Detail -> {
+            // Re-derived from the latest uiState.hotspots on every recomposition, not the stale
+            // snapshot captured when the sheet was opened — null (no longer present in the list)
+            // simply closes the sheet, mirroring selectedHotspotFrom's own KDoc.
+            selectedHotspotFrom(uiState.hotspots, sheet.hotspotId)?.let { hotspot ->
+                HotspotDetailBottomSheet(hotspot = hotspot, onDismiss = { hotspotSheet = HotspotSheet.None })
+            }
+        }
     }
+}
+
+/** Which of the mutually exclusive hotspot-related bottom sheets [MapContent] currently shows —
+ * see its own comment on `hotspotSheet` for why a sum type instead of separate booleans/ids. */
+private sealed interface HotspotSheet {
+    data object None : HotspotSheet
+    data object List : HotspotSheet
+    data class Detail(val hotspotId: UUID) : HotspotSheet
 }
 
 /** Everything drawn once the map itself has not (fully) failed: top filter/legend controls,
@@ -542,6 +646,7 @@ private fun HotspotControlsAndOverlays(
     onRetry: () -> Unit,
     onCurrentLocationClick: () -> Unit,
     isLocating: Boolean,
+    onOpenHotspotList: () -> Unit,
     onTopControlsMeasured: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -601,6 +706,34 @@ private fun HotspotControlsAndOverlays(
                     }
                 }
             }
+
+            // Secondary navigation only (§5) — the primary flow (tap pin -> zoom -> details) works
+            // without it. Bottom-start, mirroring the current-location FAB's own bottom-end
+            // clearance of the attribution button, so this clears the logo the same way instead of
+            // overlapping it; disabled (not hidden, to avoid a layout jump) while there is nothing
+            // to list.
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomStart) {
+                val hotspotListLabel = stringResource(R.string.action_hotspot_list)
+                val hasHotspots = uiState.hotspots.isNotEmpty()
+                Surface(
+                    modifier = Modifier.padding(start = Spacing.lg, bottom = CurrentLocationFabBottomPadding),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    shadowElevation = 3.dp
+                ) {
+                    IconButton(onClick = onOpenHotspotList, enabled = hasHotspots) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.List,
+                            contentDescription = hotspotListLabel,
+                            tint = if (hasHotspots) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -616,9 +749,11 @@ private fun openAppSettings(context: Context) {
     )
 }
 
-/** The 3 device-count buckets that decide polygon color (§10) — color depends only on
- * [Hotspot.deviceCount], never [Hotspot.confidence]. */
-private enum class DeviceCountBucket(val color: Color) {
+/** The 3 device-count buckets that decide polygon *and* marker color (§10, plan item 2) — color
+ * depends only on [Hotspot.deviceCount], never [Hotspot.confidence]. `internal` (not `private`) so
+ * [HotspotListBottomSheet] can reuse the same classification for its per-row color dot instead of
+ * re-deriving it. */
+internal enum class DeviceCountBucket(val color: Color) {
     Two(SemanticColors.Yellow),
     Three(SemanticColors.Warning),
     FourOrMore(SemanticColors.Danger)
@@ -642,7 +777,7 @@ internal fun retainedSelectedHotspotId(
         hotspots.any { hotspot -> hotspot.id == id }
     }
 
-private fun bucketFor(deviceCount: Int): DeviceCountBucket = when {
+internal fun bucketFor(deviceCount: Int): DeviceCountBucket = when {
     deviceCount <= 2 -> DeviceCountBucket.Two
     deviceCount == 3 -> DeviceCountBucket.Three
     else -> DeviceCountBucket.FourOrMore
@@ -665,6 +800,13 @@ private fun bucketPolygons(hotspots: List<Hotspot>): Map<DeviceCountBucket, List
             )
         }
     }
+
+/** One [org.maplibre.compose.sources.GeoJsonSource] per bucket, mirroring [bucketPolygons] exactly
+ * (same bucketing rule via [bucketFor], same per-bucket-source rationale) — kept as a separate
+ * grouping (not merged into [bucketPolygons]) because markers are built straight from [Hotspot]
+ * centroids, not from an already-computed [HotspotPolygon] ring. */
+private fun bucketMarkers(hotspots: List<Hotspot>): Map<DeviceCountBucket, List<Hotspot>> =
+    DeviceCountBucket.entries.associateWith { bucket -> hotspots.filter { bucketFor(it.deviceCount) == bucket } }
 
 @Composable
 private fun TimeRangeRow(

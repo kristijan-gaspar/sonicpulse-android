@@ -21,11 +21,23 @@ object HotspotHitSelector {
      * overlapping candidates, the nearest centroid wins; an exact tie falls back to hotspot UUID
      * for a deterministic, order-independent result. */
     fun select(clickLatitude: Double, clickLongitude: Double, hotspots: List<Hotspot>): Hotspot? =
+        nearestWithinTolerance(clickLatitude, clickLongitude, hotspots) { hotspot ->
+            maxOf(hotspot.radiusMeters, HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS)
+        }
+
+    /** The shared "nearest centroid within some per-hotspot tolerance wins, exact ties break on
+     * hotspot id" rule, factored out so [select] (geographic polygon/radius hit-testing) and
+     * [HotspotMarkerHitSelector.select] (fixed screen-space marker hit-testing) can't silently
+     * drift apart on tie-break behavior. */
+    internal fun nearestWithinTolerance(
+        clickLatitude: Double,
+        clickLongitude: Double,
+        hotspots: List<Hotspot>,
+        toleranceMetersFor: (Hotspot) -> Double
+    ): Hotspot? =
         hotspots
             .map { it to distanceMeters(clickLatitude, clickLongitude, it.latitude, it.longitude) }
-            .filter { (hotspot, distance) ->
-                distance <= maxOf(hotspot.radiusMeters, HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS)
-            }
+            .filter { (hotspot, distance) -> distance <= toleranceMetersFor(hotspot) }
             .minWithOrNull(compareBy({ it.second }, { it.first.id }))
             ?.first
 
