@@ -22,6 +22,7 @@ retrofitKotlinxSerializationConverter = "1.0.0"
 datastorePreferences = "1.1.1"
 maplibreCompose = "0.13.0"
 appcompat = "1.7.0"
+maplibreNative = "13.4.1"
 
 [libraries]
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
@@ -56,6 +57,7 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
 maplibre-compose = { group = "org.maplibre.compose", name = "maplibre-compose", version.ref = "maplibreCompose" }
 maplibre-compose-gms = { group = "org.maplibre.compose", name = "maplibre-compose-gms", version.ref = "maplibreCompose" }
+maplibre-native-android = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibreNative" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
