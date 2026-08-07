@@ -23,3 +23,9 @@ fun hotspotTimeSpanFor(firstReceivedAtUtc: Instant, lastReceivedAtUtc: Instant):
         else -> HotspotTimeSpan.HoursMinutes(totalSeconds / 3600, (totalSeconds % 3600) / 60)
     }
 }
+
+/** [Hotspot.confidence][hr.sonicpulse.app.domain.model.Hotspot.confidence] is a heuristic 0–100
+ * score computed server-side from device count and temporal compactness — not a probability — so
+ * it is rendered as "X / 100", never as a percentage. Locale-invariant (plain ASCII digits and a
+ * slash), so unlike [hotspotTimeSpanFor]'s buckets this needs no separate localized template. */
+fun confidenceScoreText(confidence: Int): String = "$confidence / 100"

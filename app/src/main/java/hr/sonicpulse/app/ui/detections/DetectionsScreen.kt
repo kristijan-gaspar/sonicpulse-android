@@ -457,19 +457,46 @@ private fun DetectionDetailBottomSheet(
                 }
             }
             Spacer(modifier = Modifier.height(Spacing.md))
+
+            SectionHeader(text = stringResource(R.string.section_signal))
+            Spacer(modifier = Modifier.height(Spacing.sm))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                DetailCell(value = stringResource(R.string.peak_level_dbfs, detection.peakDbfs), modifier = Modifier.weight(1f))
                 DetailCell(
+                    label = stringResource(R.string.detail_label_peak_level),
+                    value = stringResource(R.string.peak_level_dbfs, detection.peakDbfs),
+                    modifier = Modifier.weight(1f)
+                )
+                DetailCell(
+                    label = stringResource(R.string.detail_label_status),
                     value = stringResource(if (detection.grouped) R.string.status_grouped else R.string.status_ungrouped),
                     color = if (detection.grouped) SemanticColors.Success else SemanticColors.Warning,
                     modifier = Modifier.weight(1f)
                 )
             }
+
             Spacer(modifier = Modifier.height(Spacing.md))
-            DetailRow(label = stringResource(R.string.detail_label_timestamp), value = detection.detailTimestampText)
+            SectionHeader(text = stringResource(R.string.section_location))
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            DetailRow(label = stringResource(R.string.detail_label_latitude), value = detection.latitudeText)
+            DetailRow(label = stringResource(R.string.detail_label_longitude), value = detection.longitudeText)
             DetailRow(
-                label = stringResource(R.string.detail_label_coordinates),
-                value = stringResource(R.string.coordinates_format, detection.latitudeText, detection.longitudeText)
+                label = stringResource(R.string.detail_label_gps_accuracy),
+                value = stringResource(R.string.gps_accuracy_format, detection.gpsAccuracyText)
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+            SectionHeader(text = stringResource(R.string.section_time))
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            DetailRow(label = stringResource(R.string.detail_label_detected), value = detection.detailTimestampText)
+            DetailRow(label = stringResource(R.string.detail_label_received_server), value = detection.receivedAtServerText)
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+            SectionHeader(text = stringResource(R.string.section_grouping))
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                text = stringResource(if (detection.grouped) R.string.grouping_assigned else R.string.grouping_not_assigned),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (detection.grouped) SemanticColors.Success else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }
     }
@@ -477,12 +504,14 @@ private fun DetectionDetailBottomSheet(
 
 @Composable
 private fun DetailCell(
+    label: String,
     value: String,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.onSurface
 ) {
     Surface(modifier = modifier, shape = AppShapes.ChipOrBadge, color = MaterialTheme.colorScheme.surfaceVariant) {
-        Box(modifier = Modifier.padding(Spacing.md), contentAlignment = Alignment.Center) {
+        Column(modifier = Modifier.padding(Spacing.md)) {
+            Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
             Text(text = value, style = MonospaceValueStyle.copy(fontWeight = FontWeight.Bold), color = color)
         }
     }

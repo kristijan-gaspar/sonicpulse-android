@@ -14,8 +14,10 @@ private fun previewItem(peakDbfs: Double, grouped: Boolean) = DetectionHistoryIt
     peakDbfs = peakDbfs,
     listTimestampText = "14:32:07",
     detailTimestampText = "August 3, 2026 14:32:07",
+    receivedAtServerText = "August 3, 2026 14:32:09",
     latitudeText = "45.80000",
     longitudeText = "16.00000",
+    gpsAccuracyText = "8",
     grouped = grouped
 )
 

@@ -105,9 +105,23 @@
 
     <!-- Detections — detail bottom sheet (C) -->
     <string name="detection_detail_title">Detalji detekcije</string>
-    <string name="detail_label_timestamp">Vrijeme</string>
-    <string name="detail_label_coordinates">Koordinate</string>
     <string name="action_close">Zatvori</string>
+    <string name="section_signal">Signal</string>
+    <string name="section_location">Lokacija</string>
+    <string name="section_time">Vrijeme</string>
+    <string name="section_grouping">Grupiranje</string>
+    <string name="detail_label_peak_level">Vršna razina</string>
+    <string name="detail_label_status">Status</string>
+    <string name="detail_label_latitude">Zemljopisna širina</string>
+    <string name="detail_label_longitude">Zemljopisna dužina</string>
+    <string name="detail_label_gps_accuracy">GPS preciznost</string>
+    <string name="detail_label_detected">Detektirano</string>
+    <string name="detail_label_received_server">Zaprimljeno na poslužitelju</string>
+    <string name="grouping_assigned">Pridruženo hotspotu</string>
+    <string name="grouping_not_assigned">Nije pridruženo hotspotu</string>
+    <!-- GPS preciznost, npr. "±8 m" — argument je već formatirani brojčani niz (vidi
+         coordinates_format); jedinica je namjerno ista u svim jezicima. -->
+    <string name="gps_accuracy_format">±%1$s m</string>
 
     <!-- Map — time range -->
     <string name="range_last_24_hours">Zadnja 24 sata</string>
@@ -141,10 +155,14 @@
     <string name="hotspot_detail_title">Detalji žarišta</string>
     <string name="detail_label_devices">Broj uređaja</string>
     <string name="detail_label_radius">Radijus</string>
-    <string name="detail_label_confidence">Pouzdanost</string>
+    <string name="detail_label_confidence">Ocjena pouzdanosti</string>
     <string name="detail_label_time_span">Vremenski raspon</string>
+    <string name="detail_label_first_detection">Prva zaprimljena detekcija</string>
+    <string name="detail_label_last_detection">Posljednja zaprimljena detekcija</string>
+    <!-- Pouzdanost je heuristička ocjena 0–100, ne vjerojatnost — ova napomena to pojašnjava unutar
+         detalja žarišta, vizualno je sekundarna kako ne bi opterećivala samu kartu. -->
+    <string name="hotspot_detail_confidence_explanation">Heuristička ocjena temeljena na broju uređaja i vremenskoj blizini detekcija.</string>
     <string name="unit_meters_short">%1$d m</string>
-    <string name="unit_percent">%1$d%%</string>
     <string name="duration_seconds">%1$d s</string>
     <string name="duration_minutes_seconds">%1$d min %2$d s</string>
     <string name="duration_hours_minutes">%1$d h %2$d min</string>
