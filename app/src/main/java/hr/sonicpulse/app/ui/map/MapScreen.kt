@@ -520,21 +520,25 @@ internal fun MapContent(
                 // existing legend already explains the color coding), drawn above the geographic
                 // polygons so it stays the clearly visible, primary tap target at any zoom.
                 markersByBucket.forEach { (bucket, hotspots) ->
-                    if (hotspots.isEmpty()) return@forEach
+                    val markerGeoJson = remember(hotspots) {
+                        HotspotGeoJson.pointFeatureCollection(hotspots)
+                    }
                     val markerSource = rememberGeoJsonSource(
-                        data = GeoJsonData.JsonString(HotspotGeoJson.pointFeatureCollection(hotspots))
+                        data = GeoJsonData.JsonString(markerGeoJson)
                     )
-                    CircleLayer(
-                        id = "hotspots-marker-${bucket.name}",
-                        source = markerSource,
-                        radius = const(MARKER_VISUAL_RADIUS_DP),
-                        color = const(bucket.color),
-                        opacity = const(1f),
-                        strokeColor = const(Color.White),
-                        strokeWidth = const(MARKER_STROKE_WIDTH_DP),
-                        strokeOpacity = const(1f),
-                        onClick = onFeatureClick
-                    )
+                    if (hotspots.isNotEmpty()) {
+                        CircleLayer(
+                            id = "hotspots-marker-${bucket.name}",
+                            source = markerSource,
+                            radius = const(MARKER_VISUAL_RADIUS_DP),
+                            color = const(bucket.color),
+                            opacity = const(1f),
+                            strokeColor = const(Color.White),
+                            strokeWidth = const(MARKER_STROKE_WIDTH_DP),
+                            strokeOpacity = const(1f),
+                            onClick = onFeatureClick
+                        )
+                    }
                 }
 
                 if (locationEnabled) {
