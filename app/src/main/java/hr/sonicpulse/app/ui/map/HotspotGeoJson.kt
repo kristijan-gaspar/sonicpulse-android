@@ -19,10 +19,11 @@ object HotspotGeoJson {
         put("features", buildJsonArray { polygons.forEach { add(feature(it)) } })
     }.toString()
 
-    /** One Point feature per hotspot centroid, for the fixed screen-space marker layer (plan item
-     * 2) — built straight from [Hotspot], not from [HotspotPolygon]'s already-computed ring: a
-     * marker only needs the centroid, not 64 ring vertices. `label` carries the marker's
-     * device-count text so the map style itself doesn't need a data-driven ">= 4" expression. */
+    /** One Point feature per hotspot centroid, for the fixed screen-space marker layer — built
+     * straight from [Hotspot], not from [HotspotPolygon]'s already-computed ring: a marker only
+     * needs the centroid, not 64 ring vertices. Carries only `hotspotId` — the marker itself has no
+     * device-count text (the map legend already explains the color coding; see [MapScreen]) — used
+     * by [MapScreen]'s `CircleLayer` `onClick` to resolve a tap back to a [Hotspot]. */
     fun pointFeatureCollection(hotspots: List<Hotspot>): String = buildJsonObject {
         put("type", "FeatureCollection")
         put("features", buildJsonArray { hotspots.forEach { add(pointFeature(it)) } })
@@ -45,8 +46,6 @@ object HotspotGeoJson {
         put("type", "Feature")
         put("properties", buildJsonObject {
             put("hotspotId", hotspot.id.toString())
-            put("deviceCount", hotspot.deviceCount)
-            put("label", deviceCountLabel(hotspot.deviceCount))
         })
         put("geometry", buildJsonObject {
             put("type", "Point")

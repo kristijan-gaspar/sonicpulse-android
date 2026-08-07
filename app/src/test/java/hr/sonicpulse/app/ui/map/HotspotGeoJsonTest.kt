@@ -98,7 +98,7 @@ class HotspotGeoJsonTest {
     }
 
     @Test
-    fun `a point feature carries hotspotId deviceCount and a label property`() {
+    fun `a point feature carries only the hotspotId property — no device-count text on the marker itself`() {
         val id = UUID.fromString("22222222-2222-2222-2222-222222222222")
         val target = hotspot(id = id, deviceCount = 3)
 
@@ -106,8 +106,7 @@ class HotspotGeoJsonTest {
             .jsonObject["features"]!!.jsonArray[0].jsonObject["properties"]!!.jsonObject
 
         assertEquals(id.toString(), properties["hotspotId"]?.jsonPrimitive?.content)
-        assertEquals(3, properties["deviceCount"]?.jsonPrimitive?.int)
-        assertEquals("3", properties["label"]?.jsonPrimitive?.content)
+        assertEquals(setOf("hotspotId"), properties.keys)
     }
 
     // --- deviceCountLabel ---

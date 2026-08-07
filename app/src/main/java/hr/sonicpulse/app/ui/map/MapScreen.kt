@@ -94,18 +94,16 @@ import hr.sonicpulse.app.ui.theme.Spacing
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.compose.camera.rememberCameraState
-import org.maplibre.compose.expressions.dsl.asString
 import org.maplibre.compose.expressions.dsl.const
-import org.maplibre.compose.expressions.dsl.feature
-import org.maplibre.compose.expressions.dsl.format
-import org.maplibre.compose.expressions.dsl.span
 import org.maplibre.compose.gms.rememberFusedLocationProvider
 import org.maplibre.compose.layers.CircleLayer
 import org.maplibre.compose.layers.FillLayer
 import org.maplibre.compose.layers.LineLayer
-import org.maplibre.compose.layers.SymbolLayer
 import org.maplibre.compose.location.LocationPuck
 import org.maplibre.compose.location.rememberUserLocationState
 import org.maplibre.compose.map.MapOptions
@@ -115,6 +113,7 @@ import org.maplibre.compose.sources.GeoJsonData
 import org.maplibre.compose.sources.rememberGeoJsonSource
 import org.maplibre.compose.style.BaseStyle
 import org.maplibre.compose.util.ClickResult
+import org.maplibre.compose.util.FeaturesClickHandler
 import org.maplibre.spatialk.geojson.Position
 
 /** Documented, officially working OpenFreeMap style (verified during the branch spike). A dark
@@ -130,10 +129,14 @@ private val DefaultCameraPosition = CameraPosition(target = Position(longitude =
 /** A value between 10 and 15 s is acceptable per the plan; 15 s chosen and used consistently. */
 private const val LOCATION_FIX_TIMEOUT_MILLIS = 15_000L
 
-/** Fixed on-screen marker radius (dp) — deliberately never scaled by geographic zoom (see
- * [HotspotMarkerHitSelector]'s KDoc), so a hotspot stays clearly visible even zoomed out to a
- * whole-region view. ~24 dp diameter, inside the plan's 20-28 dp range. */
-private val MARKER_VISUAL_RADIUS_DP = 12.dp
+/** Fixed on-screen marker radius (dp) — deliberately never scaled by geographic zoom, so a hotspot
+ * stays clearly visible (and, since hit-testing now goes through the marker's own `CircleLayer`
+ * `onClick`, clickable) even zoomed out to a whole-region view. */
+private val MARKER_VISUAL_RADIUS_DP = 17.dp
+
+/** Deliberately bold — the marker is meant to read as an obvious, pin-like dot even at a glance,
+ * not a subtle outline. */
+private val MARKER_STROKE_WIDTH_DP = 4.dp
 
 /** Camera zoom used whenever a hotspot is focused — by tapping its marker/polygon or picking it
  * from the hotspot list — within the plan's 15-16 "close enough to see the real radius polygon"
@@ -466,6 +469,24 @@ internal fun MapContent(
     val polygonsByBucket = remember(uiState.hotspots) { bucketPolygons(uiState.hotspots) }
     val markersByBucket = remember(uiState.hotspots) { bucketMarkers(uiState.hotspots) }
 
+    // Click handling lives on the marker/polygon layers themselves, not on MaplibreMap's top-level
+    // onMapClick. onMapClick is captured once inside MaplibreMap's own remember(cameraState,
+    // styleState, styleComposition) block with no refresh mechanism (verified against the pinned
+    // maplibre-compose 0.13.0 sources — unlike a layer's own onClick, which is re-applied every
+    // recomposition via LayerNode's Updater.set()), so it goes stale as soon as uiState.hotspots
+    // changes after the map first loads — in practice, permanently frozen to the pre-load empty
+    // list. A layer's own onClick also only reports features whose *actual rendered geometry* is
+    // under the tap, so no separate geographic hit-tolerance math is needed at all.
+    val onFeatureClick: FeaturesClickHandler = { features ->
+        val hit = hotspotFromClickedFeatures(features.map { it.properties }, uiState.hotspots)
+        if (hit != null) {
+            focusHotspot(hit)
+            ClickResult.Consume
+        } else {
+            ClickResult.Pass
+        }
+    }
+
     // No Scaffold here on purpose: the app-level Scaffold in SonicPulseApp already reserves the
     // area between the top bar and the bottom navigation bar, and a nested Scaffold's own default
     // window-insets handling would re-reserve part of that same space, shrinking the map viewport
@@ -478,25 +499,6 @@ internal fun MapContent(
                 baseStyle = BaseStyle.Uri(MAP_STYLE_URL),
                 cameraState = cameraState,
                 options = MapOptions(ornamentOptions = ornamentOptions),
-                onMapClick = { position: Position, _ ->
-                    // The fixed-size marker is the primary tap target at any zoom (§3/§4) — its
-                    // geographic hit tolerance depends on the current zoom, so it's tried first;
-                    // the geographic polygon/radius hit-test is the existing fallback. Both funnel
-                    // into the same focusHotspot (§3: "the same general behavior may also be used
-                    // when selecting the geographic hotspot polygon").
-                    val hit = HotspotMarkerHitSelector.select(
-                        clickLatitude = position.latitude,
-                        clickLongitude = position.longitude,
-                        hotspots = uiState.hotspots,
-                        zoom = cameraState.position.zoom
-                    ) ?: HotspotHitSelector.select(position.latitude, position.longitude, uiState.hotspots)
-                    if (hit != null) {
-                        focusHotspot(hit)
-                        ClickResult.Consume
-                    } else {
-                        ClickResult.Pass
-                    }
-                },
                 onMapLoadFailed = { reason ->
                     renderCoordinator.onLoadFailed(instanceGeneration, reason)
                     renderVersion++
@@ -509,11 +511,15 @@ internal fun MapContent(
                 polygonsByBucket.forEach { (bucket, polygons) ->
                     if (polygons.isEmpty()) return@forEach
                     val source = rememberGeoJsonSource(data = GeoJsonData.JsonString(HotspotGeoJson.featureCollection(polygons)))
+                    // onClick only on the fill (the layer whose rendered area actually spans the
+                    // hotspot's radius) — the outline below is decorative and would only be
+                    // clickable along its thin stroke.
                     FillLayer(
                         id = "hotspots-fill-${bucket.name}",
                         source = source,
                         color = const(bucket.color),
-                        opacity = const(0.25f)
+                        opacity = const(0.25f),
+                        onClick = onFeatureClick
                     )
                     LineLayer(
                         id = "hotspots-outline-${bucket.name}",
@@ -523,13 +529,9 @@ internal fun MapContent(
                     )
                 }
 
-                // Fixed screen-space centroid markers (plan item 2), drawn above the geographic
-                // polygons so they stay the clearly visible, primary tap target at any zoom — see
-                // HotspotMarkerHitSelector's KDoc for why CircleLayer's dp radius doesn't shrink
-                // when zooming out. Tapping is handled entirely by onMapClick above, not a
-                // per-layer onClick here: onClick only receives the tapped features, never the
-                // click's own geographic position, which the deterministic "nearest centroid wins"
-                // tie-break (§4) needs.
+                // Fixed screen-space centroid markers — a simple, solid pin-like dot (no text; the
+                // existing legend already explains the color coding), drawn above the geographic
+                // polygons so it stays the clearly visible, primary tap target at any zoom.
                 markersByBucket.forEach { (bucket, hotspots) ->
                     if (hotspots.isEmpty()) return@forEach
                     val markerSource = rememberGeoJsonSource(
@@ -540,20 +542,11 @@ internal fun MapContent(
                         source = markerSource,
                         radius = const(MARKER_VISUAL_RADIUS_DP),
                         color = const(bucket.color),
+                        opacity = const(1f),
                         strokeColor = const(Color.White),
-                        strokeWidth = const(2.dp)
-                    )
-                    // Device-count label (plan item 2) — skipped rather than forced if this ever
-                    // turns out to render unreliably; a plain colored marker alone already satisfies
-                    // the plan's fallback ("a clean colored marker is sufficient").
-                    SymbolLayer(
-                        id = "hotspots-marker-label-${bucket.name}",
-                        source = markerSource,
-                        textField = format(span(feature["label"].asString())),
-                        textColor = const(Color.White),
-                        textSize = const(11.sp),
-                        textAllowOverlap = const(true),
-                        textIgnorePlacement = const(true)
+                        strokeWidth = const(MARKER_STROKE_WIDTH_DP),
+                        strokeOpacity = const(1f),
+                        onClick = onFeatureClick
                     )
                 }
 
@@ -776,6 +769,24 @@ internal fun retainedSelectedHotspotId(
     selectedId?.takeIf { id ->
         hotspots.any { hotspot -> hotspot.id == id }
     }
+
+/**
+ * Resolves the hotspot a native layer click landed on, from the clicked features' own `hotspotId`
+ * property (set by [HotspotGeoJson] on both the polygon and marker features) — the click already
+ * only contains features whose *actual rendered geometry* is under the tap (MapLibre's own
+ * `queryRenderedFeatures`), so no separate geographic hit-tolerance math is needed. Takes plain
+ * feature properties rather than [org.maplibre.spatialk.geojson.Feature] itself so this stays
+ * pure-JVM-testable without constructing geometry types. Multiple candidates (e.g. perfectly
+ * overlapping markers, an edge case in practice) break deterministically on the lowest hotspot id.
+ */
+internal fun hotspotFromClickedFeatures(featureProperties: List<JsonObject?>, hotspots: List<Hotspot>): Hotspot? {
+    val clickedIds = featureProperties
+        .mapNotNull { properties -> (properties?.get("hotspotId") as? JsonPrimitive)?.contentOrNull }
+        .mapNotNull { raw -> runCatching { UUID.fromString(raw) }.getOrNull() }
+        .toSet()
+    if (clickedIds.isEmpty()) return null
+    return hotspots.filter { it.id in clickedIds }.minByOrNull { it.id }
+}
 
 internal fun bucketFor(deviceCount: Int): DeviceCountBucket = when {
     deviceCount <= 2 -> DeviceCountBucket.Two

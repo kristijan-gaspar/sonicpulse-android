@@ -54,8 +54,23 @@ private fun SonicPulseNavigationBar(navController: androidx.navigation.NavHostCo
             NavigationBarItem(
                 selected = selected,
                 onClick = {
+                    // Leaving Map must NOT be saved: with saveState = true, Navigation Compose caps
+                    // the popped NavBackStackEntry's lifecycle at CREATED (never DESTROYED) so its
+                    // ViewModel/rememberSaveable state survives for restoreState. But MapLibre's own
+                    // MapView lifecycle is tied to exactly that same LocalLifecycleOwner (see
+                    // MapViewLifecycleObserver in the pinned maplibre-compose 0.13.0) and its
+                    // AndroidView creates a brand-new native MapView on every fresh composition —
+                    // since the old entry is only ever saved (never destroyed), mapView.onDestroy()
+                    // is never called on it, leaking one native map surface per Map tab round trip
+                    // and eventually leaving a freshly (re)created MapView's style/tile load stuck
+                    // forever. Every other destination keeps normal saveState/restoreState — this
+                    // only strips saveState when Map is the entry being left (LEAVING, not
+                    // entering: navigating TO Map with restoreState = true is harmless either way,
+                    // since Map re-fetches its own data on screen entry regardless).
+                    val leavingMap = currentDestination?.hierarchy
+                        ?.any { it.route == SonicPulseDestination.Map.route } == true
                     navController.navigate(destination.route) {
-                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = !leavingMap }
                         launchSingleTop = true
                         restoreState = true
                     }
