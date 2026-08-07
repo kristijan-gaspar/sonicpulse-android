@@ -157,8 +157,8 @@
     <string name="detail_label_radius">Radijus</string>
     <string name="detail_label_confidence">Ocjena pouzdanosti</string>
     <string name="detail_label_time_span">Vremenski raspon</string>
-    <string name="detail_label_first_detection">Prva detekcija</string>
-    <string name="detail_label_last_detection">Posljednja detekcija</string>
+    <string name="detail_label_first_detection">Prva zaprimljena detekcija</string>
+    <string name="detail_label_last_detection">Posljednja zaprimljena detekcija</string>
     <!-- Pouzdanost je heuristička ocjena 0–100, ne vjerojatnost — ova napomena to pojašnjava unutar
          detalja žarišta, vizualno je sekundarna kako ne bi opterećivala samu kartu. -->
     <string name="hotspot_detail_confidence_explanation">Heuristička ocjena temeljena na broju uređaja i vremenskoj blizini detekcija.</string>

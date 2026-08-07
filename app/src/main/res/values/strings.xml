@@ -159,8 +159,8 @@
     <string name="detail_label_radius">Radius</string>
     <string name="detail_label_confidence">Confidence score</string>
     <string name="detail_label_time_span">Time span</string>
-    <string name="detail_label_first_detection">First detection</string>
-    <string name="detail_label_last_detection">Last detection</string>
+    <string name="detail_label_first_detection">First detection received</string>
+    <string name="detail_label_last_detection">Last detection received</string>
     <!-- Confidence is a heuristic 0–100 score, not a probability — this caption clarifies that in
          the hotspot detail sheet, kept visually secondary so it doesn't clutter the map itself. -->
     <string name="hotspot_detail_confidence_explanation">Heuristic score based on device count and detection timing.</string>

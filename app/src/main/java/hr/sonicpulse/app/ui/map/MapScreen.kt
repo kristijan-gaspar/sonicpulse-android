@@ -829,7 +829,10 @@ private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modi
 @Composable
 private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState()
-    val timeSpan = remember(hotspot.id) { hotspotTimeSpanFor(hotspot.firstReceivedAtUtc, hotspot.lastReceivedAtUtc) }
+    // Not remembered: hotspot.id alone doesn't change when a refresh updates lastReceivedAtUtc for
+    // the same hotspot, and these calls are cheap pure computations — recomputing on every
+    // recomposition is correct and simpler than keying remember() by every timestamp involved.
+    val timeSpan = hotspotTimeSpanFor(hotspot.firstReceivedAtUtc, hotspot.lastReceivedAtUtc)
     val timeSpanText = when (timeSpan) {
         is HotspotTimeSpan.Seconds -> stringResource(R.string.duration_seconds, timeSpan.seconds)
         is HotspotTimeSpan.MinutesSeconds -> stringResource(R.string.duration_minutes_seconds, timeSpan.minutes, timeSpan.seconds)
@@ -837,10 +840,10 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     }
     val radiusText = stringResource(R.string.unit_meters_short, hotspot.radiusMeters.roundToInt())
     val confidenceText = confidenceScoreText(hotspot.confidence)
-    val zone = remember { ZoneId.systemDefault() }
-    val locale = remember { Locale.getDefault() }
-    val firstDetectionText = remember(hotspot.id) { detailTimestampTextFor(hotspot.firstReceivedAtUtc, zone, locale) }
-    val lastDetectionText = remember(hotspot.id) { detailTimestampTextFor(hotspot.lastReceivedAtUtc, zone, locale) }
+    val zone = ZoneId.systemDefault()
+    val locale = Locale.getDefault()
+    val firstDetectionText = detailTimestampTextFor(hotspot.firstReceivedAtUtc, zone, locale)
+    val lastDetectionText = detailTimestampTextFor(hotspot.lastReceivedAtUtc, zone, locale)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = AppShapes.BottomSheet) {
         Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md).fillMaxWidth()) {
