@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import android.util.Log
+import kotlin.math.roundToInt
 
 private const val PAGE_SIZE = 50
 
@@ -313,8 +314,10 @@ private fun toUiModel(detection: Detection): DetectionHistoryItemUiModel {
         peakDbfs = detection.peakDbfs,
         listTimestampText = listTimestampTextFor(detection.eventTime, zone, locale),
         detailTimestampText = detailTimestampTextFor(detection.eventTime, zone, locale),
+        receivedAtServerText = detailTimestampTextFor(detection.receivedAtUtc, zone, locale),
         latitudeText = String.format(Locale.US, "%.5f", detection.latitude),
         longitudeText = String.format(Locale.US, "%.5f", detection.longitude),
+        gpsAccuracyText = detection.gpsAccuracy.roundToInt().toString(),
         grouped = detection.hotspotId != null
     )
 }

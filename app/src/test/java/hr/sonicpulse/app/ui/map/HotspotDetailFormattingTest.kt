@@ -2,6 +2,7 @@ package hr.sonicpulse.app.ui.map
 
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class HotspotDetailFormattingTest {
@@ -48,5 +49,27 @@ class HotspotDetailFormattingTest {
         val span = hotspotTimeSpanFor(base, base.plusSeconds(3600))
 
         assertEquals(HotspotTimeSpan.HoursMinutes(1, 0), span)
+    }
+
+    // --- confidenceScoreText ---
+
+    @Test
+    fun `confidence is rendered as a score out of 100`() {
+        assertEquals("74 / 100", confidenceScoreText(74))
+    }
+
+    @Test
+    fun `confidence score never contains a percent sign`() {
+        assertFalse(confidenceScoreText(74).contains("%"))
+    }
+
+    @Test
+    fun `confidence score at the 0 boundary`() {
+        assertEquals("0 / 100", confidenceScoreText(0))
+    }
+
+    @Test
+    fun `confidence score at the 100 boundary`() {
+        assertEquals("100 / 100", confidenceScoreText(100))
     }
 }

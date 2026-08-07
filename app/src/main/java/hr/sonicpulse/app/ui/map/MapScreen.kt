@@ -79,9 +79,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.domain.model.Hotspot
+import java.time.ZoneId
+import java.util.Locale
 import java.util.UUID
 import hr.sonicpulse.app.ui.components.FilterChipRow
 import hr.sonicpulse.app.ui.components.FilterChipRowHorizontalContentPadding
+import hr.sonicpulse.app.ui.detections.detailTimestampTextFor
 import hr.sonicpulse.app.ui.permissions.PermissionDecisionEvaluator
 import hr.sonicpulse.app.ui.theme.AppShapes
 import hr.sonicpulse.app.ui.theme.MonospaceValueStyle
@@ -826,14 +829,21 @@ private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modi
 @Composable
 private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState()
-    val timeSpan = remember(hotspot.id) { hotspotTimeSpanFor(hotspot.firstReceivedAtUtc, hotspot.lastReceivedAtUtc) }
+    // Not remembered: hotspot.id alone doesn't change when a refresh updates lastReceivedAtUtc for
+    // the same hotspot, and these calls are cheap pure computations — recomputing on every
+    // recomposition is correct and simpler than keying remember() by every timestamp involved.
+    val timeSpan = hotspotTimeSpanFor(hotspot.firstReceivedAtUtc, hotspot.lastReceivedAtUtc)
     val timeSpanText = when (timeSpan) {
         is HotspotTimeSpan.Seconds -> stringResource(R.string.duration_seconds, timeSpan.seconds)
         is HotspotTimeSpan.MinutesSeconds -> stringResource(R.string.duration_minutes_seconds, timeSpan.minutes, timeSpan.seconds)
         is HotspotTimeSpan.HoursMinutes -> stringResource(R.string.duration_hours_minutes, timeSpan.hours, timeSpan.minutes)
     }
     val radiusText = stringResource(R.string.unit_meters_short, hotspot.radiusMeters.roundToInt())
-    val confidenceText = stringResource(R.string.unit_percent, hotspot.confidence)
+    val confidenceText = confidenceScoreText(hotspot.confidence)
+    val zone = ZoneId.systemDefault()
+    val locale = Locale.getDefault()
+    val firstDetectionText = detailTimestampTextFor(hotspot.firstReceivedAtUtc, zone, locale)
+    val lastDetectionText = detailTimestampTextFor(hotspot.lastReceivedAtUtc, zone, locale)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = AppShapes.BottomSheet) {
         Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md).fillMaxWidth()) {
@@ -853,7 +863,27 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
                 DetailCell(label = stringResource(R.string.detail_label_confidence), value = confidenceText, modifier = Modifier.weight(1f))
                 DetailCell(label = stringResource(R.string.detail_label_time_span), value = timeSpanText, modifier = Modifier.weight(1f))
             }
+            Text(
+                text = stringResource(R.string.hotspot_detail_confidence_explanation),
+                modifier = Modifier.padding(top = Spacing.xs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+            Spacer(modifier = Modifier.height(Spacing.md))
+            DetailRow(label = stringResource(R.string.detail_label_first_detection), value = firstDetectionText)
+            DetailRow(label = stringResource(R.string.detail_label_last_detection), value = lastDetectionText)
         }
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(vertical = Spacing.xs),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Text(text = value, style = MonospaceValueStyle)
     }
 }
 
