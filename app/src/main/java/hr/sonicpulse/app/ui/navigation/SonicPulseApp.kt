@@ -1,5 +1,7 @@
 package hr.sonicpulse.app.ui.navigation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -21,6 +23,17 @@ import hr.sonicpulse.app.ui.detections.DetectionsScreen
 import hr.sonicpulse.app.ui.map.MapScreen
 import hr.sonicpulse.app.ui.monitoring.MonitoringScreen
 import hr.sonicpulse.app.ui.settings.SettingsScreen
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.navigation.NavBackStackEntry
 
 @Composable
 fun SonicPulseApp() {
@@ -33,13 +46,61 @@ fun SonicPulseApp() {
         NavHost(
             navController = navController,
             startDestination = SonicPulseDestination.Monitoring.route,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
+            enterTransition = { sonicPulseEnterTransition() }
+
         ) {
-            composable(SonicPulseDestination.Monitoring.route) { MonitoringScreen() }
-            composable(SonicPulseDestination.Detections.route) { DetectionsScreen() }
-            composable(SonicPulseDestination.Map.route) { MapScreen() }
-            composable(SonicPulseDestination.Settings.route) { SettingsScreen() }
+            composable(SonicPulseDestination.Monitoring.route) {
+                OpaqueDestination { MonitoringScreen() }
+            }
+
+            composable(SonicPulseDestination.Detections.route) {
+                OpaqueDestination { DetectionsScreen() }
+            }
+
+            composable(SonicPulseDestination.Map.route) {
+                MapScreen()
+            }
+
+            composable(SonicPulseDestination.Settings.route) {
+                OpaqueDestination { SettingsScreen() }
+            }
         }
+    }
+}
+
+private const val NAVIGATION_ANIMATION_DURATION_MS = 200
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.sonicPulseEnterTransition(): EnterTransition {
+    return if (involvesMap()) {
+        EnterTransition.None
+    } else {
+        fadeIn(animationSpec = tween(NAVIGATION_ANIMATION_DURATION_MS))
+    }
+}
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.sonicPulseExitTransition(): ExitTransition {
+    return if (involvesMap()) {
+        ExitTransition.None
+    } else {
+        fadeOut(animationSpec = tween(NAVIGATION_ANIMATION_DURATION_MS))
+    }
+}
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.involvesMap(): Boolean {
+    return initialState.destination.route == SonicPulseDestination.Map.route ||
+            targetState.destination.route == SonicPulseDestination.Map.route
+}
+
+@Composable
+private fun OpaqueDestination(
+    content: @Composable () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        content()
     }
 }
 
@@ -54,25 +115,14 @@ private fun SonicPulseNavigationBar(navController: androidx.navigation.NavHostCo
             NavigationBarItem(
                 selected = selected,
                 onClick = {
-                    // Leaving Map must NOT be saved: with saveState = true, Navigation Compose caps
-                    // the popped NavBackStackEntry's lifecycle at CREATED (never DESTROYED) so its
-                    // ViewModel/rememberSaveable state survives for restoreState. But MapLibre's own
-                    // MapView lifecycle is tied to exactly that same LocalLifecycleOwner (see
-                    // MapViewLifecycleObserver in the pinned maplibre-compose 0.13.0) and its
-                    // AndroidView creates a brand-new native MapView on every fresh composition —
-                    // since the old entry is only ever saved (never destroyed), mapView.onDestroy()
-                    // is never called on it, leaking one native map surface per Map tab round trip
-                    // and eventually leaving a freshly (re)created MapView's style/tile load stuck
-                    // forever. Every other destination keeps normal saveState/restoreState — this
-                    // only strips saveState when Map is the entry being left (LEAVING, not
-                    // entering: navigating TO Map with restoreState = true is harmless either way,
-                    // since Map re-fetches its own data on screen entry regardless).
-                    val leavingMap = currentDestination?.hierarchy
-                        ?.any { it.route == SonicPulseDestination.Map.route } == true
-                    navController.navigate(destination.route) {
-                        popUpTo(navController.graph.findStartDestination().id) { saveState = !leavingMap }
-                        launchSingleTop = true
-                        restoreState = true
+                    if (!selected) {
+                        val leavingMap = currentDestination?.hierarchy
+                            ?.any { it.route == SonicPulseDestination.Map.route } == true
+                        navController.navigate(destination.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = !leavingMap }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 },
                 icon = { Icon(destination.icon, contentDescription = null) },

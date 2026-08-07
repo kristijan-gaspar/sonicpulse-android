@@ -132,29 +132,16 @@ private const val LOCATION_FIX_TIMEOUT_MILLIS = 15_000L
 /** Fixed on-screen marker radius (dp) — deliberately never scaled by geographic zoom, so a hotspot
  * stays clearly visible (and, since hit-testing now goes through the marker's own `CircleLayer`
  * `onClick`, clickable) even zoomed out to a whole-region view. */
-private val MARKER_VISUAL_RADIUS_DP = 17.dp
+private val MARKER_VISUAL_RADIUS_DP = 10.dp
 
 /** Deliberately bold — the marker is meant to read as an obvious, pin-like dot even at a glance,
  * not a subtle outline. */
-private val MARKER_STROKE_WIDTH_DP = 4.dp
+private val MARKER_STROKE_WIDTH_DP = 2.dp
 
 /** Camera zoom used whenever a hotspot is focused — by tapping its marker/polygon or picking it
  * from the hotspot list — within the plan's 15-16 "close enough to see the real radius polygon"
  * range. */
 private const val HOTSPOT_FOCUS_ZOOM = 15.5
-
-// --- Bottom-edge layout for the map's native ornaments (logo/attribution) and the Compose
-// overlays that share that corner (current-location FAB, snackbar). ---
-//
-// org.maplibre.compose's OrnamentOptions exposes exactly one shared `padding: PaddingValues` for
-// every ornament, regardless of alignment (confirmed against the pinned maplibre-compose 0.13.0
-// sources — there is no per-corner padding override). Giving that single padding a large bottom
-// value to keep the bottom-end attribution clear of the FAB — as the previous version did via
-// CurrentLocationFabClearance — also pushes the unrelated bottom-*start* logo up by the same
-// amount, even though the logo and the FAB are in different corners and never collide. The fix is
-// the other direction: keep the shared ornament padding small (both logo and attribution sit close
-// to the true bottom edge), and instead give the FAB — a plain Compose composable we fully
-// control — enough of its own bottom padding to clear the attribution button.
 
 /** Small, uniform edge inset for every enabled MapLibre ornament (logo, attribution, compass). */
 private val MapOrnamentEdgeInset = Spacing.sm

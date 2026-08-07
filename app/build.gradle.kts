@@ -121,16 +121,14 @@ dependencies {
 
     implementation(libs.maplibre.compose)
     implementation(libs.maplibre.compose.gms)
+    implementation(libs.maplibre.native.android)
 
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.kotlinx.serialization)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.datastore.preferences)
-    // Per-app language switching (Settings §3): AppCompatDelegate.setApplicationLocales() is the
-    // AndroidX-recommended mechanism across the app's minSdk range — it uses the Android 13+
-    // platform API automatically and falls back to its own implementation below that, without
-    // requiring AppCompatActivity.
+
     implementation(libs.androidx.appcompat)
 
     testImplementation(libs.junit)
