@@ -36,10 +36,11 @@ object HotspotGeometry {
      * smooth at any zoom level actually used on the Map screen without being wasteful to render. */
     const val SEGMENTS = 64
 
-    /** A zero or near-zero backend `radiusMeters` would otherwise collapse the ring to (or near)
-     * a single point — invisible, and effectively unclickable via [HotspotHitSelector]. This is a
-     * rendering/hit-testing floor only: the real, possibly-zero radius is preserved unchanged in
-     * [hr.sonicpulse.app.domain.model.Hotspot] and the detail sheet — see plan item 12. */
+    /** A zero or near-zero backend `radiusMeters` would otherwise collapse the ring to (or near) a
+     * single point — invisible, and (since a hotspot polygon's click handling is the *rendered*
+     * fill's own `onClick`, via native hit-testing — see [MapScreen]) effectively unclickable too.
+     * This is a rendering/hit-testing floor only: the real, possibly-zero radius is preserved
+     * unchanged in [hr.sonicpulse.app.domain.model.Hotspot] and the detail sheet — see plan item 12. */
     const val MIN_EFFECTIVE_RADIUS_METERS = 25.0
 
     /**
