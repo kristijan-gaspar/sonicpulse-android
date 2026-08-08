@@ -440,11 +440,14 @@ class MonitoringService : Service() {
     /** Creates the submission job lazily and only ever starts it if the session's tracker
      * actually accepts the registration — a job rejected because shutdown has already begun for
      * this session is cancelled outright, so no HTTP request is ever made for a detection nothing
-     * is waiting to resolve. */
+     * is waiting to resolve. The actual submission runs through [submitDetectionSafely] — see its
+     * KDoc for why this job body must never call [detectionSubmitter] directly. */
     private fun submitTracked(session: MonitoringSession, sessionDetection: hr.sonicpulse.app.domain.model.SessionDetection) {
         val tracker = session.submissionTracker
         val job = serviceScope.launch(start = CoroutineStart.LAZY) {
-            detectionSubmitter.submit(sessionDetection)
+            submitDetectionSafely(monitoringStateRepository, sessionDetection) {
+                detectionSubmitter.submit(sessionDetection)
+            }
         }
         if (tracker != null && tracker.register(sessionDetection.localEventId, job)) {
             job.start()

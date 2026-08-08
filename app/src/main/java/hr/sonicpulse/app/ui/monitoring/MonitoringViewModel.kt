@@ -174,5 +174,6 @@ private fun sendResultForFailure(reason: SubmissionFailureReason): SendResult = 
     is SubmissionFailureReason.RateLimited,
     is SubmissionFailureReason.ClientError,
     is SubmissionFailureReason.ServerError,
-    is SubmissionFailureReason.UnexpectedHttpStatus -> SendResult.FailedOther
+    is SubmissionFailureReason.UnexpectedHttpStatus,
+    SubmissionFailureReason.UnexpectedError -> SendResult.FailedOther
 }
