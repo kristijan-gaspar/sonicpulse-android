@@ -57,12 +57,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.location.LocationManager
+import hr.sonicpulse.app.ui.map.findActivity
 
 @Composable
 fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val activity = context as Activity
+    val activity = context.findActivity()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -74,17 +75,17 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
 
         val microphone = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.RECORD_AUDIO] == true,
-            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO),
+            shouldShowRationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)== true,
             requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.RECORD_AUDIO] == true
         )
         val fineLocation = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true,
-            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION),
+            shouldShowRationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) == true,
             requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.ACCESS_FINE_LOCATION] == true
         )
         val coarseLocation = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true,
-            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION),
+            shouldShowRationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION) == true,
             requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         )
 
@@ -131,7 +132,7 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     ) { results ->
         val fineLocation = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true,
-            shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION),
+            shouldShowRationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) == true,
             requestedBefore = upgradeFineRequestedBefore
         )
         scope.launch { results.keys.forEach { viewModel.markPermissionRequested(it) } }
