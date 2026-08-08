@@ -25,7 +25,6 @@ import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
-import hr.sonicpulse.app.domain.model.SessionDetection
 import hr.sonicpulse.app.observability.DetectionSessionLogger
 import hr.sonicpulse.app.repository.MonitoringStateRepository
 import hr.sonicpulse.engine.DetectionEngine
@@ -45,40 +44,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * Owns the active monitoring process: audio capture and engine processing run synchronously on
- * AudioRecorder's own capture thread (no separate executor here, per the threading contract) —
- * this service only coordinates lifecycle and publishes state. Location updates run alongside
- * audio capture (foregroundServiceType "microphone|location"), started asynchronously via
- * LocationProvider.start() — AudioRecorder only starts once that reports LocationStartResult.Started.
- *
- * Session ownership: every Start creates its own [MonitoringSession] (audio recorder, submission
- * tracker, first-block timing, processing-failure flag, location-polling job), owned exclusively
- * by [sessionRunner] — see [MonitoringSessionRunner]'s KDoc for exactly how it prevents an old,
- * still-running teardown from ever reading or mutating a newer session's resources, and how a
- * Start arriving mid-teardown is queued (never raced) as a single pending restart rather than
- * starting a second, overlapping session. Every callback that could touch shared/global state
- * (the repository, the diagnostic logger, a submission job) carries the exact [MonitoringSession]
- * it belongs to and checks it against [MonitoringSessionRunner.currentSession] first — a callback
- * whose session is no longer current is a stale leftover from a torn-down (or being torn down)
- * session and is silently ignored.
- *
- * The audio thread itself never touches LocationProvider except reading [LocationProvider.currentSnapshot]
- * (a cheap volatile-field read, not I/O) at the exact moment a detection is handed off — capturing
- * the classification as it stood then, before handing the rest of the work to this service's own
- * coroutine scope.
- *
- * Submission runs on [serviceScope] after the location snapshot: the audio thread never waits on
- * it, only publishes the local detection and moves on to the next block.
- *
- * Must only be started (via [startIntent]) from a visible user action (e.g. a Start button on
- * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO, location) to
- * apply, and the future UI is expected to have already requested and confirmed both permissions
- * before calling `startForegroundService()`. This service still defensively re-checks both
- * itself (via [MonitoringStartupGate]) — Android 14+ validates permissions again when promoting
- * a foreground service, so `ServiceCompat.startForeground()` can fail with a SecurityException
- * even when a permission check moments earlier passed.
- */
 @AndroidEntryPoint
 class MonitoringService : Service() {
 
@@ -100,12 +65,6 @@ class MonitoringService : Service() {
     private val lifecycleCoordinator = MonitoringLifecycleCoordinator()
     private val refreshCoordinator = MonitoringRefreshCoordinator()
 
-    /** Everything one monitoring session owns exclusively — see the class KDoc above and
-     * [MonitoringSessionRunner]. [recorder]/[submissionTracker] start null and are filled in by
-     * [startAudioCapture] once the session actually reaches ACTIVE; a session interrupted while
-     * still STARTING (e.g. Stop pressed before the location request resolves) simply never gets
-     * them, and [tearDownSession] already treats a null recorder/tracker as "nothing to release
-     * there." */
     private class MonitoringSession(val generation: Long) {
         var recorder: AudioRecorder? = null
         var submissionTracker: SubmissionJobTracker? = null
@@ -133,9 +92,6 @@ class MonitoringService : Service() {
             }
 
             override fun onTeardownFailure(throwable: Throwable) {
-                // Best-effort only: the teardown that was supposed to do this itself broke
-                // partway through, so nothing beyond logging and releasing what we safely can
-                // here is guaranteed to still be in a consistent state.
                 Log.e(TAG, "Monitoring session teardown failed", throwable)
                 runCatching { stopForegroundCompat() }
                 runCatching { monitoringStateRepository.cancelPendingSubmissions() }
@@ -143,13 +99,6 @@ class MonitoringService : Service() {
         }
     )
 
-    /** The most recently delivered `startId`, updated unconditionally on every [onStartCommand]
-     * call regardless of action or lifecycle state — read fresh at the exact moment
-     * [stopSelfResult] is actually called, never threaded through as a parameter captured
-     * earlier. This is what lets a duplicate/ignored Start (still the *same* generation) extend a
-     * pending stop's authority, while a Start that genuinely begins a new session is instead
-     * handled by [sessionRunner]'s queued-restart mechanism — stopSelfResult is simply never
-     * called in that case (see [MonitoringSessionRunner.Sessions.onRestart]). */
     private var latestStartId: Int = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -192,7 +141,8 @@ class MonitoringService : Service() {
             hasRecordAudioPermission = ::hasRecordAudioPermission,
             locationPermissionLevel = locationProvider::permissionLevel,
             areLocationServicesEnabled = locationProvider::areLocationServicesEnabled,
-            startForeground = ::tryStartForeground
+            startForeground = ::tryStartForeground,
+            enableLocationForegroundType = ::tryEnableLocationForegroundType
         )
 
         when (val result = gate.attemptStartup()) {
@@ -242,7 +192,7 @@ class MonitoringService : Service() {
                 this,
                 NOTIFICATION_ID,
                 buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
             ForegroundStartOutcome.Started
         } catch (e: SecurityException) {
@@ -252,6 +202,29 @@ class MonitoringService : Service() {
             ForegroundStartOutcome.PermissionDenied(e)
         } catch (e: IllegalStateException) {
             Log.w(TAG, "startForeground() failed for a non-permission reason")
+            ForegroundStartOutcome.Failed(e)
+        }
+    }
+
+    /** Upgrades the already-promoted (microphone-only) foreground service to also declare
+     * FOREGROUND_SERVICE_TYPE_LOCATION, once [MonitoringStartupGate] has confirmed location
+     * permission and services are both available. Same SecurityException/IllegalStateException
+     * distinction as [tryStartForeground] — see its KDoc. */
+    private fun tryEnableLocationForegroundType(): ForegroundStartOutcome {
+        return try {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+            ForegroundStartOutcome.Started
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Location foreground service type promotion was rejected")
+            ForegroundStartOutcome.PermissionDenied(e)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Location foreground service type promotion failed")
             ForegroundStartOutcome.Failed(e)
         }
     }
@@ -343,11 +316,20 @@ class MonitoringService : Service() {
         // location card, regardless of whether any detection ever occurs.
         session.locationPollingJob = serviceScope.launch {
             while (isActive) {
-                monitoringStateRepository.updateLocationStatus(
-                    snapshot = locationProvider.currentSnapshot,
-                    permissionLevel = locationProvider.permissionLevel(),
-                    servicesEnabled = locationProvider.areLocationServicesEnabled()
-                )
+                try {
+                    monitoringStateRepository.updateLocationStatus(
+                        snapshot = locationProvider.currentSnapshot,
+                        permissionLevel = locationProvider.permissionLevel(),
+                        servicesEnabled = locationProvider.areLocationServicesEnabled()
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // One bad iteration must not kill the whole polling loop — log and retry
+                    // after the normal interval below instead of leaving the status pill stuck
+                    // on its last value for the rest of the session.
+                    Log.e(TAG, "Location status polling failed", e)
+                }
                 delay(LOCATION_POLL_INTERVAL_MILLIS)
             }
         }
@@ -423,18 +405,34 @@ class MonitoringService : Service() {
         }
 
         if (event != null) {
-            // Captured here, on the audio thread, at the exact moment of handoff — not inside
-            // the coroutine below, whose scheduling could otherwise let a newer location update
-            // arrive first and misrepresent what was actually known when this detection occurred.
-            val locationSnapshot = locationProvider.currentSnapshot
-            val sessionDetection = sessionDetectionFor(event.peakDbfs, finalizedCandidate!!.peakTimeClient, locationSnapshot)
-            if (sessionDetection != null) {
-                // Published synchronously (MutableStateFlow.update is thread-safe) so the detection
-                // is visibly Pending before any submission attempt is even scheduled — insertion and
-                // submission are deliberately not both inside the launched coroutine below, so a
-                // cancelled/never-started submission coroutine can never leave the detection unlisted.
-                monitoringStateRepository.localDetectionOccurred(sessionDetection)
-                submitTracked(session, sessionDetection)
+            // Captured here, on the audio thread, at the exact moment of handoff — not inside the
+            // coroutine below, whose scheduling could otherwise let a newer location/permission/
+            // services state arrive first and misrepresent what was actually known when this
+            // detection occurred. currentSubmittableLocationSnapshot() re-checks permission and
+            // services fresh (never assumes a cached Valid snapshot is still legitimately
+            // obtainable — see its KDoc) before sessionDetectionFor() additionally requires the
+            // snapshot itself to be Valid.
+            val locationSnapshot = currentSubmittableLocationSnapshot(
+                permissionLevel = locationProvider.permissionLevel(),
+                servicesEnabled = locationProvider.areLocationServicesEnabled(),
+                snapshot = locationProvider.currentSnapshot
+            )
+            if (locationSnapshot != null) {
+                val sessionDetection = sessionDetectionFor(
+                    event.peakDbfs,
+                    finalizedCandidate!!.peakTimeClient,
+                    locationSnapshot
+                )
+
+                if (sessionDetection != null) {
+                    // Published synchronously (MutableStateFlow.update is thread-safe) so the
+                    // detection is visibly Pending before any submission attempt is even
+                    // scheduled — insertion and submission are deliberately not both inside the
+                    // launched coroutine below, so a cancelled/never-started submission coroutine
+                    // can never leave the detection unlisted.
+                    monitoringStateRepository.localDetectionOccurred(sessionDetection)
+                    submitTracked(session, sessionDetection)
+                }
             }
         }
     }
