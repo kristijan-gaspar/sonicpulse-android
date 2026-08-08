@@ -85,6 +85,8 @@ internal object SubmissionTransitions {
             SubmissionFailureReason.LocalStorageError -> counters.copy(droppedLocalStorage = counters.droppedLocalStorage + 1)
             SubmissionFailureReason.NetworkError -> counters.copy(droppedNetwork = counters.droppedNetwork + 1)
             SubmissionFailureReason.Cancelled -> counters.copy(cancelled = counters.cancelled + 1)
+            SubmissionFailureReason.UnexpectedError ->
+                counters.copy(submissionFailedUnexpectedError = counters.submissionFailedUnexpectedError + 1)
             SubmissionFailureReason.BadRequest ->
                 counters.copy(submissionFailedBadRequest = counters.submissionFailedBadRequest + 1)
             SubmissionFailureReason.Unauthorized ->
