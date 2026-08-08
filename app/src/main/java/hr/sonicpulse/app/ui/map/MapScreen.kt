@@ -29,7 +29,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -69,6 +68,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -417,6 +417,14 @@ internal fun MapContent(
                 if (!isLocationServicesEnabled(context)) {
                     disableLocationDueToServicesUnavailable()
                 }
+            } else if (locatingCoordinator.attempt.active && !isLocationServicesEnabled(context)) {
+                // A locating attempt can still be active on an ordinary resume if location services
+                // were disabled through a path this screen never tracked (e.g. a quick-settings
+                // tile) while the app was backgrounded, rather than via this screen's own "Open
+                // location settings" snackbar action (the branch above already covers that case).
+                // Catching it here clears the spinner on the very next resume instead of leaving it
+                // spinning for the rest of the fixed timeout.
+                disableLocationDueToServicesUnavailable()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -651,8 +659,7 @@ private fun HotspotControlsAndOverlays(
                     pendingRange = uiState.pendingRange,
                     isInitialLoading = uiState.isInitialLoading,
                     isLoadingSubsequent = uiState.isLoadingSubsequent,
-                    onSelectRange = onSelectRange,
-                    onRefresh = onRefresh
+                    onSelectRange = onSelectRange
                 )
                 Spacer(modifier = Modifier.height(Spacing.sm))
                 // Aligns the legend's left edge with the first filter chip's left edge, not the
@@ -814,6 +821,10 @@ private fun bucketPolygons(hotspots: List<Hotspot>): Map<DeviceCountBucket, List
 private fun bucketMarkers(hotspots: List<Hotspot>): Map<DeviceCountBucket, List<Hotspot>> =
     DeviceCountBucket.entries.associateWith { bucket -> hotspots.filter { bucketFor(it.deviceCount) == bucket } }
 
+/** No permanent refresh control here on purpose: selecting a time range (or the error-state Retry
+ * actions — [InitialDataErrorOverlay]/[SubsequentErrorBanner]) already re-fetches, so a standing
+ * refresh button next to the chips was redundant and, at narrow widths or larger font scales, a
+ * fixed-size sibling competing with this row's horizontally-scrollable [FilterChipRow] for space. */
 @Composable
 private fun TimeRangeRow(
     committedRange: HotspotTimeRange,
@@ -821,7 +832,6 @@ private fun TimeRangeRow(
     isInitialLoading: Boolean,
     isLoadingSubsequent: Boolean,
     onSelectRange: (HotspotTimeRange) -> Unit,
-    onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val selected = pendingRange ?: committedRange
@@ -831,36 +841,21 @@ private fun TimeRangeRow(
     val last3daysLabel = stringResource(R.string.range_last_3_days)
     val last7daysLabel = stringResource(R.string.range_last_7_days)
 
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        FilterChipRow(
-            options = HotspotTimeRange.entries,
-            selected = selected,
-            onSelect = onSelectRange,
-            label = { range ->
-                when (range) {
-                    HotspotTimeRange.Last24Hours -> last24hLabel
-                    HotspotTimeRange.Last3Days -> last3daysLabel
-                    HotspotTimeRange.Last7Days -> last7daysLabel
-                }
-            },
-            enabled = { !requestActive },
-            loading = { it == pendingRange },
-            modifier = Modifier.weight(1f)
-        )
-        val refreshLabel = stringResource(R.string.action_refresh)
-        IconButton(onClick = onRefresh, enabled = !requestActive) {
-            if (isLoadingSubsequent && pendingRange == null) {
-                // Semantics kept identical to the Icon it replaces — without this, a screen reader
-                // announces this button with no name at all while it is loading.
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp).semantics { contentDescription = refreshLabel },
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Icon(Icons.Filled.Refresh, contentDescription = refreshLabel)
+    FilterChipRow(
+        options = HotspotTimeRange.entries,
+        selected = selected,
+        onSelect = onSelectRange,
+        label = { range ->
+            when (range) {
+                HotspotTimeRange.Last24Hours -> last24hLabel
+                HotspotTimeRange.Last3Days -> last3daysLabel
+                HotspotTimeRange.Last7Days -> last7daysLabel
             }
-        }
-    }
+        },
+        enabled = { !requestActive },
+        loading = { it == pendingRange },
+        modifier = modifier.fillMaxWidth()
+    )
 }
 
 /** A compact "Devices  ●2  ●3  ●4+" chip — not a full-width banner. `wrapContentWidth()`, not
@@ -953,12 +948,15 @@ private fun EmptyHotspotsOverlay(modifier: Modifier = Modifier) {
     }
 }
 
+/** The message is a full sentence, not a short label — an unweighted Row with SpaceBetween would
+ * let it collide with the Retry button instead of wrapping at larger font scales/narrower widths.
+ * Weighting the message bounds it to whatever width remains after the button's own fixed size. */
 @Composable
 private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Surface(modifier = modifier.fillMaxWidth(), shape = AppShapes.Card, color = SemanticColors.WarningBg) {
         Row(
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -966,7 +964,8 @@ private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modi
                     if (serverConfigurationError) R.string.error_server_configuration else R.string.map_error_data_refresh
                 ),
                 style = MaterialTheme.typography.bodySmall,
-                color = SemanticColors.Warning
+                color = SemanticColors.Warning,
+                modifier = Modifier.weight(1f)
             )
             TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
         }
@@ -1024,14 +1023,24 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     }
 }
 
+/** [value] carries the weight, not [label] — an unweighted Row would let a long localized label
+ * plus a long formatted timestamp overflow past the sheet's width at larger font scales instead of
+ * wrapping, since Compose does not shrink or clip Text by default. Weighting [value] bounds it to
+ * whatever width remains after [label]'s own (short, fixed) intrinsic width, so it wraps onto a
+ * second line — right-aligned, to preserve the label-left/value-right layout — rather than overflow. */
 @Composable
 private fun DetailRow(label: String, value: String, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-        Text(text = value, style = MonospaceValueStyle)
+        Text(
+            text = value,
+            style = MonospaceValueStyle,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 

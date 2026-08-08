@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -63,6 +64,7 @@ import hr.sonicpulse.app.ui.theme.Spacing
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
+import java.util.UUID
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 
 @Composable
@@ -94,7 +96,19 @@ internal fun DetectionsContent(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedDetection by remember { mutableStateOf<DetectionHistoryItemUiModel?>(null) }
+    // Only the id is retained, never the tapped-at-that-moment DetectionHistoryItemUiModel itself —
+    // the sheet below re-derives its content from the current uiState.sections on every
+    // recomposition (selectedDetectionFrom), so a refresh/filter/paging change that drops this item
+    // closes the sheet instead of continuing to show a stale snapshot. Mirrors MapScreen's
+    // HotspotSheet.Detail + selectedHotspotFrom for the same reason.
+    var selectedDetectionId by remember { mutableStateOf<UUID?>(null) }
+
+    LaunchedEffect(uiState.sections, selectedDetectionId) {
+        val currentId = selectedDetectionId
+        if (currentId != null && selectedDetectionFrom(uiState.sections, currentId) == null) {
+            selectedDetectionId = null
+        }
+    }
 
     val allLabel = stringResource(R.string.filter_all)
     val todayLabel = stringResource(R.string.filter_today)
@@ -158,24 +172,43 @@ internal fun DetectionsContent(
                     pagingErrorServerConfiguration = uiState.pagingErrorServerConfiguration,
                     pagingActionDisabled = uiState.isRefreshing,
                     onLoadNextPage = onLoadNextPage,
-                    onItemClick = { selectedDetection = it }
+                    onItemClick = { selectedDetectionId = it.id }
                 )
             }
         }
 
-        selectedDetection?.let { detection ->
+        // Re-derived from the latest uiState.sections on every recomposition, not the stale
+        // snapshot captured when the sheet was opened — see selectedDetectionId's own comment.
+        selectedDetectionFrom(uiState.sections, selectedDetectionId)?.let { detection ->
             DetectionDetailBottomSheet(
                 detection = detection,
-                onDismiss = { selectedDetection = null })
+                onDismiss = { selectedDetectionId = null })
         }
     }
 }
 
+/**
+ * Re-derives the selected detection from the currently loaded [sections] by id, rather than
+ * trusting a captured object from the moment it was tapped — so an open detail sheet always
+ * reflects the latest data for that detection, and closes on its own (returning null) once the
+ * detection is no longer present (evicted by a refresh, paged out, or filtered out by a filter
+ * change), instead of continuing to display a stale snapshot. `selectedId == null` (nothing
+ * selected) also returns null. Mirrors `hr.sonicpulse.app.ui.map.selectedHotspotFrom`.
+ */
+internal fun selectedDetectionFrom(
+    sections: List<DetectionDateSection>,
+    selectedId: UUID?
+): DetectionHistoryItemUiModel? =
+    selectedId?.let { id -> sections.asSequence().flatMap { it.items }.find { it.id == id } }
+
+/** The message is a full sentence, not a short label — an unweighted Row with SpaceBetween would
+ * let it collide with the Retry button instead of wrapping at larger font scales/narrower widths.
+ * Weighting the message bounds it to whatever width remains after the button's own fixed size. */
 @Composable
 private fun RefreshErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Row(
         modifier = modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -183,7 +216,8 @@ private fun RefreshErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifie
                 if (serverConfigurationError) R.string.error_server_configuration else R.string.detections_error_refresh
             ),
             style = MaterialTheme.typography.bodySmall,
-            color = SemanticColors.Warning
+            color = SemanticColors.Warning,
+            modifier = Modifier.weight(1f)
         )
         TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
     }
@@ -298,7 +332,16 @@ private fun DetectionListItem(
                 Icon(icon, contentDescription = null, tint = iconTint)
             }
             Column(modifier = Modifier.weight(1f).padding(start = Spacing.md)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                // FlowRow, not Row: at a narrow width combined with a larger system font scale, the
+                // peak level + timestamp (and, below, coordinates + status badge) can together
+                // exceed the available width — an unweighted Row with SpaceBetween would let them
+                // overlap instead of clipping. Wrapping the second element onto its own line reads
+                // fine and costs nothing at the normal single-line width/scale.
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                ) {
                     Text(
                         text = stringResource(R.string.peak_level_dbfs, item.peakDbfs),
                         style = MonospaceValueStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -309,18 +352,19 @@ private fun DetectionListItem(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                     )
                 }
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs)
                 ) {
                     Text(
                         text = stringResource(R.string.coordinates_format, item.latitudeText, item.longitudeText),
                         style = MaterialTheme.typography.bodySmall,
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        modifier = Modifier.align(Alignment.CenterVertically)
                     )
-                    StatusBadge(grouped = item.grouped)
+                    StatusBadge(grouped = item.grouped, modifier = Modifier.align(Alignment.CenterVertically))
                 }
             }
             Icon(
@@ -517,17 +561,28 @@ private fun DetailCell(
     }
 }
 
+/** [value] carries the weight, not [label] — an unweighted Row would let a long localized label
+ * plus a long formatted value (e.g. a full latitude/longitude or timestamp string) overflow past
+ * the sheet's width at larger font scales instead of wrapping, since Compose does not shrink or
+ * clip Text by default. Weighting [value] bounds it to whatever width remains after [label]'s own
+ * (short, fixed) intrinsic width, so it wraps onto a second line — right-aligned, to preserve the
+ * label-left/value-right layout — rather than overflow. */
 @Composable
 private fun DetailRow(label: String, value: String, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
-        Text(text = value, style = MonospaceValueStyle)
+        Text(
+            text = value,
+            style = MonospaceValueStyle,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
