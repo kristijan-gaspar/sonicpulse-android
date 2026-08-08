@@ -332,17 +332,20 @@ class MonitoringService : Service() {
             return
         }
 
-        // The audio thread only reads currentSnapshot at the instant of a detection; this is the
-        // separate, continuous feed the Monitoring screen needs for its live status pill and
-        // location card, regardless of whether any detection ever occurs.
         session.locationPollingJob = serviceScope.launch {
-            while (isActive) {
-                monitoringStateRepository.updateLocationStatus(
-                    snapshot = locationProvider.currentSnapshot,
-                    permissionLevel = locationProvider.permissionLevel(),
-                    servicesEnabled = locationProvider.areLocationServicesEnabled()
-                )
-                delay(LOCATION_POLL_INTERVAL_MILLIS)
+            try {
+                while (isActive) {
+                    monitoringStateRepository.updateLocationStatus(
+                        snapshot = locationProvider.currentSnapshot,
+                        permissionLevel = locationProvider.permissionLevel(),
+                        servicesEnabled = locationProvider.areLocationServicesEnabled()
+                    )
+                    delay(LOCATION_POLL_INTERVAL_MILLIS)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Location status polling failed", e)
             }
         }
     }
