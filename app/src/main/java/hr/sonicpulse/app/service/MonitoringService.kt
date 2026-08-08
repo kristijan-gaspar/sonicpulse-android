@@ -44,43 +44,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * Owns the active monitoring process: audio capture and engine processing run synchronously on
- * AudioRecorder's own capture thread (no separate executor here, per the threading contract) —
- * this service only coordinates lifecycle and publishes state. Location updates run alongside
- * audio capture (foregroundServiceType "microphone|location"), started asynchronously via
- * LocationProvider.start() — AudioRecorder only starts once that reports LocationStartResult.Started.
- *
- * Session ownership: every Start creates its own [MonitoringSession] (audio recorder, submission
- * tracker, first-block timing, processing-failure flag, location-polling job), owned exclusively
- * by [sessionRunner] — see [MonitoringSessionRunner]'s KDoc for exactly how it prevents an old,
- * still-running teardown from ever reading or mutating a newer session's resources, and how a
- * Start arriving mid-teardown is queued (never raced) as a single pending restart rather than
- * starting a second, overlapping session. Every callback that could touch shared/global state
- * (the repository, the diagnostic logger, a submission job) carries the exact [MonitoringSession]
- * it belongs to and checks it against [MonitoringSessionRunner.currentSession] first — a callback
- * whose session is no longer current is a stale leftover from a torn-down (or being torn down)
- * session and is silently ignored.
- *
- * The audio thread itself never touches LocationProvider except reading [LocationProvider.currentSnapshot]
- * (a cheap volatile-field read, not I/O) at the exact moment a detection is handed off — capturing
- * the classification as it stood then, before handing the rest of the work to this service's own
- * coroutine scope.
- *
- * Submission runs on [serviceScope] after the location snapshot: the audio thread never waits on
- * it, only publishes the local detection and moves on to the next block.
- *
- * Must only be started (via [startIntent]) from a visible user action (e.g. a Start button on
- * the Monitoring screen) — required for while-in-use permissions (RECORD_AUDIO, location) to
- * apply, and the future UI is expected to have already requested and confirmed both permissions
- * before calling `startForegroundService()`. This service still defensively re-checks both
- * itself (via [MonitoringStartupGate]) — Android 14+ validates permissions again when promoting
- * a foreground service, so `ServiceCompat.startForeground()` can fail with a SecurityException
- * even when a permission check moments earlier passed. Promotion itself happens in two stages —
- * see [MonitoringStartupGate] and [tryStartForeground]/[tryEnableLocationForegroundType] — so the
- * service always promotes to the foreground promptly, before the location checks, regardless of
- * how long those checks take.
- */
 @AndroidEntryPoint
 class MonitoringService : Service() {
 
@@ -102,12 +65,6 @@ class MonitoringService : Service() {
     private val lifecycleCoordinator = MonitoringLifecycleCoordinator()
     private val refreshCoordinator = MonitoringRefreshCoordinator()
 
-    /** Everything one monitoring session owns exclusively — see the class KDoc above and
-     * [MonitoringSessionRunner]. [recorder]/[submissionTracker] start null and are filled in by
-     * [startAudioCapture] once the session actually reaches ACTIVE; a session interrupted while
-     * still STARTING (e.g. Stop pressed before the location request resolves) simply never gets
-     * them, and [tearDownSession] already treats a null recorder/tracker as "nothing to release
-     * there." */
     private class MonitoringSession(val generation: Long) {
         var recorder: AudioRecorder? = null
         var submissionTracker: SubmissionJobTracker? = null
@@ -135,9 +92,6 @@ class MonitoringService : Service() {
             }
 
             override fun onTeardownFailure(throwable: Throwable) {
-                // Best-effort only: the teardown that was supposed to do this itself broke
-                // partway through, so nothing beyond logging and releasing what we safely can
-                // here is guaranteed to still be in a consistent state.
                 Log.e(TAG, "Monitoring session teardown failed", throwable)
                 runCatching { stopForegroundCompat() }
                 runCatching { monitoringStateRepository.cancelPendingSubmissions() }
@@ -145,13 +99,6 @@ class MonitoringService : Service() {
         }
     )
 
-    /** The most recently delivered `startId`, updated unconditionally on every [onStartCommand]
-     * call regardless of action or lifecycle state — read fresh at the exact moment
-     * [stopSelfResult] is actually called, never threaded through as a parameter captured
-     * earlier. This is what lets a duplicate/ignored Start (still the *same* generation) extend a
-     * pending stop's authority, while a Start that genuinely begins a new session is instead
-     * handled by [sessionRunner]'s queued-restart mechanism — stopSelfResult is simply never
-     * called in that case (see [MonitoringSessionRunner.Sessions.onRestart]). */
     private var latestStartId: Int = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
