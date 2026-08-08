@@ -43,6 +43,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.location.LocationManagerCompat
 import hr.sonicpulse.app.BuildConfig
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.observability.SessionLogExporter
@@ -55,6 +56,7 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.location.LocationManager
 
 @Composable
 fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
@@ -64,18 +66,12 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // --- Start flow: one deterministic RequestMultiplePermissions launch, never two. ---
-
-    // Captured fresh right before each launch(), from *before* this specific request — consumed
-    // once the system dialog's result comes back, so a permanently-denied classification can never
-    // be confused with "never asked yet" (both look like shouldShowRationale == false).
     var startRequestedBeforeSnapshot by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
 
     val startPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        // POST_NOTIFICATIONS may be present in `results` (API 33+) but is intentionally never
-        // looked up below — it must never influence whether monitoring is allowed to start.
+
         val microphone = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.RECORD_AUDIO] == true,
             shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO),
@@ -91,18 +87,26 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
             shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION),
             requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         )
-        // Only the permissions actually included in this request (results.keys) are marked —
-        // on API < 33 that's mic+fine+coarse only, POST_NOTIFICATIONS is simply never a key.
+
         scope.launch { results.keys.forEach { viewModel.markPermissionRequested(it) } }
 
         when (MonitoringPermissionEvaluator.evaluate(microphone, fineLocation, coarseLocation)) {
-            // Enough to start — the service's own MonitoringStartupGate re-validates and reports
-            // a specific MonitoringStartupFailure if something is still actually missing, so no
-            // duplicate handling is needed here for either branch.
-            MonitoringPermissionOutcome.Granted, MonitoringPermissionOutcome.ApproximateLocationOnly ->
-                startMonitoring(context)
-            // Not enough to start, but the user can just tap Start again — nothing else to do.
+            MonitoringPermissionOutcome.Granted,
+            MonitoringPermissionOutcome.ApproximateLocationOnly -> {
+                if (isLocationServicesEnabled(context)) {
+                    startMonitoring(context)
+                } else {
+                    scope.launch {
+                        showLocationServicesDisabledSnackbar(
+                            context = context,
+                            snackbarHostState = snackbarHostState
+                        )
+                    }
+                }
+            }
+
             MonitoringPermissionOutcome.Denied -> Unit
+
             MonitoringPermissionOutcome.PermanentlyDenied -> scope.launch {
                 showOpenSettingsSnackbar(context, snackbarHostState)
             }
@@ -117,15 +121,9 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
         }
     }
 
-    // --- Precise-location upgrade flow: a separate request, never reuses the Start flow. ---
-    // Monitoring is already active in MonitoringPhase.PreciseLocationRequired — this must never
-    // request microphone or notifications again, and success must never re-send a Start intent.
 
     var upgradeFineRequestedBefore by remember { mutableStateOf(false) }
 
-    // Tracks whether Settings was opened specifically from this flow (not the Start flow's own
-    // PermanentlyDenied branch) — rememberSaveable so it survives the process death that opening
-    // Settings can trigger. Only this flag may ever cause a refresh-location intent on resume.
     var openedSettingsForPreciseLocation by rememberSaveable { mutableStateOf(false) }
 
     val preciseLocationLauncher = rememberLauncherForActivityResult(
@@ -143,7 +141,7 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
                 if (uiState.microphoneActive) {
                     context.startService(MonitoringService.refreshLocationIntent(context))
                 }
-            // Still PreciseLocationRequired; the user can tap "Enable location" again.
+
             PreciseLocationUpgradeOutcome.Denied -> Unit
             PreciseLocationUpgradeOutcome.PermanentlyDenied -> scope.launch {
                 showOpenSettingsSnackbar(
@@ -163,11 +161,7 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    // DisposableEffect(lifecycleOwner) only (re)builds its observer when lifecycleOwner itself
-    // changes — never on every uiState update — so the observer's closure would otherwise keep
-    // whatever microphoneActive value was current when it was first created. rememberUpdatedState
-    // gives it a stable holder to read through instead, so ON_RESUME (which can fire long after
-    // that first composition, e.g. on returning from system Settings) always sees the current value.
+
     val currentMonitoringActive = rememberUpdatedState(uiState.microphoneActive)
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -194,15 +188,22 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(uiState.errorEventId) {
-        uiState.errorMessageRes?.let { resId -> snackbarHostState.showSnackbar(context.getString(resId)) }
+    val errorMessage = uiState.errorMessageRes?.let { resId ->
+        stringResource(resId)
     }
 
-    // --- Session log export (testing-only, BuildConfig.ENABLE_SESSION_LOGGING): the button
-    // itself is only ever composed when the flag is on (see MonitoringContent) and the launcher
-    // is cheap to register regardless, so it's declared unconditionally here like every other
-    // launcher on this screen. A null uri means the user cancelled the picker — not a failure,
-    // nothing is shown for it. ---
+    LaunchedEffect(uiState.errorEventId) {
+        errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    val sessionLogExportSuccessMessage =
+        stringResource(R.string.session_log_export_success)
+
+    val sessionLogExportFailedMessage =
+        stringResource(R.string.session_log_export_failed)
+
     val exportSessionLogLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
@@ -214,12 +215,13 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
             } else {
                 Result.failure(IllegalStateException("No completed session log available"))
             }
-            val messageRes = if (result.isSuccess) {
-                R.string.session_log_export_success
+            val message = if (result.isSuccess) {
+                sessionLogExportSuccessMessage
             } else {
-                R.string.session_log_export_failed
+                sessionLogExportFailedMessage
             }
-            snackbarHostState.showSnackbar(context.getString(messageRes))
+
+            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -253,6 +255,21 @@ private suspend fun showOpenSettingsSnackbar(
     if (result == SnackbarResult.ActionPerformed) {
         onOpenSettings()
         openAppSettings(context)
+    }
+}
+
+private suspend fun showLocationServicesDisabledSnackbar(
+    context: Context,
+    snackbarHostState: SnackbarHostState
+) {
+    val result = snackbarHostState.showSnackbar(
+        message = context.getString(R.string.error_startup_location_services_disabled),
+        actionLabel = context.getString(R.string.action_open_location_settings),
+        duration = SnackbarDuration.Long
+    )
+
+    if (result == SnackbarResult.ActionPerformed) {
+        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
     }
 }
 
@@ -297,9 +314,7 @@ internal fun MonitoringContent(
             locationDisplayState = uiState.locationDisplayState
         )
         LastDetectionCard(uiState.lastDetection)
-        // Hidden entirely (not just disabled) when the build doesn't have session logging, and
-        // hidden until a session has actually finished — only "disabled while monitoring is
-        // active" is a true enabled/disabled state rather than a presence/absence one.
+
         if (BuildConfig.ENABLE_SESSION_LOGGING && uiState.sessionLogAvailable) {
             OutlinedButton(
                 onClick = onExportSessionLog,
@@ -326,4 +341,11 @@ private fun openAppSettings(context: Context) {
         Uri.fromParts("package", context.packageName, null)
     )
     context.startActivity(intent)
+}
+
+private fun isLocationServicesEnabled(context: Context): Boolean {
+    val locationManager =
+        context.getSystemService(LocationManager::class.java) ?: return false
+
+    return LocationManagerCompat.isLocationEnabled(locationManager)
 }
