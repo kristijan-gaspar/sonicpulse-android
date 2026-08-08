@@ -271,6 +271,26 @@ class MonitoringStartupGateTest {
     }
 
     @Test
+    fun `unexplained SecurityException during location foreground promotion is reported as ForegroundStartFailed when both permissions are available`() {
+        val cause = SecurityException("unexplained during location promotion")
+
+        val result = gate(
+            hasRecordAudioPermission = { true },
+            locationPermissionLevel = { LocationPermissionLevel.FINE },
+            enableLocationForegroundType = {
+                ForegroundStartOutcome.PermissionDenied(cause)
+            }
+        ).attemptStartup()
+
+        assertTrue(result is MonitoringStartupResult.Failed)
+
+        val failure = (result as MonitoringStartupResult.Failed).failure
+
+        assertTrue(failure is MonitoringStartupFailure.ForegroundStartFailed)
+        assertSame(cause, (failure as MonitoringStartupFailure.ForegroundStartFailed).cause)
+    }
+
+    @Test
     fun `location foreground promotion failure is reported as ForegroundStartFailed`() {
         val cause = IllegalStateException(
             "location foreground promotion failed"
