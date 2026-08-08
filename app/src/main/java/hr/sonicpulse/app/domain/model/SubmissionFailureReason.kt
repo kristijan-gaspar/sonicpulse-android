@@ -10,6 +10,12 @@ sealed interface SubmissionFailureReason {
     data object NetworkError : SubmissionFailureReason
     data object Cancelled : SubmissionFailureReason
 
+    /** A non-cancellation exception escaped the submission attempt itself — neither a network nor
+     * local-storage IOException (both handled separately above), e.g. a malformed-response
+     * deserialization failure. Caught at the coroutine boundary in [hr.sonicpulse.app.service]
+     * so it can never crash the process; this is how that boundary reports the outcome. */
+    data object UnexpectedError : SubmissionFailureReason
+
     data object BadRequest : SubmissionFailureReason
     data object Unauthorized : SubmissionFailureReason
 

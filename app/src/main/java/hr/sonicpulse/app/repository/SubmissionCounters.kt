@@ -20,5 +20,10 @@ data class SubmissionCounters(
     val submissionFailedClient: Int = 0,
     val submissionFailedServer: Int = 0,
     val submissionFailedUnexpected: Int = 0,
+    /** [hr.sonicpulse.app.domain.model.SubmissionFailureReason.UnexpectedError] only — a
+     * non-cancellation exception from the submission attempt itself, never an HTTP response.
+     * Distinct from [submissionFailedUnexpected], which is specifically an unrecognized HTTP
+     * status code. */
+    val submissionFailedUnexpectedError: Int = 0,
     val cancelled: Int = 0
 )
