@@ -209,6 +209,44 @@ class MonitoringStartupGateTest {
     }
 
     @Test
+    fun `SecurityException during microphone-only promotion is never attributed to missing location permission`() {
+        val cause = SecurityException("record audio")
+
+        val result = gate(
+            locationPermissionLevel = { LocationPermissionLevel.NONE },
+            startForeground = { ForegroundStartOutcome.PermissionDenied(cause) }
+        ).attemptStartup()
+
+        assertTrue(result is MonitoringStartupResult.Failed)
+
+        val failure = (result as MonitoringStartupResult.Failed).failure
+
+        assertTrue(failure is MonitoringStartupFailure.ForegroundStartFailed)
+        assertSame(cause, (failure as MonitoringStartupFailure.ForegroundStartFailed).cause)
+    }
+
+    @Test
+    fun `SecurityException during microphone+location promotion is still attributed to revoked microphone permission`() {
+        var checkCount = 0
+        val cause = SecurityException("record audio revoked mid-flight")
+
+        val result = gate(
+            hasRecordAudioPermission = {
+                checkCount++
+                checkCount <= 2
+            },
+            enableLocationForegroundType = { ForegroundStartOutcome.PermissionDenied(cause) }
+        ).attemptStartup()
+
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.MicrophonePermissionDenied
+            ),
+            result
+        )
+    }
+
+    @Test
     fun `unattributed SecurityException is reported as ForegroundStartFailed`() {
         val cause = SecurityException("unexplained")
 
