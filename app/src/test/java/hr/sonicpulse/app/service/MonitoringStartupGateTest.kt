@@ -11,118 +11,315 @@ class MonitoringStartupGateTest {
 
     private fun gate(
         hasRecordAudioPermission: () -> Boolean = { true },
-        locationPermissionLevel: () -> LocationPermissionLevel = { LocationPermissionLevel.FINE },
+        locationPermissionLevel: () -> LocationPermissionLevel = {
+            LocationPermissionLevel.FINE
+        },
         areLocationServicesEnabled: () -> Boolean = { true },
-        startForeground: () -> ForegroundStartOutcome = { ForegroundStartOutcome.Started }
-    ) = MonitoringStartupGate(hasRecordAudioPermission, locationPermissionLevel, areLocationServicesEnabled, startForeground)
+        startForeground: () -> ForegroundStartOutcome = {
+            ForegroundStartOutcome.Started
+        },
+        enableLocationForegroundType: () -> ForegroundStartOutcome = {
+            ForegroundStartOutcome.Started
+        }
+    ) = MonitoringStartupGate(
+        hasRecordAudioPermission = hasRecordAudioPermission,
+        locationPermissionLevel = locationPermissionLevel,
+        areLocationServicesEnabled = areLocationServicesEnabled,
+        startForeground = startForeground,
+        enableLocationForegroundType = enableLocationForegroundType
+    )
 
     @Test
     fun `missing RECORD_AUDIO denies startup without checking anything else`() {
         var locationChecked = false
         var servicesChecked = false
         var startForegroundCalled = false
+        var locationForegroundCalled = false
+
         val result = gate(
             hasRecordAudioPermission = { false },
-            locationPermissionLevel = { locationChecked = true; LocationPermissionLevel.FINE },
-            areLocationServicesEnabled = { servicesChecked = true; true },
-            startForeground = { startForegroundCalled = true; ForegroundStartOutcome.Started }
+            locationPermissionLevel = {
+                locationChecked = true
+                LocationPermissionLevel.FINE
+            },
+            areLocationServicesEnabled = {
+                servicesChecked = true
+                true
+            },
+            startForeground = {
+                startForegroundCalled = true
+                ForegroundStartOutcome.Started
+            },
+            enableLocationForegroundType = {
+                locationForegroundCalled = true
+                ForegroundStartOutcome.Started
+            }
         ).attemptStartup()
 
-        assertEquals(MonitoringStartupResult.Failed(MonitoringStartupFailure.MicrophonePermissionDenied), result)
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.MicrophonePermissionDenied
+            ),
+            result
+        )
         assertFalse(locationChecked)
         assertFalse(servicesChecked)
         assertFalse(startForegroundCalled)
+        assertFalse(locationForegroundCalled)
     }
 
     @Test
-    fun `missing location permission denies startup without checking location services or promoting`() {
+    fun `missing location permission denies startup after microphone promotion`() {
         var servicesChecked = false
-        var startForegroundCalled = false
+        var microphonePromotionCalled = false
+        var locationPromotionCalled = false
+
         val result = gate(
-            locationPermissionLevel = { LocationPermissionLevel.NONE },
-            areLocationServicesEnabled = { servicesChecked = true; true },
-            startForeground = { startForegroundCalled = true; ForegroundStartOutcome.Started }
+            locationPermissionLevel = {
+                LocationPermissionLevel.NONE
+            },
+            areLocationServicesEnabled = {
+                servicesChecked = true
+                true
+            },
+            startForeground = {
+                microphonePromotionCalled = true
+                ForegroundStartOutcome.Started
+            },
+            enableLocationForegroundType = {
+                locationPromotionCalled = true
+                ForegroundStartOutcome.Started
+            }
         ).attemptStartup()
 
-        assertEquals(MonitoringStartupResult.Failed(MonitoringStartupFailure.LocationPermissionDenied), result)
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.LocationPermissionDenied
+            ),
+            result
+        )
+        assertTrue(microphonePromotionCalled)
         assertFalse(servicesChecked)
-        assertFalse(startForegroundCalled)
+        assertFalse(locationPromotionCalled)
     }
 
     @Test
-    fun `disabled location services deny startup without attempting to promote`() {
-        var startForegroundCalled = false
+    fun `disabled location services deny startup after microphone promotion`() {
+        var microphonePromotionCalled = false
+        var locationPromotionCalled = false
+
         val result = gate(
             areLocationServicesEnabled = { false },
-            startForeground = { startForegroundCalled = true; ForegroundStartOutcome.Started }
+            startForeground = {
+                microphonePromotionCalled = true
+                ForegroundStartOutcome.Started
+            },
+            enableLocationForegroundType = {
+                locationPromotionCalled = true
+                ForegroundStartOutcome.Started
+            }
         ).attemptStartup()
 
-        assertEquals(MonitoringStartupResult.Failed(MonitoringStartupFailure.LocationServicesDisabled), result)
-        assertFalse(startForegroundCalled)
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.LocationServicesDisabled
+            ),
+            result
+        )
+        assertTrue(microphonePromotionCalled)
+        assertFalse(locationPromotionCalled)
     }
 
     @Test
-    fun `an IllegalStateException-derived foreground failure is reported as ForegroundStartFailed`() {
-        val cause = IllegalStateException("not allowed to start a foreground service in this app state")
-        val result = gate(startForeground = { ForegroundStartOutcome.Failed(cause) }).attemptStartup()
+    fun `foreground promotion failure is reported as ForegroundStartFailed`() {
+        val cause = IllegalStateException(
+            "not allowed to start foreground service"
+        )
+
+        val result = gate(
+            startForeground = {
+                ForegroundStartOutcome.Failed(cause)
+            }
+        ).attemptStartup()
 
         assertTrue(result is MonitoringStartupResult.Failed)
-        val failure = (result as MonitoringStartupResult.Failed).failure
-        assertTrue(failure is MonitoringStartupFailure.ForegroundStartFailed)
-        assertSame(cause, (failure as MonitoringStartupFailure.ForegroundStartFailed).cause)
+
+        val failure =
+            (result as MonitoringStartupResult.Failed).failure
+
+        assertTrue(
+            failure is MonitoringStartupFailure.ForegroundStartFailed
+        )
+        assertSame(
+            cause,
+            (failure as MonitoringStartupFailure.ForegroundStartFailed).cause
+        )
     }
 
     @Test
-    fun `a SecurityException during promotion is attributed to microphone when RECORD_AUDIO is no longer granted`() {
-        var recordAudioCheckCount = 0
+    fun `SecurityException during microphone promotion is attributed to revoked microphone permission`() {
+        var microphoneCheckCount = 0
         val cause = SecurityException("record audio")
+
         val result = gate(
             hasRecordAudioPermission = {
-                recordAudioCheckCount++
-                recordAudioCheckCount == 1 // granted pre-promotion, revoked by attribution time
+                microphoneCheckCount++
+                microphoneCheckCount == 1
             },
-            startForeground = { ForegroundStartOutcome.PermissionDenied(cause) }
+            startForeground = {
+                ForegroundStartOutcome.PermissionDenied(cause)
+            }
         ).attemptStartup()
 
-        assertEquals(MonitoringStartupResult.Failed(MonitoringStartupFailure.MicrophonePermissionDenied), result)
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.MicrophonePermissionDenied
+            ),
+            result
+        )
     }
 
     @Test
-    fun `a SecurityException during promotion is attributed to location when its permission is no longer granted`() {
+    fun `SecurityException during location foreground promotion is attributed to revoked location permission`() {
         var locationCheckCount = 0
         val cause = SecurityException("location")
+
         val result = gate(
             locationPermissionLevel = {
                 locationCheckCount++
-                if (locationCheckCount == 1) LocationPermissionLevel.FINE else LocationPermissionLevel.NONE
+
+                if (locationCheckCount == 1) {
+                    LocationPermissionLevel.FINE
+                } else {
+                    LocationPermissionLevel.NONE
+                }
             },
-            startForeground = { ForegroundStartOutcome.PermissionDenied(cause) }
+            enableLocationForegroundType = {
+                ForegroundStartOutcome.PermissionDenied(cause)
+            }
         ).attemptStartup()
 
-        assertEquals(MonitoringStartupResult.Failed(MonitoringStartupFailure.LocationPermissionDenied), result)
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.LocationPermissionDenied
+            ),
+            result
+        )
+        assertEquals(2, locationCheckCount)
     }
 
     @Test
-    fun `a SecurityException during promotion with both permissions still granted is an unattributed foreground failure preserving the original cause`() {
-        val cause = SecurityException("unexplained")
-        val result = gate(startForeground = { ForegroundStartOutcome.PermissionDenied(cause) }).attemptStartup()
+    fun `SecurityException during microphone-only promotion is never attributed to missing location permission`() {
+        val cause = SecurityException("record audio")
+
+        val result = gate(
+            locationPermissionLevel = { LocationPermissionLevel.NONE },
+            startForeground = { ForegroundStartOutcome.PermissionDenied(cause) }
+        ).attemptStartup()
 
         assertTrue(result is MonitoringStartupResult.Failed)
+
         val failure = (result as MonitoringStartupResult.Failed).failure
+
         assertTrue(failure is MonitoringStartupFailure.ForegroundStartFailed)
         assertSame(cause, (failure as MonitoringStartupFailure.ForegroundStartFailed).cause)
     }
 
     @Test
-    fun `all checks passing and successful promotion allows startup to proceed`() {
-        val result = gate().attemptStartup()
+    fun `SecurityException during microphone+location promotion is still attributed to revoked microphone permission`() {
+        var checkCount = 0
+        val cause = SecurityException("record audio revoked mid-flight")
 
-        assertEquals(MonitoringStartupResult.Proceed, result)
+        val result = gate(
+            hasRecordAudioPermission = {
+                checkCount++
+                checkCount <= 2
+            },
+            enableLocationForegroundType = { ForegroundStartOutcome.PermissionDenied(cause) }
+        ).attemptStartup()
+
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.MicrophonePermissionDenied
+            ),
+            result
+        )
     }
 
     @Test
-    fun `RECORD_AUDIO revoked between the pre-check and the post-promotion re-check denies startup`() {
+    fun `unattributed SecurityException is reported as ForegroundStartFailed`() {
+        val cause = SecurityException("unexplained")
+
+        val result = gate(
+            startForeground = {
+                ForegroundStartOutcome.PermissionDenied(cause)
+            }
+        ).attemptStartup()
+
+        assertTrue(result is MonitoringStartupResult.Failed)
+
+        val failure =
+            (result as MonitoringStartupResult.Failed).failure
+
+        assertTrue(
+            failure is MonitoringStartupFailure.ForegroundStartFailed
+        )
+        assertSame(
+            cause,
+            (failure as MonitoringStartupFailure.ForegroundStartFailed).cause
+        )
+    }
+
+    @Test
+    fun `unexplained SecurityException during location foreground promotion is reported as ForegroundStartFailed when both permissions are available`() {
+        val cause = SecurityException("unexplained during location promotion")
+
+        val result = gate(
+            hasRecordAudioPermission = { true },
+            locationPermissionLevel = { LocationPermissionLevel.FINE },
+            enableLocationForegroundType = {
+                ForegroundStartOutcome.PermissionDenied(cause)
+            }
+        ).attemptStartup()
+
+        assertTrue(result is MonitoringStartupResult.Failed)
+
+        val failure = (result as MonitoringStartupResult.Failed).failure
+
+        assertTrue(failure is MonitoringStartupFailure.ForegroundStartFailed)
+        assertSame(cause, (failure as MonitoringStartupFailure.ForegroundStartFailed).cause)
+    }
+
+    @Test
+    fun `location foreground promotion failure is reported as ForegroundStartFailed`() {
+        val cause = IllegalStateException(
+            "location foreground promotion failed"
+        )
+
+        val result = gate(
+            enableLocationForegroundType = {
+                ForegroundStartOutcome.Failed(cause)
+            }
+        ).attemptStartup()
+
+        assertTrue(result is MonitoringStartupResult.Failed)
+
+        val failure =
+            (result as MonitoringStartupResult.Failed).failure
+
+        assertTrue(
+            failure is MonitoringStartupFailure.ForegroundStartFailed
+        )
+        assertSame(
+            cause,
+            (failure as MonitoringStartupFailure.ForegroundStartFailed).cause
+        )
+    }
+
+    @Test
+    fun `RECORD_AUDIO revoked after microphone promotion denies startup`() {
         var checkCount = 0
+
         val result = gate(
             hasRecordAudioPermission = {
                 checkCount++
@@ -130,19 +327,21 @@ class MonitoringStartupGateTest {
             }
         ).attemptStartup()
 
-        assertEquals(MonitoringStartupResult.Failed(MonitoringStartupFailure.MicrophonePermissionDenied), result)
+        assertEquals(
+            MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.MicrophonePermissionDenied
+            ),
+            result
+        )
     }
 
     @Test
-    fun `location permission revoked between the pre-check and the post-promotion re-check denies startup`() {
-        var checkCount = 0
-        val result = gate(
-            locationPermissionLevel = {
-                checkCount++
-                if (checkCount == 1) LocationPermissionLevel.FINE else LocationPermissionLevel.NONE
-            }
-        ).attemptStartup()
+    fun `all checks and both foreground promotions succeeding allow startup`() {
+        val result = gate().attemptStartup()
 
-        assertEquals(MonitoringStartupResult.Failed(MonitoringStartupFailure.LocationPermissionDenied), result)
+        assertEquals(
+            MonitoringStartupResult.Proceed,
+            result
+        )
     }
 }
