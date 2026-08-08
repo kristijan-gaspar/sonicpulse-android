@@ -45,33 +45,61 @@ class MonitoringStartupGate(
     private val hasRecordAudioPermission: () -> Boolean,
     private val locationPermissionLevel: () -> LocationPermissionLevel,
     private val areLocationServicesEnabled: () -> Boolean,
-    private val startForeground: () -> ForegroundStartOutcome
+    private val startForeground: () -> ForegroundStartOutcome,
+    private val enableLocationForegroundType: () -> ForegroundStartOutcome
 ) {
     fun attemptStartup(): MonitoringStartupResult {
         if (!hasRecordAudioPermission()) {
-            return MonitoringStartupResult.Failed(MonitoringStartupFailure.MicrophonePermissionDenied)
-        }
-        if (locationPermissionLevel() == LocationPermissionLevel.NONE) {
-            return MonitoringStartupResult.Failed(MonitoringStartupFailure.LocationPermissionDenied)
-        }
-        if (!areLocationServicesEnabled()) {
-            return MonitoringStartupResult.Failed(MonitoringStartupFailure.LocationServicesDisabled)
+            return MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.MicrophonePermissionDenied
+            )
         }
 
-        return when (val outcome = startForeground()) {
+        when (val outcome = startForeground()) {
             is ForegroundStartOutcome.Failed ->
-                MonitoringStartupResult.Failed(MonitoringStartupFailure.ForegroundStartFailed(outcome.cause))
+                return MonitoringStartupResult.Failed(
+                    MonitoringStartupFailure.ForegroundStartFailed(outcome.cause)
+                )
+
             is ForegroundStartOutcome.PermissionDenied ->
-                MonitoringStartupResult.Failed(attributeSecurityException(outcome.cause))
-            ForegroundStartOutcome.Started -> {
-                if (!hasRecordAudioPermission()) {
-                    MonitoringStartupResult.Failed(MonitoringStartupFailure.MicrophonePermissionDenied)
-                } else if (locationPermissionLevel() == LocationPermissionLevel.NONE) {
-                    MonitoringStartupResult.Failed(MonitoringStartupFailure.LocationPermissionDenied)
-                } else {
-                    MonitoringStartupResult.Proceed
-                }
-            }
+                return MonitoringStartupResult.Failed(
+                    attributeSecurityException(outcome.cause)
+                )
+
+            ForegroundStartOutcome.Started -> Unit
+        }
+
+        if (!hasRecordAudioPermission()) {
+            return MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.MicrophonePermissionDenied
+            )
+        }
+
+        if (locationPermissionLevel() == LocationPermissionLevel.NONE) {
+            return MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.LocationPermissionDenied
+            )
+        }
+
+        if (!areLocationServicesEnabled()) {
+            return MonitoringStartupResult.Failed(
+                MonitoringStartupFailure.LocationServicesDisabled
+            )
+        }
+
+        return when (val outcome = enableLocationForegroundType()) {
+            is ForegroundStartOutcome.Failed ->
+                MonitoringStartupResult.Failed(
+                    MonitoringStartupFailure.ForegroundStartFailed(outcome.cause)
+                )
+
+            is ForegroundStartOutcome.PermissionDenied ->
+                MonitoringStartupResult.Failed(
+                    attributeSecurityException(outcome.cause)
+                )
+
+            ForegroundStartOutcome.Started ->
+                MonitoringStartupResult.Proceed
         }
     }
 
