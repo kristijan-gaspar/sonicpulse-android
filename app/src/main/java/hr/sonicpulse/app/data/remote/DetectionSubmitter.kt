@@ -16,10 +16,10 @@ import javax.inject.Inject
  * Two distinct I/O failure domains are kept separate: a failure reading the installation id from
  * DataStore never reaches the network at all ([SubmissionFailureReason.LocalStorageError]); a
  * failure from the actual HTTP call is [SubmissionFailureReason.NetworkError]. Only [IOException]
- * is caught in either boundary — coroutine cancellation and any other [Throwable] propagate
+ * is caught in either boundary — coroutine cancellation and any other exception propagate
  * deliberately: that is this class's contract, not an oversight. The caller is responsible for a
- * final safety net (see [hr.sonicpulse.app.service.submitDetectionSafely]) so an unexpected
- * exception here still cannot crash the process.
+ * final safety net (see [hr.sonicpulse.app.service.submitDetectionSafely]) that catches any other
+ * non-cancellation [Exception] so it cannot crash the process.
  */
 class DetectionSubmitter @Inject constructor(
     private val detectionApi: DetectionApi,

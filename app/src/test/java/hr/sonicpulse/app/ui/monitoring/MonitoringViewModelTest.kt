@@ -309,7 +309,8 @@ class MonitoringViewModelTest {
                 SubmissionFailureReason.RateLimited(retryAfterSeconds = 30L),
                 SubmissionFailureReason.ClientError(httpCode = 404),
                 SubmissionFailureReason.ServerError(httpCode = 500),
-                SubmissionFailureReason.UnexpectedHttpStatus(httpCode = 302)
+                SubmissionFailureReason.UnexpectedHttpStatus(httpCode = 302),
+                SubmissionFailureReason.UnexpectedError
             ).forEach { reason ->
                 val repository = FakeMonitoringStateRepository()
                 val viewModel = MonitoringViewModel(repository, FakePermissionRequestHistory(), FakeDetectionSessionLogger())

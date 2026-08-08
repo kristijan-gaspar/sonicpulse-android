@@ -10,14 +10,14 @@ private const val TAG = "MonitoringService"
 
 /**
  * Root-coroutine safety net around one submission attempt. [hr.sonicpulse.app.data.remote.DetectionSubmitter]'s
- * own KDoc documents that it deliberately lets any Throwable other than IOException propagate out
+ * own KDoc documents that it deliberately lets any exception other than IOException propagate out
  * of `submit()` — that boundary is the network/storage layer's, not this one's. This is the
- * boundary that must never let such an exception escape uncaught into [attemptSubmit]'s caller
- * (a launch on MonitoringService's serviceScope, an application-level root coroutine with no
- * installed CoroutineExceptionHandler) and crash the process. [CancellationException] is rethrown
- * untouched; anything else becomes a terminal [SubmissionFailureReason.UnexpectedError], so
- * [detection] can never be silently stuck Pending forever because of a bug elsewhere in the
- * submission path.
+ * boundary that must never let an unexpected, non-cancellation [Exception] escape uncaught into
+ * [attemptSubmit]'s caller (a launch on MonitoringService's serviceScope, an application-level
+ * root coroutine with no installed CoroutineExceptionHandler) and crash the process.
+ * [CancellationException] is rethrown untouched; any other [Exception] becomes a terminal
+ * [SubmissionFailureReason.UnexpectedError], so [detection] can never be silently stuck Pending
+ * forever because of a bug elsewhere in the submission path.
  */
 internal suspend fun submitDetectionSafely(
     monitoringStateRepository: MonitoringStateRepository,

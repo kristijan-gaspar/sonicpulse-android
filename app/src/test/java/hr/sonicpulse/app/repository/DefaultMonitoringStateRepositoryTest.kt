@@ -419,7 +419,8 @@ class DefaultMonitoringStateRepositoryTest {
             SubmissionFailureReason.RateLimited(30L) to SubmissionCounters(submissionRateLimited = 1),
             SubmissionFailureReason.ClientError(404) to SubmissionCounters(submissionFailedClient = 1),
             SubmissionFailureReason.ServerError(500) to SubmissionCounters(submissionFailedServer = 1),
-            SubmissionFailureReason.UnexpectedHttpStatus(302) to SubmissionCounters(submissionFailedUnexpected = 1)
+            SubmissionFailureReason.UnexpectedHttpStatus(302) to SubmissionCounters(submissionFailedUnexpected = 1),
+            SubmissionFailureReason.UnexpectedError to SubmissionCounters(submissionFailedUnexpectedError = 1)
         )
 
         expectedCounter.forEach { (reason, expected) ->
