@@ -432,13 +432,16 @@ internal fun MapContent(
                 if (!isLocationServicesEnabled(context)) {
                     disableLocationProvider()
                 }
-            } else if (locatingCoordinator.attempt.active && !isLocationServicesEnabled(context)) {
-                // A locating attempt can still be active on an ordinary resume if location services
-                // were disabled through a path this screen never tracked (e.g. a quick-settings
-                // tile) while the app was backgrounded, rather than via this screen's own "Open
-                // location settings" snackbar action (the branch above already covers that case).
-                // Catching it here clears the spinner on the very next resume instead of leaving it
-                // spinning for the rest of the fixed timeout.
+            } else if (locationEnabled && !isLocationServicesEnabled(context)) {
+                // Checked against locationEnabled, not locatingCoordinator.attempt.active: the
+                // provider/puck can still be enabled on an ordinary resume even after its locating
+                // attempt has already completed (a fix was acquired, or it timed out) — services
+                // disabled through a path this screen never tracked (e.g. a quick-settings tile)
+                // while the app was backgrounded, rather than via this screen's own "Open location
+                // settings" snackbar action (the branch above already covers that case), must still
+                // disable the provider on the very next resume instead of leaving it showing stale
+                // state (or, if an attempt happened to still be active, spinning for the rest of the
+                // fixed timeout).
                 disableLocationProvider()
             }
         }
