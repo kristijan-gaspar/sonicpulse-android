@@ -191,9 +191,13 @@
 
     <!-- Settings — section C: Permissions -->
     <string name="settings_section_permissions">Dozvole</string>
+    <string name="settings_label_location_permission">Dozvola za lokaciju</string>
     <string name="settings_label_precise_location">Precizna lokacija</string>
+    <string name="settings_label_location_services">Lokacijske usluge</string>
     <string name="permission_status_granted">Odobreno</string>
     <string name="permission_status_denied">Odbijeno</string>
+    <string name="location_services_status_enabled">Uključeno</string>
+    <string name="location_services_status_disabled">Isključeno</string>
     <string name="settings_action_open">Otvori</string>
 
     <!-- Settings — section E: Device ID -->

@@ -43,22 +43,27 @@ object HotspotCamera {
     private const val MIN_ZOOM = 2.0
     private const val MAX_ZOOM = 16.0
 
+    private const val SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS = 500.0
+
     fun targetFor(hotspots: List<Hotspot>): HotspotCameraTarget {
         if (hotspots.isEmpty()) return HotspotCameraTarget.KeepCurrent
 
-        // applyMinimumRadius = false: the camera's own degenerate-span detection below must see
-        // hotspots' real, possibly-zero radii — see HotspotGeometry.polygonFor's KDoc.
         val polygons = hotspots.map {
             HotspotGeometry.polygonFor(
                 hotspotId = it.id,
                 centerLatitude = it.latitude,
                 centerLongitude = it.longitude,
-                radiusMeters = it.radiusMeters,
+                radiusMeters = if (hotspots.size == 1) {
+                    maxOf(it.radiusMeters, SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS)
+                } else {
+                    it.radiusMeters
+                },
                 deviceCount = it.deviceCount,
                 confidence = it.confidence,
                 applyMinimumRadius = false
             )
         }
+
         val span = HotspotBounds.compute(polygons) ?: return HotspotCameraTarget.KeepCurrent
 
         val latitudeSpanDegrees = span.northLatitude - span.southLatitude
@@ -90,10 +95,6 @@ object HotspotCamera {
         )
     }
 
-    /** The zoom that fits both spans (whichever needs to zoom out further wins), using the
-     * standard web-Mercator approximation that a span of `360 / 2^zoom` degrees fits the tile grid
-     * at that zoom level. Deliberately approximate — "sensible", not pixel-exact, matches every
-     * other qualitative zoom requirement in this feature. */
     private fun zoomForSpans(longitudeSpanDegrees: Double, latitudeSpanDegrees: Double): Double =
         min(zoomForSpan(longitudeSpanDegrees), zoomForSpan(latitudeSpanDegrees))
 

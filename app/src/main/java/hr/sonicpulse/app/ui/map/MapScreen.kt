@@ -24,12 +24,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,8 +84,8 @@ import hr.sonicpulse.app.domain.model.Hotspot
 import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
-import hr.sonicpulse.app.ui.components.FilterChipRow
 import hr.sonicpulse.app.ui.components.FilterChipRowHorizontalContentPadding
+import hr.sonicpulse.app.ui.components.ResponsiveFilterRow
 import hr.sonicpulse.app.ui.detections.detailTimestampTextFor
 import hr.sonicpulse.app.ui.permissions.PermissionDecisionEvaluator
 import hr.sonicpulse.app.ui.theme.AppShapes
@@ -289,11 +290,12 @@ internal fun MapContent(
         locatingVersion++
     }
 
-    /** Location services are unavailable (checked fresh on every button press and again on resume
-     * from Android's location settings): the map-local provider must not stay enabled, and any
-     * attempt currently waiting on a fix must stop immediately rather than linger until its own
-     * 15 s timeout fires later for no reason. */
-    fun disableLocationDueToServicesUnavailable() {
+    /** Either location services or location permission is unavailable (checked fresh on every
+     * button press, again on resume from Android's location/app-details settings, and on every
+     * ordinary resume for permission specifically): the map-local provider must not stay enabled,
+     * and any attempt currently waiting on a fix must stop immediately rather than linger until its
+     * own 15 s timeout fires later for no reason. */
+    fun disableLocationProvider() {
         locationEnabled = false
         locatingCoordinator.cancel()
         locatingVersion++
@@ -338,7 +340,7 @@ internal fun MapContent(
     // shortcut — a permission granted earlier does not mean services are still on right now.
     fun onCurrentLocationClick() {
         if (!isLocationServicesEnabled(context)) {
-            disableLocationDueToServicesUnavailable()
+            disableLocationProvider()
             scope.launch {
                 val result = snackbarHostState.showSnackbar(
                     message = locationServicesDisabledMessage,
@@ -407,6 +409,19 @@ internal fun MapContent(
                 // map-local location provider/puck may run at all; a later explicit Current
                 // Location press performs the actual attempt.
                 locationEnabled = fineGranted || coarseGranted
+            } else {
+                // Permission can also be revoked through a path this screen never tracked (e.g. App
+                // Info opened independently of this screen's own settings launch above) — checked
+                // on every ordinary resume. Disable-only, never re-enables: turning the provider
+                // back on stays the job of the branch above (which followed our own settings
+                // launch) or a later explicit Current Location press, never a bare resume.
+                val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+                val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+                if (!fineGranted && !coarseGranted) {
+                    disableLocationProvider()
+                }
             }
             if (currentOpenedLocationSettings.value) {
                 openedLocationSettingsFromMap = false
@@ -415,8 +430,19 @@ internal fun MapContent(
                 // new attempt or move the camera just because services are now back on; that only
                 // happens from a later explicit Current Location press.
                 if (!isLocationServicesEnabled(context)) {
-                    disableLocationDueToServicesUnavailable()
+                    disableLocationProvider()
                 }
+            } else if (locationEnabled && !isLocationServicesEnabled(context)) {
+                // Checked against locationEnabled, not locatingCoordinator.attempt.active: the
+                // provider/puck can still be enabled on an ordinary resume even after its locating
+                // attempt has already completed (a fix was acquired, or it timed out) — services
+                // disabled through a path this screen never tracked (e.g. a quick-settings tile)
+                // while the app was backgrounded, rather than via this screen's own "Open location
+                // settings" snackbar action (the branch above already covers that case), must still
+                // disable the provider on the very next resume instead of leaving it showing stale
+                // state (or, if an attempt happened to still be active, spinning for the rest of the
+                // fixed timeout).
+                disableLocationProvider()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -651,8 +677,7 @@ private fun HotspotControlsAndOverlays(
                     pendingRange = uiState.pendingRange,
                     isInitialLoading = uiState.isInitialLoading,
                     isLoadingSubsequent = uiState.isLoadingSubsequent,
-                    onSelectRange = onSelectRange,
-                    onRefresh = onRefresh
+                    onSelectRange = onSelectRange
                 )
                 Spacer(modifier = Modifier.height(Spacing.sm))
                 // Aligns the legend's left edge with the first filter chip's left edge, not the
@@ -814,6 +839,10 @@ private fun bucketPolygons(hotspots: List<Hotspot>): Map<DeviceCountBucket, List
 private fun bucketMarkers(hotspots: List<Hotspot>): Map<DeviceCountBucket, List<Hotspot>> =
     DeviceCountBucket.entries.associateWith { bucket -> hotspots.filter { bucketFor(it.deviceCount) == bucket } }
 
+/** No permanent refresh control here on purpose: selecting a time range (or the error-state Retry
+ * actions — [InitialDataErrorOverlay]/[SubsequentErrorBanner]) already re-fetches, so a standing
+ * refresh button next to the chips was redundant and, at narrow widths or larger font scales, a
+ * fixed-size sibling competing with this row's [ResponsiveFilterRow] for space. */
 @Composable
 private fun TimeRangeRow(
     committedRange: HotspotTimeRange,
@@ -821,7 +850,6 @@ private fun TimeRangeRow(
     isInitialLoading: Boolean,
     isLoadingSubsequent: Boolean,
     onSelectRange: (HotspotTimeRange) -> Unit,
-    onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val selected = pendingRange ?: committedRange
@@ -831,36 +859,21 @@ private fun TimeRangeRow(
     val last3daysLabel = stringResource(R.string.range_last_3_days)
     val last7daysLabel = stringResource(R.string.range_last_7_days)
 
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        FilterChipRow(
-            options = HotspotTimeRange.entries,
-            selected = selected,
-            onSelect = onSelectRange,
-            label = { range ->
-                when (range) {
-                    HotspotTimeRange.Last24Hours -> last24hLabel
-                    HotspotTimeRange.Last3Days -> last3daysLabel
-                    HotspotTimeRange.Last7Days -> last7daysLabel
-                }
-            },
-            enabled = { !requestActive },
-            loading = { it == pendingRange },
-            modifier = Modifier.weight(1f)
-        )
-        val refreshLabel = stringResource(R.string.action_refresh)
-        IconButton(onClick = onRefresh, enabled = !requestActive) {
-            if (isLoadingSubsequent && pendingRange == null) {
-                // Semantics kept identical to the Icon it replaces — without this, a screen reader
-                // announces this button with no name at all while it is loading.
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp).semantics { contentDescription = refreshLabel },
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Icon(Icons.Filled.Refresh, contentDescription = refreshLabel)
+    ResponsiveFilterRow(
+        options = HotspotTimeRange.entries,
+        selected = selected,
+        onSelect = onSelectRange,
+        label = { range ->
+            when (range) {
+                HotspotTimeRange.Last24Hours -> last24hLabel
+                HotspotTimeRange.Last3Days -> last3daysLabel
+                HotspotTimeRange.Last7Days -> last7daysLabel
             }
-        }
-    }
+        },
+        enabled = { !requestActive },
+        loading = { it == pendingRange },
+        modifier = modifier.fillMaxWidth()
+    )
 }
 
 /** A compact "Devices  ●2  ●3  ●4+" chip — not a full-width banner. `wrapContentWidth()`, not
@@ -953,12 +966,15 @@ private fun EmptyHotspotsOverlay(modifier: Modifier = Modifier) {
     }
 }
 
+/** The message is a full sentence, not a short label — an unweighted Row with SpaceBetween would
+ * let it collide with the Retry button instead of wrapping at larger font scales/narrower widths.
+ * Weighting the message bounds it to whatever width remains after the button's own fixed size. */
 @Composable
 private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modifier, serverConfigurationError: Boolean = false) {
     Surface(modifier = modifier.fillMaxWidth(), shape = AppShapes.Card, color = SemanticColors.WarningBg) {
         Row(
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -966,7 +982,8 @@ private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modi
                     if (serverConfigurationError) R.string.error_server_configuration else R.string.map_error_data_refresh
                 ),
                 style = MaterialTheme.typography.bodySmall,
-                color = SemanticColors.Warning
+                color = SemanticColors.Warning,
+                modifier = Modifier.weight(1f)
             )
             TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
         }
@@ -994,9 +1011,25 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     val lastDetectionText = detailTimestampTextFor(hotspot.lastReceivedAtUtc, zone, locale)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = AppShapes.BottomSheet) {
-        Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md).fillMaxWidth()) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = stringResource(R.string.hotspot_detail_title), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        // verticalScroll: at a compact screen height combined with a large system font scale, this
+        // sheet's content (2 rows of cells + the confidence note + 2 detail rows, all grown taller)
+        // can exceed what ModalBottomSheet is able to show at once — without this, the excess would
+        // simply be clipped and unreachable rather than scrollable.
+        Column(
+            modifier = Modifier
+                .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
+                // weight(1f): a long localized title must wrap instead of pushing the close button
+                // out of the row (and off-sheet) at narrow widths or larger font scales.
+                Text(
+                    text = stringResource(R.string.hotspot_detail_title),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
                 }
@@ -1024,11 +1057,18 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     }
 }
 
+/** FlowRow, not Row: weighting only [value] (a prior version of this fix) still let a long
+ * localized [label] alone consume most of the width, since an unweighted sibling is otherwise
+ * measured at its full natural width with no upper bound. FlowRow constrains *every* child to at
+ * most the row's own width, so either one wraps onto its own line(s) — never shrunk or clipped —
+ * the instant it doesn't fit; when both fit on one line, SpaceBetween still places [label] at the
+ * start and [value] at the end exactly as the plain Row did. */
 @Composable
 private fun DetailRow(label: String, value: String, modifier: Modifier = Modifier) {
-    Row(
+    FlowRow(
         modifier = modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
         Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         Text(text = value, style = MonospaceValueStyle)

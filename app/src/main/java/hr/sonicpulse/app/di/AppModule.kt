@@ -20,7 +20,9 @@ import hr.sonicpulse.app.repository.DefaultMonitoringStateRepository
 import hr.sonicpulse.app.repository.DetectionsRepository
 import hr.sonicpulse.app.repository.HotspotsRepository
 import hr.sonicpulse.app.repository.MonitoringStateRepository
+import hr.sonicpulse.app.ui.permissions.AndroidLocationServicesChecker
 import hr.sonicpulse.app.ui.permissions.AndroidPermissionChecker
+import hr.sonicpulse.app.ui.permissions.LocationServicesChecker
 import hr.sonicpulse.app.ui.permissions.PermissionChecker
 import hr.sonicpulse.app.ui.theme.AppLanguageController
 import hr.sonicpulse.app.ui.theme.DefaultAppLanguageController
@@ -73,6 +75,11 @@ abstract class AppModule {
     abstract fun bindPermissionChecker(
         impl: AndroidPermissionChecker
     ): PermissionChecker
+
+    @Binds
+    abstract fun bindLocationServicesChecker(
+        impl: AndroidLocationServicesChecker
+    ): LocationServicesChecker
 
     @Binds
     abstract fun bindAppLanguageController(
