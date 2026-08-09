@@ -56,7 +56,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import hr.sonicpulse.app.R
 import hr.sonicpulse.app.ui.components.AppCard
-import hr.sonicpulse.app.ui.components.FilterChipRow
+import hr.sonicpulse.app.ui.components.ResponsiveFilterRow
 import hr.sonicpulse.app.ui.components.SectionHeader
 import hr.sonicpulse.app.ui.components.StatusBadge
 import hr.sonicpulse.app.ui.theme.AppShapes
@@ -118,7 +118,7 @@ internal fun DetectionsContent(
     val ungroupedLabel = stringResource(R.string.filter_ungrouped)
 
     Column(modifier = modifier.fillMaxSize()) {
-        FilterChipRow(
+        ResponsiveFilterRow(
             options = DetectionsFilter.entries,
             selected = uiState.selectedFilter,
             onSelect = onSelectFilter,

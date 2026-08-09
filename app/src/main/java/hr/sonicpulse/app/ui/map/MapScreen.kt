@@ -84,8 +84,8 @@ import hr.sonicpulse.app.domain.model.Hotspot
 import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
-import hr.sonicpulse.app.ui.components.FilterChipRow
 import hr.sonicpulse.app.ui.components.FilterChipRowHorizontalContentPadding
+import hr.sonicpulse.app.ui.components.ResponsiveFilterRow
 import hr.sonicpulse.app.ui.detections.detailTimestampTextFor
 import hr.sonicpulse.app.ui.permissions.PermissionDecisionEvaluator
 import hr.sonicpulse.app.ui.theme.AppShapes
@@ -842,7 +842,7 @@ private fun bucketMarkers(hotspots: List<Hotspot>): Map<DeviceCountBucket, List<
 /** No permanent refresh control here on purpose: selecting a time range (or the error-state Retry
  * actions — [InitialDataErrorOverlay]/[SubsequentErrorBanner]) already re-fetches, so a standing
  * refresh button next to the chips was redundant and, at narrow widths or larger font scales, a
- * fixed-size sibling competing with this row's horizontally-scrollable [FilterChipRow] for space. */
+ * fixed-size sibling competing with this row's [ResponsiveFilterRow] for space. */
 @Composable
 private fun TimeRangeRow(
     committedRange: HotspotTimeRange,
@@ -859,7 +859,7 @@ private fun TimeRangeRow(
     val last3daysLabel = stringResource(R.string.range_last_3_days)
     val last7daysLabel = stringResource(R.string.range_last_7_days)
 
-    FilterChipRow(
+    ResponsiveFilterRow(
         options = HotspotTimeRange.entries,
         selected = selected,
         onSelect = onSelectRange,
