@@ -635,7 +635,16 @@ class MonitoringService : Service() {
         private const val ACTION_START = "hr.sonicpulse.app.action.START_MONITORING"
         private const val ACTION_STOP = "hr.sonicpulse.app.action.STOP_MONITORING"
         private const val ACTION_REFRESH_LOCATION = "hr.sonicpulse.app.action.REFRESH_LOCATION"
-        private const val LOCATION_POLL_INTERVAL_MILLIS = 1_000L
+
+        /** Purely a UI refresh cadence for the Monitoring screen's live status pill/location card
+         * (see the KDoc on the polling job below) — this loop never feeds detection/submission
+         * eligibility, that reads currentSnapshot directly, synchronously, at the moment of a
+         * detection. The data it displays changes at most as often as a GPS fix arrives
+         * (LocationPolicy.updateIntervalMillis, 8 s) or a permission/services flip (rare, and
+         * separately re-checked on resume) — 1 s was oversampling that by 8x for no visible
+         * benefit. Previously 1_000; 2_000 still reads as "live" to a human while roughly halving
+         * this loop's Binder/CPU wakeups over a session. */
+        private const val LOCATION_POLL_INTERVAL_MILLIS = 2_000L
 
         /** Bounds the submission drain's wait for in-flight submissions during shutdown — long
          * enough for a normal HTTP round trip, short enough that Stop still feels immediate. */
