@@ -43,6 +43,8 @@ object HotspotCamera {
     private const val MIN_ZOOM = 2.0
     private const val MAX_ZOOM = 16.0
 
+    private const val SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS = 500.0
+
     fun targetFor(hotspots: List<Hotspot>): HotspotCameraTarget {
         if (hotspots.isEmpty()) return HotspotCameraTarget.KeepCurrent
 
@@ -52,7 +54,7 @@ object HotspotCamera {
                 centerLatitude = it.latitude,
                 centerLongitude = it.longitude,
                 radiusMeters = if (hotspots.size == 1) {
-                    maxOf(it.radiusMeters, 500.0)
+                    maxOf(it.radiusMeters, SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS)
                 } else {
                     it.radiusMeters
                 },
