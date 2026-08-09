@@ -273,7 +273,18 @@ internal fun MapContent(
     // singleton DefaultLocationProvider (that provider has monitoring-session start/stop
     // semantics this screen must not interfere with). Permission is requested only on tap. ---
     var locationEnabled by remember { mutableStateOf(false) }
-    var locationRequestedBeforeSnapshot by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+
+    // Captured fresh right before each launch(), from *before* this specific request — consumed
+    // once the system dialog's result comes back, so a permanently-denied classification can never
+    // be confused with "never asked yet" (both look like shouldShowRationale == false).
+    // rememberSaveable (not remember): a system-initiated process kill can happen while the
+    // permission dialog is up (the same reason openedAppSettingsForLocation below is saveable), and
+    // losing this snapshot on restart would misclassify a permanently-denied permission as a plain
+    // first-time denial once the pending result is redelivered. One Boolean per permission, not a
+    // Map, since rememberSaveable's default saver only covers Bundle-primitive types and the
+    // permission set requested here is fixed (see mapLocationPermissions()).
+    var locationFineRequestedBefore by rememberSaveable { mutableStateOf(false) }
+    var locationCoarseRequestedBefore by rememberSaveable { mutableStateOf(false) }
     val locatingCoordinator = remember { LocatingCoordinator() }
     var locatingVersion by remember { mutableIntStateOf(0) }
     var currentLocatingGeneration by remember { mutableLongStateOf(0L) }
@@ -308,12 +319,12 @@ internal fun MapContent(
         val fineLocation = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true,
             shouldShowRationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) == true,
-            requestedBefore = locationRequestedBeforeSnapshot[Manifest.permission.ACCESS_FINE_LOCATION] == true
+            requestedBefore = locationFineRequestedBefore
         )
         val coarseLocation = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true,
             shouldShowRationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION) == true,
-            requestedBefore = locationRequestedBeforeSnapshot[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            requestedBefore = locationCoarseRequestedBefore
         )
         scope.launch { results.keys.forEach { markPermissionRequested(it) } }
 
@@ -371,7 +382,8 @@ internal fun MapContent(
         }
         scope.launch {
             val permissions = mapLocationPermissions()
-            locationRequestedBeforeSnapshot = permissions.associateWith { hasRequestedPermissionBefore(it) }
+            locationFineRequestedBefore = hasRequestedPermissionBefore(Manifest.permission.ACCESS_FINE_LOCATION)
+            locationCoarseRequestedBefore = hasRequestedPermissionBefore(Manifest.permission.ACCESS_COARSE_LOCATION)
             locationPermissionLauncher.launch(permissions)
         }
     }

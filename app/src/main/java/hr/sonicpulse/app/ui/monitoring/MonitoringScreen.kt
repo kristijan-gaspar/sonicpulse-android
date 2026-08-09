@@ -71,7 +71,17 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     // Captured fresh right before each launch(), from *before* this specific request — consumed
     // once the system dialog's result comes back, so a permanently-denied classification can never
     // be confused with "never asked yet" (both look like shouldShowRationale == false).
-    var startRequestedBeforeSnapshot by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    // rememberSaveable (not remember): a system-initiated process kill can happen while the
+    // permission dialog is up (the same reason openedSettingsForPreciseLocation below is
+    // saveable), and losing this snapshot on restart would misclassify a permanently-denied
+    // permission as a plain first-time denial once the pending result is redelivered. One Boolean
+    // per permission, not a Map, since rememberSaveable's default saver only covers
+    // Bundle-primitive types and the permission set requested here is fixed (see
+    // MonitoringPermissionRequestPlan.startPermissions()) — POST_NOTIFICATIONS is deliberately not
+    // tracked here since it's never looked up in the callback below.
+    var startMicRequestedBefore by rememberSaveable { mutableStateOf(false) }
+    var startFineRequestedBefore by rememberSaveable { mutableStateOf(false) }
+    var startCoarseRequestedBefore by rememberSaveable { mutableStateOf(false) }
 
     val startPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -89,17 +99,17 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
         val microphone = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.RECORD_AUDIO] == true,
             shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO),
-            requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.RECORD_AUDIO] == true
+            requestedBefore = startMicRequestedBefore
         )
         val fineLocation = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true,
             shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION),
-            requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.ACCESS_FINE_LOCATION] == true
+            requestedBefore = startFineRequestedBefore
         )
         val coarseLocation = PermissionDecisionEvaluator.evaluate(
             granted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true,
             shouldShowRationale = activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION),
-            requestedBefore = startRequestedBeforeSnapshot[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            requestedBefore = startCoarseRequestedBefore
         )
 
         // Only the permissions actually included in this request (results.keys) are marked —
@@ -139,7 +149,9 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     fun requestStartPermissions() {
         scope.launch {
             val permissions = MonitoringPermissionRequestPlan.startPermissions()
-            startRequestedBeforeSnapshot = permissions.associateWith { viewModel.hasRequestedPermissionBefore(it) }
+            startMicRequestedBefore = viewModel.hasRequestedPermissionBefore(Manifest.permission.RECORD_AUDIO)
+            startFineRequestedBefore = viewModel.hasRequestedPermissionBefore(Manifest.permission.ACCESS_FINE_LOCATION)
+            startCoarseRequestedBefore = viewModel.hasRequestedPermissionBefore(Manifest.permission.ACCESS_COARSE_LOCATION)
             startPermissionLauncher.launch(permissions)
         }
     }
@@ -148,7 +160,8 @@ fun MonitoringScreen(viewModel: MonitoringViewModel = hiltViewModel()) {
     // Monitoring is already active in MonitoringPhase.PreciseLocationRequired — this must never
     // request microphone or notifications again, and success must never re-send a Start intent.
 
-    var upgradeFineRequestedBefore by remember { mutableStateOf(false) }
+    // rememberSaveable for the same process-death reason as startFineRequestedBefore above.
+    var upgradeFineRequestedBefore by rememberSaveable { mutableStateOf(false) }
 
     // Tracks whether Settings was opened specifically from this flow (not the Start flow's own
     // PermanentlyDenied branch) — rememberSaveable so it survives the process death that opening

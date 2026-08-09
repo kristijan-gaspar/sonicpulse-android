@@ -18,13 +18,24 @@ sealed interface HotspotCameraTarget {
 }
 
 /**
- * Derives a [HotspotCameraTarget] from a committed hotspot dataset. Two cases are deliberately
- * routed to [HotspotCameraTarget.Center] instead of [HotspotCameraTarget.Bounds]:
+ * Derives a [HotspotCameraTarget] from a committed hotspot dataset.
  *
- * - a degenerate span — every point (across any number of hotspots) collapses to essentially one
- *   geographic location, e.g. one zero-radius hotspot, several co-located zero-radius hotspots, or
- *   an extremely small near-zero span. Detected by span magnitude ([CAMERA_SPAN_EPSILON_DEGREES]),
- *   never by hotspot count — a zero-area `BoundingBox` must never reach MapLibre's camera fit (§8);
+ * A single-hotspot dataset is always framed as [HotspotCameraTarget.Bounds], never via the
+ * degenerate-span path below: its framing radius is `maxOf(radiusMeters,
+ * [SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS])`, so even a genuinely zero-radius lone hotspot gets a
+ * real, non-degenerate span to fit — giving the camera sensible surrounding context instead of
+ * zooming in on literally nothing. This is a deliberate, hotspot-count-based exception to the
+ * span-magnitude rule below.
+ *
+ * Two remaining cases are routed to [HotspotCameraTarget.Center] instead of
+ * [HotspotCameraTarget.Bounds]:
+ *
+ * - a degenerate span — two or more hotspots whose points collapse to essentially one geographic
+ *   location, e.g. several co-located zero-radius hotspots, or an extremely small near-zero span
+ *   across the group. Detected by span magnitude ([CAMERA_SPAN_EPSILON_DEGREES]) after each
+ *   hotspot's own framing radius has been applied — never reachable for a single hotspot, since its
+ *   minimum framing radius above always produces a real span; a zero-area `BoundingBox` must never
+ *   reach MapLibre's camera fit (§8);
  * - any dataset whose minimal longitude span crosses the anti-meridian (§9) — this project could
  *   not verify whether MapLibre Compose 0.13.0's camera fit correctly interprets a `BoundingBox`
  *   with `west > east` as "wraps around" rather than an inverted/empty box, and the task's own
@@ -43,7 +54,10 @@ object HotspotCamera {
     private const val MIN_ZOOM = 2.0
     private const val MAX_ZOOM = 16.0
 
-    private const val SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS = 500.0
+    /** The minimum camera-framing radius applied to a single-hotspot dataset regardless of its
+     * actual `radiusMeters` — see the class KDoc. `internal` so the test suite can assert against
+     * it directly instead of duplicating the literal. */
+    internal const val SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS = 500.0
 
     fun targetFor(hotspots: List<Hotspot>): HotspotCameraTarget {
         if (hotspots.isEmpty()) return HotspotCameraTarget.KeepCurrent
