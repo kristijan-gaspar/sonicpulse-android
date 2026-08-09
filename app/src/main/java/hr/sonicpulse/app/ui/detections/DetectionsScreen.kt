@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
@@ -485,16 +487,28 @@ private fun DetectionDetailBottomSheet(
 ) {
     val sheetState = rememberModalBottomSheetState()
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = AppShapes.BottomSheet) {
-        Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md).fillMaxWidth()) {
+        // verticalScroll: at a compact screen height combined with a large system font scale, this
+        // sheet's content (Signal/Location/Time/Grouping sections) can exceed what ModalBottomSheet
+        // is able to show at once — without this, the excess would simply be clipped and
+        // unreachable rather than scrollable.
+        Column(
+            modifier = Modifier
+                .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // weight(1f): a long localized title must wrap instead of pushing the close button
+                // out of the row (and off-sheet) at narrow widths or larger font scales.
                 Text(
                     text = stringResource(R.string.detection_detail_title),
                     fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
@@ -561,28 +575,24 @@ private fun DetailCell(
     }
 }
 
-/** [value] carries the weight, not [label] — an unweighted Row would let a long localized label
- * plus a long formatted value (e.g. a full latitude/longitude or timestamp string) overflow past
- * the sheet's width at larger font scales instead of wrapping, since Compose does not shrink or
- * clip Text by default. Weighting [value] bounds it to whatever width remains after [label]'s own
- * (short, fixed) intrinsic width, so it wraps onto a second line — right-aligned, to preserve the
- * label-left/value-right layout — rather than overflow. */
+/** FlowRow, not Row: weighting only [value] (a prior version of this fix) still let a long
+ * localized [label] alone consume most of the width, since an unweighted sibling is otherwise
+ * measured at its full natural width with no upper bound. FlowRow constrains *every* child to at
+ * most the row's own width, so either one wraps onto its own line(s) — never shrunk or clipped —
+ * the instant it doesn't fit; when both fit on one line, SpaceBetween still places [label] at the
+ * start and [value] at the end exactly as the plain Row did. */
 @Composable
 private fun DetailRow(label: String, value: String, modifier: Modifier = Modifier) {
-    Row(
+    FlowRow(
         modifier = modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
-        Text(
-            text = value,
-            style = MonospaceValueStyle,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f)
-        )
+        Text(text = value, style = MonospaceValueStyle)
     }
 }

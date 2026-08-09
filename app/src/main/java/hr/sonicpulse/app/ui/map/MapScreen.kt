@@ -24,7 +24,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
@@ -68,7 +70,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -289,11 +290,12 @@ internal fun MapContent(
         locatingVersion++
     }
 
-    /** Location services are unavailable (checked fresh on every button press and again on resume
-     * from Android's location settings): the map-local provider must not stay enabled, and any
-     * attempt currently waiting on a fix must stop immediately rather than linger until its own
-     * 15 s timeout fires later for no reason. */
-    fun disableLocationDueToServicesUnavailable() {
+    /** Either location services or location permission is unavailable (checked fresh on every
+     * button press, again on resume from Android's location/app-details settings, and on every
+     * ordinary resume for permission specifically): the map-local provider must not stay enabled,
+     * and any attempt currently waiting on a fix must stop immediately rather than linger until its
+     * own 15 s timeout fires later for no reason. */
+    fun disableLocationProvider() {
         locationEnabled = false
         locatingCoordinator.cancel()
         locatingVersion++
@@ -338,7 +340,7 @@ internal fun MapContent(
     // shortcut — a permission granted earlier does not mean services are still on right now.
     fun onCurrentLocationClick() {
         if (!isLocationServicesEnabled(context)) {
-            disableLocationDueToServicesUnavailable()
+            disableLocationProvider()
             scope.launch {
                 val result = snackbarHostState.showSnackbar(
                     message = locationServicesDisabledMessage,
@@ -407,6 +409,19 @@ internal fun MapContent(
                 // map-local location provider/puck may run at all; a later explicit Current
                 // Location press performs the actual attempt.
                 locationEnabled = fineGranted || coarseGranted
+            } else {
+                // Permission can also be revoked through a path this screen never tracked (e.g. App
+                // Info opened independently of this screen's own settings launch above) — checked
+                // on every ordinary resume. Disable-only, never re-enables: turning the provider
+                // back on stays the job of the branch above (which followed our own settings
+                // launch) or a later explicit Current Location press, never a bare resume.
+                val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+                val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+                if (!fineGranted && !coarseGranted) {
+                    disableLocationProvider()
+                }
             }
             if (currentOpenedLocationSettings.value) {
                 openedLocationSettingsFromMap = false
@@ -415,7 +430,7 @@ internal fun MapContent(
                 // new attempt or move the camera just because services are now back on; that only
                 // happens from a later explicit Current Location press.
                 if (!isLocationServicesEnabled(context)) {
-                    disableLocationDueToServicesUnavailable()
+                    disableLocationProvider()
                 }
             } else if (locatingCoordinator.attempt.active && !isLocationServicesEnabled(context)) {
                 // A locating attempt can still be active on an ordinary resume if location services
@@ -424,7 +439,7 @@ internal fun MapContent(
                 // location settings" snackbar action (the branch above already covers that case).
                 // Catching it here clears the spinner on the very next resume instead of leaving it
                 // spinning for the rest of the fixed timeout.
-                disableLocationDueToServicesUnavailable()
+                disableLocationProvider()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -993,9 +1008,25 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     val lastDetectionText = detailTimestampTextFor(hotspot.lastReceivedAtUtc, zone, locale)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = AppShapes.BottomSheet) {
-        Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md).fillMaxWidth()) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = stringResource(R.string.hotspot_detail_title), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        // verticalScroll: at a compact screen height combined with a large system font scale, this
+        // sheet's content (2 rows of cells + the confidence note + 2 detail rows, all grown taller)
+        // can exceed what ModalBottomSheet is able to show at once — without this, the excess would
+        // simply be clipped and unreachable rather than scrollable.
+        Column(
+            modifier = Modifier
+                .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
+                // weight(1f): a long localized title must wrap instead of pushing the close button
+                // out of the row (and off-sheet) at narrow widths or larger font scales.
+                Text(
+                    text = stringResource(R.string.hotspot_detail_title),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
                 }
@@ -1023,24 +1054,21 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     }
 }
 
-/** [value] carries the weight, not [label] — an unweighted Row would let a long localized label
- * plus a long formatted timestamp overflow past the sheet's width at larger font scales instead of
- * wrapping, since Compose does not shrink or clip Text by default. Weighting [value] bounds it to
- * whatever width remains after [label]'s own (short, fixed) intrinsic width, so it wraps onto a
- * second line — right-aligned, to preserve the label-left/value-right layout — rather than overflow. */
+/** FlowRow, not Row: weighting only [value] (a prior version of this fix) still let a long
+ * localized [label] alone consume most of the width, since an unweighted sibling is otherwise
+ * measured at its full natural width with no upper bound. FlowRow constrains *every* child to at
+ * most the row's own width, so either one wraps onto its own line(s) — never shrunk or clipped —
+ * the instant it doesn't fit; when both fit on one line, SpaceBetween still places [label] at the
+ * start and [value] at the end exactly as the plain Row did. */
 @Composable
 private fun DetailRow(label: String, value: String, modifier: Modifier = Modifier) {
-    Row(
+    FlowRow(
         modifier = modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
         Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-        Text(
-            text = value,
-            style = MonospaceValueStyle,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f)
-        )
+        Text(text = value, style = MonospaceValueStyle)
     }
 }
 
