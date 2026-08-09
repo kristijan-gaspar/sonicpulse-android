@@ -6,10 +6,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins the default request cadence and its relationship to the freshness policy — the exact
- * invariant PR4's battery optimization depends on: a fix requested this often must still be well
- * inside maxLocationAgeMillis by the time LocationValidator next evaluates it, not sitting at the
- * edge where ordinary FLP delivery jitter could tip a good fix into Stale.
+ * Pins the default request interval and its *configured* relationship to the freshness policy
+ * value — both are static config numbers, and comparing them is exactly that: a config check, not
+ * proof of runtime delivery behavior. `LocationRequest`'s interval is a desired cadence for Fused
+ * Location, not a delivery guarantee, so a fix can still arrive slower (or faster) than requested
+ * regardless of what these two constants say. This test only pins the *intent* (a nominal 2 s
+ * margin) so a future edit to either constant that erodes that intended margin is caught here;
+ * whether fixes actually stay fresh at runtime must be validated on a physical device, never
+ * inferred from this comparison alone.
  */
 class LocationPolicyTest {
 
@@ -19,12 +23,13 @@ class LocationPolicyTest {
     }
 
     @Test
-    fun `default request interval stays well inside the freshness budget, not at its edge`() {
+    fun `default request interval leaves a nominal 2 second margin below the freshness budget, in configuration`() {
         val policy = LocationPolicy()
 
         assertTrue(
-            "updateIntervalMillis (${policy.updateIntervalMillis}) should leave a real margin " +
-                "below maxLocationAgeMillis (${policy.maxLocationAgeMillis}), not sit at its edge",
+            "updateIntervalMillis (${policy.updateIntervalMillis}) should leave a nominal margin " +
+                "below maxLocationAgeMillis (${policy.maxLocationAgeMillis}) in configuration — " +
+                "this does not guarantee actual delivery lands within that margin at runtime",
             policy.updateIntervalMillis <= policy.maxLocationAgeMillis - 1_000L
         )
     }
