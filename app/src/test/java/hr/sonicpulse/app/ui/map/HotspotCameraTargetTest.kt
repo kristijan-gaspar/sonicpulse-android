@@ -31,16 +31,40 @@ class HotspotCameraTargetTest {
     }
 
     @Test
-    fun `a single zero-radius hotspot returns a Center target at its own coordinates`() {
+    fun `a single zero-radius hotspot returns Bounds framed at the single-hotspot minimum radius`() {
         val target = HotspotCamera.targetFor(listOf(hotspot(latitude = 45.8, longitude = 16.0, radiusMeters = 0.0)))
 
-        val center = target as HotspotCameraTarget.Center
-        // The center comes from the generated ring (a sin/asin round-trip), not the raw hotspot
-        // coordinate directly, so it's only exact up to floating-point precision — irrelevant for
-        // camera placement but not bit-identical to the input.
-        assertEquals(45.8, center.latitude, 1e-9)
-        assertEquals(16.0, center.longitude, 0.0)
-        assertEquals(HotspotCamera.SINGLE_POINT_ZOOM, center.zoom, 0.0)
+        val bounds = target as HotspotCameraTarget.Bounds
+        assertTrue(bounds.boundingBox.west < 16.0)
+        assertTrue(bounds.boundingBox.east > 16.0)
+        assertTrue(bounds.boundingBox.south < 45.8)
+        assertTrue(bounds.boundingBox.north > 45.8)
+    }
+
+    @Test
+    fun `a single hotspot below the minimum radius is framed identically to one exactly at it`() {
+        val belowMinimum = HotspotCamera.targetFor(
+            listOf(hotspot(radiusMeters = HotspotCamera.SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS - 1.0))
+        )
+        val atMinimum = HotspotCamera.targetFor(
+            listOf(hotspot(radiusMeters = HotspotCamera.SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS))
+        )
+
+        assertEquals(atMinimum, belowMinimum)
+    }
+
+    @Test
+    fun `a single hotspot above the minimum radius is framed at its own larger radius`() {
+        val aboveMinimum = HotspotCamera.targetFor(
+            listOf(hotspot(radiusMeters = HotspotCamera.SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS + 1000.0))
+        )
+        val atMinimum = HotspotCamera.targetFor(
+            listOf(hotspot(radiusMeters = HotspotCamera.SINGLE_HOTSPOT_MIN_CAMERA_RADIUS_METERS))
+        )
+
+        val aboveMinimumBounds = aboveMinimum as HotspotCameraTarget.Bounds
+        val atMinimumBounds = atMinimum as HotspotCameraTarget.Bounds
+        assertTrue(aboveMinimumBounds.boundingBox.east > atMinimumBounds.boundingBox.east)
     }
 
     @Test
