@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -82,7 +83,15 @@ private fun DetectionRow(detection: DetectionUiModel) {
             )
         }
         Column(modifier = Modifier.weight(1f).padding(start = Spacing.md)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            // FlowRow, not Row: at a narrow width combined with a larger system font scale, the
+            // peak level + timestamp can together exceed the available width — an unweighted Row
+            // with SpaceBetween would let them overlap instead of clipping. Wrapping the timestamp
+            // onto its own line reads fine and costs nothing at the normal single-line width/scale.
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
                 Text(
                     text = stringResource(R.string.peak_level_dbfs, detection.peakDbfs),
                     style = MonospaceValueStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold)

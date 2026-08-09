@@ -27,7 +27,9 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
@@ -107,6 +109,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             onThemeSelect = viewModel::setThemeMode,
             onLanguageSelect = viewModel::setLanguage,
             onOpenAppSettings = { openAppSettingsSafely(context) },
+            onOpenLocationSettings = { openLocationSettingsSafely(context) },
             onCopyDeviceId = { id ->
                 clipboardManager.setText(AnnotatedString(id))
                 scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.settings_device_id_copied)) }
@@ -127,12 +130,21 @@ private fun openAppSettingsSafely(context: Context) {
     }
 }
 
+private fun openLocationSettingsSafely(context: Context) {
+    try {
+        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+    } catch (e: android.content.ActivityNotFoundException) {
+        // No activity can handle this on the current device/emulator image — nothing else to do.
+    }
+}
+
 @Composable
 internal fun SettingsContent(
     uiState: SettingsUiState,
     onThemeSelect: (ThemeMode) -> Unit,
     onLanguageSelect: (AppLanguage) -> Unit,
     onOpenAppSettings: () -> Unit,
+    onOpenLocationSettings: () -> Unit,
     onCopyDeviceId: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -147,7 +159,14 @@ internal fun SettingsContent(
     ) {
         AppearanceSection(uiState.themeMode, uiState.language, onThemeSelect, onLanguageSelect)
         NotificationsSection()
-        PermissionsSection(uiState.microphonePermissionGranted, uiState.preciseLocationPermissionGranted, onOpenAppSettings)
+        PermissionsSection(
+            microphoneGranted = uiState.microphonePermissionGranted,
+            locationPermissionGranted = uiState.locationPermissionGranted,
+            preciseLocationGranted = uiState.preciseLocationPermissionGranted,
+            locationServicesEnabled = uiState.locationServicesEnabled,
+            onOpenAppSettings = onOpenAppSettings,
+            onOpenLocationSettings = onOpenLocationSettings
+        )
         DeviceIdSection(uiState.installationId, onCopyDeviceId)
         AboutSection(
             versionName = uiState.versionName,
@@ -278,19 +297,29 @@ private fun NotificationsSection() {
 @Composable
 private fun PermissionsSection(
     microphoneGranted: Boolean,
+    locationPermissionGranted: Boolean,
     preciseLocationGranted: Boolean,
-    onOpenAppSettings: () -> Unit
+    locationServicesEnabled: Boolean,
+    onOpenAppSettings: () -> Unit,
+    onOpenLocationSettings: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         SectionHeader(stringResource(R.string.settings_section_permissions))
         AppCard {
             PermissionRow(Icons.Filled.Mic, stringResource(R.string.label_microphone), microphoneGranted, onOpenAppSettings)
             PermissionRow(
+                Icons.Filled.LocationOn,
+                stringResource(R.string.settings_label_location_permission),
+                locationPermissionGranted,
+                onOpenAppSettings
+            )
+            PermissionRow(
                 Icons.Filled.GpsFixed,
                 stringResource(R.string.settings_label_precise_location),
                 preciseLocationGranted,
                 onOpenAppSettings
             )
+            LocationServicesRow(locationServicesEnabled, onOpenLocationSettings)
         }
     }
 }
@@ -302,7 +331,11 @@ private fun PermissionRow(icon: ImageVector, label: String, granted: Boolean, on
         title = label,
         trailing = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                PermissionStatusBadge(granted)
+                DeviceStatusBadge(
+                    isOk = granted,
+                    okTextRes = R.string.permission_status_granted,
+                    notOkTextRes = R.string.permission_status_denied
+                )
                 if (!granted) {
                     TextButton(onClick = onOpenAppSettings) { Text(stringResource(R.string.settings_action_open)) }
                 }
@@ -311,11 +344,37 @@ private fun PermissionRow(icon: ImageVector, label: String, granted: Boolean, on
     )
 }
 
+/** Android's device-level Location Services toggle — distinct from location *permission* above:
+ * both can be on/off independently of each other, and this row's Open action goes to Android's
+ * location settings, never the app's own settings page. */
 @Composable
-private fun PermissionStatusBadge(granted: Boolean) {
-    val color = if (granted) SemanticColors.Success else SemanticColors.Warning
-    val background = if (granted) SemanticColors.SuccessBg else SemanticColors.WarningBg
-    val text = stringResource(if (granted) R.string.permission_status_granted else R.string.permission_status_denied)
+private fun LocationServicesRow(enabled: Boolean, onOpenLocationSettings: () -> Unit) {
+    SettingsRow(
+        icon = Icons.Filled.MyLocation,
+        title = stringResource(R.string.settings_label_location_services),
+        trailing = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                DeviceStatusBadge(
+                    isOk = enabled,
+                    okTextRes = R.string.location_services_status_enabled,
+                    notOkTextRes = R.string.location_services_status_disabled
+                )
+                if (!enabled) {
+                    TextButton(onClick = onOpenLocationSettings) { Text(stringResource(R.string.settings_action_open)) }
+                }
+            }
+        }
+    )
+}
+
+/** Shared visual shape for both a permission's granted/denied state and Location Services'
+ * enabled/disabled state — the two are worded differently ([okTextRes]/[notOkTextRes]) since
+ * "Granted"/"Denied" does not fit a device-level service toggle. */
+@Composable
+private fun DeviceStatusBadge(isOk: Boolean, okTextRes: Int, notOkTextRes: Int) {
+    val color = if (isOk) SemanticColors.Success else SemanticColors.Warning
+    val background = if (isOk) SemanticColors.SuccessBg else SemanticColors.WarningBg
+    val text = stringResource(if (isOk) okTextRes else notOkTextRes)
     Surface(shape = AppShapes.ChipOrBadge, color = background) {
         Text(
             text = text,

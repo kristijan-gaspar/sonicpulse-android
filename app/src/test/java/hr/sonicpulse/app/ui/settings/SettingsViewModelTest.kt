@@ -7,6 +7,7 @@ import hr.sonicpulse.app.data.datastore.FakeInstallationIdRepository
 import hr.sonicpulse.app.domain.model.AppLanguage
 import hr.sonicpulse.app.domain.model.AppSettings
 import hr.sonicpulse.app.domain.model.ThemeMode
+import hr.sonicpulse.app.ui.permissions.FakeLocationServicesChecker
 import hr.sonicpulse.app.ui.permissions.FakePermissionChecker
 import hr.sonicpulse.app.ui.theme.FakeAppLanguageController
 import java.io.IOException
@@ -49,11 +50,13 @@ class SettingsViewModelTest {
         settingsRepository: FakeAppSettingsRepository = FakeAppSettingsRepository(),
         installationIdRepository: FakeInstallationIdRepository = FakeInstallationIdRepository(fixedId = "fixed-id"),
         permissionChecker: FakePermissionChecker = FakePermissionChecker(),
+        locationServicesChecker: FakeLocationServicesChecker = FakeLocationServicesChecker(),
         appLanguageController: FakeAppLanguageController = FakeAppLanguageController()
     ) = SettingsViewModel(
         settingsRepository,
         installationIdRepository,
         permissionChecker,
+        locationServicesChecker,
         appLanguageController
     ).also { advanceUntilIdle() }
 
@@ -90,6 +93,44 @@ class SettingsViewModelTest {
         val state = viewModel(permissionChecker = checker).uiState.value
 
         assertFalse(state.preciseLocationPermissionGranted)
+    }
+
+    @Test
+    fun `location permission is granted when only FINE is granted`() = runTest(testDispatcher) {
+        val checker = FakePermissionChecker()
+        checker.setGranted(Manifest.permission.ACCESS_FINE_LOCATION, true)
+
+        val state = viewModel(permissionChecker = checker).uiState.value
+
+        assertTrue(state.locationPermissionGranted)
+        assertTrue(state.preciseLocationPermissionGranted)
+    }
+
+    @Test
+    fun `location permission is granted when only COARSE is granted, but precise location is not`() = runTest(testDispatcher) {
+        val checker = FakePermissionChecker()
+        checker.setGranted(Manifest.permission.ACCESS_COARSE_LOCATION, true)
+
+        val state = viewModel(permissionChecker = checker).uiState.value
+
+        assertTrue(state.locationPermissionGranted)
+        assertFalse(state.preciseLocationPermissionGranted)
+    }
+
+    @Test
+    fun `location permission is denied when neither FINE nor COARSE is granted`() = runTest(testDispatcher) {
+        val state = viewModel(permissionChecker = FakePermissionChecker()).uiState.value
+
+        assertFalse(state.locationPermissionGranted)
+    }
+
+    @Test
+    fun `maps Location Services enabled state independently of permission`() = runTest(testDispatcher) {
+        val enabledState = viewModel(locationServicesChecker = FakeLocationServicesChecker(enabled = true)).uiState.value
+        val disabledState = viewModel(locationServicesChecker = FakeLocationServicesChecker(enabled = false)).uiState.value
+
+        assertTrue(enabledState.locationServicesEnabled)
+        assertFalse(disabledState.locationServicesEnabled)
     }
 
     @Test
@@ -190,6 +231,7 @@ class SettingsViewModelTest {
             FakeAppSettingsRepository(),
             FakeInstallationIdRepository(fixedId = "fixed-id"),
             FakePermissionChecker(),
+            FakeLocationServicesChecker(),
             languageController
         )
 
@@ -207,6 +249,7 @@ class SettingsViewModelTest {
             FakeAppSettingsRepository(),
             FakeInstallationIdRepository(fixedId = "fixed-id"),
             FakePermissionChecker(),
+            FakeLocationServicesChecker(),
             languageController
         )
 
@@ -225,5 +268,20 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.microphonePermissionGranted)
+    }
+
+    /** Proves returning from Android's location settings (ON_RESUME) is reflected immediately —
+     * refreshPermissionStatus() re-reads Location Services too, not only app permissions. */
+    @Test
+    fun `refreshPermissionStatus re-reads Location Services status`() = runTest(testDispatcher) {
+        val locationServicesChecker = FakeLocationServicesChecker(enabled = false)
+        val viewModel = viewModel(locationServicesChecker = locationServicesChecker)
+        check(!viewModel.uiState.value.locationServicesEnabled)
+
+        locationServicesChecker.setEnabled(true)
+        viewModel.refreshPermissionStatus()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.locationServicesEnabled)
     }
 }
