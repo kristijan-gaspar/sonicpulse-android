@@ -193,9 +193,13 @@
 
     <!-- Settings — section C: Permissions -->
     <string name="settings_section_permissions">Permissions</string>
+    <string name="settings_label_location_permission">Location permission</string>
     <string name="settings_label_precise_location">Precise location</string>
+    <string name="settings_label_location_services">Location services</string>
     <string name="permission_status_granted">Granted</string>
     <string name="permission_status_denied">Denied</string>
+    <string name="location_services_status_enabled">Enabled</string>
+    <string name="location_services_status_disabled">Disabled</string>
     <string name="settings_action_open">Open</string>
 
     <!-- Settings — section E: Device ID -->

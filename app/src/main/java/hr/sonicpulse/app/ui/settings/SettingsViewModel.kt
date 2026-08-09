@@ -10,6 +10,7 @@ import hr.sonicpulse.app.data.datastore.AppSettingsRepository
 import hr.sonicpulse.app.data.datastore.InstallationIdRepository
 import hr.sonicpulse.app.domain.model.AppLanguage
 import hr.sonicpulse.app.domain.model.ThemeMode
+import hr.sonicpulse.app.ui.permissions.LocationServicesChecker
 import hr.sonicpulse.app.ui.permissions.PermissionChecker
 import hr.sonicpulse.app.ui.theme.AppLanguageController
 import java.io.IOException
@@ -23,20 +24,21 @@ import kotlinx.coroutines.launch
 
 /**
  * Combines persisted [AppSettings][hr.sonicpulse.app.domain.model.AppSettings] (theme only), the
- * current language from [AppLanguageController], live permission status, the installation id and
- * the app version into one immutable [SettingsUiState] — [SettingsScreen][SettingsScreen] only
- * ever renders this and forwards user actions back here, it never touches DataStore, a repository
- * or [AppLanguageController] directly (§4).
+ * current language from [AppLanguageController], live permission and Location Services status, the
+ * installation id and the app version into one immutable [SettingsUiState] —
+ * [SettingsScreen][SettingsScreen] only ever renders this and forwards user actions back here, it
+ * never touches DataStore, a repository or [AppLanguageController] directly (§4).
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val appSettingsRepository: AppSettingsRepository,
     private val installationIdRepository: InstallationIdRepository,
     private val permissionChecker: PermissionChecker,
+    private val locationServicesChecker: LocationServicesChecker,
     private val appLanguageController: AppLanguageController
 ) : ViewModel() {
 
-    private val _permissionStatus = MutableStateFlow(currentPermissionStatus())
+    private val _permissionStatus = MutableStateFlow(currentDeviceStatus())
     private val _installationId = MutableStateFlow<String?>(null)
 
     private val initialLanguage = appLanguageController.currentLanguage()
@@ -47,12 +49,14 @@ class SettingsViewModel @Inject constructor(
         _permissionStatus,
         _installationId,
         _language
-    ) { settings, permissions, installationId, language ->
+    ) { settings, status, installationId, language ->
         SettingsUiState(
             themeMode = settings.themeMode,
             language = language,
-            microphonePermissionGranted = permissions.microphoneGranted,
-            preciseLocationPermissionGranted = permissions.preciseLocationGranted,
+            microphonePermissionGranted = status.microphoneGranted,
+            locationPermissionGranted = status.locationGranted,
+            preciseLocationPermissionGranted = status.preciseLocationGranted,
+            locationServicesEnabled = status.locationServicesEnabled,
             installationId = installationId,
             versionName = BuildConfig.VERSION_NAME
         )
@@ -84,9 +88,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     /** Called from the screen's own `ON_RESUME` lifecycle observer — never on ordinary
-     * recomposition, and never itself starts monitoring, requests a permission or moves the map. */
+     * recomposition, and never itself starts monitoring, requests a permission, opens Location
+     * Settings or moves the map. Re-reads every permission and Location Services state at once, so
+     * returning from Android's app-details or location settings immediately reflects the real
+     * device state. */
     fun refreshPermissionStatus() {
-        _permissionStatus.value = currentPermissionStatus()
+        _permissionStatus.value = currentDeviceStatus()
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -102,14 +109,25 @@ class SettingsViewModel @Inject constructor(
         _language.value = language
     }
 
-    private fun currentPermissionStatus(): PermissionStatus = PermissionStatus(
-        microphoneGranted = permissionChecker.isGranted(Manifest.permission.RECORD_AUDIO),
-        preciseLocationGranted = permissionChecker.isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
-    )
+    private fun currentDeviceStatus(): DeviceStatus {
+        val fineGranted = permissionChecker.isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarseGranted = permissionChecker.isGranted(Manifest.permission.ACCESS_COARSE_LOCATION)
+        return DeviceStatus(
+            microphoneGranted = permissionChecker.isGranted(Manifest.permission.RECORD_AUDIO),
+            locationGranted = fineGranted || coarseGranted,
+            preciseLocationGranted = fineGranted,
+            locationServicesEnabled = locationServicesChecker.isEnabled()
+        )
+    }
 
     private companion object {
         const val TAG = "SettingsViewModel"
     }
 }
 
-private data class PermissionStatus(val microphoneGranted: Boolean, val preciseLocationGranted: Boolean)
+private data class DeviceStatus(
+    val microphoneGranted: Boolean,
+    val locationGranted: Boolean,
+    val preciseLocationGranted: Boolean,
+    val locationServicesEnabled: Boolean
+)
