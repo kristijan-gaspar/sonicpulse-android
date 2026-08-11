@@ -1,6 +1,6 @@
 package hr.sonicpulse.engine.adaptive
 
-import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
@@ -18,6 +18,11 @@ class RollingAnalysisWindowTest {
 
     private fun hopOf(value: Short): ShortArray = ShortArray(config.hopSize) { value }
 
+    private fun SampleWindow.toList(): List<Short> = (0 until size).map { this[it] }
+
+    private fun expectedWindow(vararg hopValues: Short): List<Short> =
+        hopValues.flatMap { value -> List(config.hopSize) { value } }
+
     @Test
     fun `update returns null while fewer than analysisWindowSize samples have accumulated`() {
         assertNull(window.update(hopOf(1)))
@@ -26,36 +31,45 @@ class RollingAnalysisWindowTest {
     }
 
     @Test
-    fun `update returns the full window once analysisWindowSize samples have accumulated`() {
+    fun `first complete window is in correct chronological order`() {
         window.update(hopOf(1))
         window.update(hopOf(2))
         window.update(hopOf(3))
-        val result = window.update(hopOf(4))
+        val result = window.update(hopOf(4))!!
 
-        val expected = ShortArray(4096).also {
-            hopOf(1).copyInto(it, 0)
-            hopOf(2).copyInto(it, 1024)
-            hopOf(3).copyInto(it, 2048)
-            hopOf(4).copyInto(it, 3072)
-        }
-        assertArrayEquals(expected, result)
+        assertEquals(expectedWindow(1, 2, 3, 4), result.toList())
     }
 
     @Test
-    fun `update slides the window by one hop, dropping the oldest hop`() {
+    fun `consecutive rotations replace the oldest hop and keep the rest in order`() {
+        window.update(hopOf(1))
+        window.update(hopOf(2))
+        window.update(hopOf(3))
+        assertEquals(expectedWindow(1, 2, 3, 4), window.update(hopOf(4))!!.toList())
+        assertEquals(expectedWindow(2, 3, 4, 5), window.update(hopOf(5))!!.toList())
+        assertEquals(expectedWindow(3, 4, 5, 6), window.update(hopOf(6))!!.toList())
+        assertEquals(expectedWindow(4, 5, 6, 7), window.update(hopOf(7))!!.toList())
+    }
+
+    @Test
+    fun `rotations remain correct through a full ring-buffer wrap-around`() {
+        // Capacity is 4 hops, so the physical write position completes one full
+        // revolution of the ring buffer every 4 hops after the window first fills.
         window.update(hopOf(1))
         window.update(hopOf(2))
         window.update(hopOf(3))
         window.update(hopOf(4))
-        val result = window.update(hopOf(5))
 
-        val expected = ShortArray(4096).also {
-            hopOf(2).copyInto(it, 0)
-            hopOf(3).copyInto(it, 1024)
-            hopOf(4).copyInto(it, 2048)
-            hopOf(5).copyInto(it, 3072)
-        }
-        assertArrayEquals(expected, result)
+        assertEquals(expectedWindow(2, 3, 4, 5), window.update(hopOf(5))!!.toList())
+        assertEquals(expectedWindow(3, 4, 5, 6), window.update(hopOf(6))!!.toList())
+        assertEquals(expectedWindow(4, 5, 6, 7), window.update(hopOf(7))!!.toList())
+        // Physical write position wraps back to the start of the buffer here.
+        assertEquals(expectedWindow(5, 6, 7, 8), window.update(hopOf(8))!!.toList())
+        assertEquals(expectedWindow(6, 7, 8, 9), window.update(hopOf(9))!!.toList())
+        assertEquals(expectedWindow(7, 8, 9, 10), window.update(hopOf(10))!!.toList())
+        assertEquals(expectedWindow(8, 9, 10, 11), window.update(hopOf(11))!!.toList())
+        // A second full wrap-around.
+        assertEquals(expectedWindow(9, 10, 11, 12), window.update(hopOf(12))!!.toList())
     }
 
     @Test
@@ -69,22 +83,29 @@ class RollingAnalysisWindowTest {
     }
 
     @Test
-    fun `returned window is a copy, mutating it does not affect subsequent windows`() {
+    fun `sample window exposes no way to write through to internal storage`() {
         window.update(hopOf(1))
         window.update(hopOf(2))
         window.update(hopOf(3))
-        val first = window.update(hopOf(4))!!
-        first.fill(99)
+        val result = window.update(hopOf(4))!!
 
-        val second = window.update(hopOf(5))!!
+        // SampleWindow only declares a getter — there is no setter or mutable
+        // accessor to call here, which is itself the guarantee. Reading the same
+        // index repeatedly must be side-effect free.
+        val firstRead = result.toList()
+        val secondRead = result.toList()
+        assertEquals(firstRead, secondRead)
+    }
 
-        val expected = ShortArray(4096).also {
-            hopOf(2).copyInto(it, 0)
-            hopOf(3).copyInto(it, 1024)
-            hopOf(4).copyInto(it, 2048)
-            hopOf(5).copyInto(it, 3072)
-        }
-        assertArrayEquals(expected, second)
+    @Test
+    fun `sample window rejects an out-of-range index`() {
+        window.update(hopOf(1))
+        window.update(hopOf(2))
+        window.update(hopOf(3))
+        val result = window.update(hopOf(4))!!
+
+        assertThrows(IndexOutOfBoundsException::class.java) { result[-1] }
+        assertThrows(IndexOutOfBoundsException::class.java) { result[config.analysisWindowSize] }
     }
 
     @Test
@@ -98,15 +119,27 @@ class RollingAnalysisWindowTest {
         assertNull(window.update(hopOf(4)))
         assertNull(window.update(hopOf(5)))
         assertNull(window.update(hopOf(6)))
-        val result = window.update(hopOf(7))
+        val result = window.update(hopOf(7))!!
 
-        val expected = ShortArray(4096).also {
-            hopOf(4).copyInto(it, 0)
-            hopOf(5).copyInto(it, 1024)
-            hopOf(6).copyInto(it, 2048)
-            hopOf(7).copyInto(it, 3072)
-        }
-        assertArrayEquals(expected, result)
+        assertEquals(expectedWindow(4, 5, 6, 7), result.toList())
+    }
+
+    @Test
+    fun `reset fully clears ring-buffer state, leaving no trace of pre-reset hops`() {
+        window.update(hopOf(9))
+        window.update(hopOf(9))
+        window.update(hopOf(9))
+        window.update(hopOf(9))
+        window.update(hopOf(9))
+
+        window.reset()
+
+        window.update(hopOf(1))
+        window.update(hopOf(2))
+        window.update(hopOf(3))
+        val result = window.update(hopOf(4))!!
+
+        assertEquals(expectedWindow(1, 2, 3, 4), result.toList())
     }
 
     @Test
@@ -115,8 +148,8 @@ class RollingAnalysisWindowTest {
             AdaptiveEngineConfig(hopSize = 1024, analysisWindowSize = 1024)
         )
 
-        val result = singleHopWindow.update(hopOf(7))
+        val result = singleHopWindow.update(hopOf(7))!!
 
-        assertArrayEquals(hopOf(7), result)
+        assertEquals(List(1024) { 7.toShort() }, result.toList())
     }
 }

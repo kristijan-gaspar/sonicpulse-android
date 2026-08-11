@@ -11,4 +11,15 @@ object PowerCalculator {
             normalized * normalized
         } / samples.size
     }
+
+    fun calculate(window: SampleWindow): Double {
+        require(window.size > 0) { "Sample window must not be empty." }
+
+        var sumOfSquares = 0.0
+        for (i in 0 until window.size) {
+            val normalized = window[i] / PCM_16_FULL_SCALE
+            sumOfSquares += normalized * normalized
+        }
+        return sumOfSquares / window.size
+    }
 }
