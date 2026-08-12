@@ -49,19 +49,28 @@ class AdaptiveDetectionProcessorFactoryTest {
     fun `a freshly created processor carries no stateful adaptive engine state from a previous session`() {
         val factory = AdaptiveDetectionProcessorFactory(config)
         val spike = mixedBlock(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3)
+        val quiet = uniformBlock(100)
         val quietAmplitudes = listOf(95, 100, 105, 90, 110)
 
         val first = factory.create()
-        repeat(15) { i -> first.process(uniformBlock(quietAmplitudes[i % quietAmplitudes.size])) }
-        first.process(spike) // 'first' now has a warmed-up, ready background and an open event.
 
-        // If the factory wrongly reused 'first's engine (e.g. returned the same instance,
-        // or shared its background state), the same spike would immediately trigger on a
-        // "fresh" processor too, since that background would already be warmed up. A
-        // genuinely independent processor has no background history yet, so it cannot.
+        repeat(15) { i ->
+            first.process(uniformBlock(quietAmplitudes[i % quietAmplitudes.size]))
+        }
+
+        first.process(spike)
+
+
         val second = factory.create()
-        val result = second.process(spike)
 
-        assertNull(result.event)
+        val onset = second.process(spike)
+        val afterFirstQuiet = second.process(quiet)
+        val afterSecondQuiet = second.process(quiet)
+        val afterThirdQuiet = second.process(quiet)
+
+        assertNull(onset.event)
+        assertNull(afterFirstQuiet.event)
+        assertNull(afterSecondQuiet.event)
+        assertNull(afterThirdQuiet.event)
     }
 }
