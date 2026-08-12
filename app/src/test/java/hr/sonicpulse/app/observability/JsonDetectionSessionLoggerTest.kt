@@ -229,6 +229,28 @@ class JsonDetectionSessionLoggerTest {
     }
 
     @Test
+    fun `a hop past the retention limit is correctly discarded even when it carries a closing DetectionEvent`() {
+        val logger = newLogger()
+        logger.startTestSession()
+
+        repeat(maxRecordedHops) { logger.onHop(diagnostics(it.toLong()), null) }
+        // One more hop, past the cap, that would need both diagnostics and event mapping if
+        // it were retained — must still be counted, but neither the hop nor its event may
+        // leak into the retained trace.
+        val overflowEvent = DetectionEvent(peakDbfs = -1.0, peakBlockIndex = 999, durationBlocks = 5)
+        logger.onHop(diagnostics(maxRecordedHops.toLong(), trigger = true), overflowEvent)
+        logger.finishSession()
+
+        val document = decode(requireNotNull(logger.exportJson()))
+        assertEquals(maxRecordedHops + 1, document.totalHopCount)
+        assertEquals(maxRecordedHops, document.recordedHopCount)
+        assertEquals(maxRecordedHops, document.hops.size)
+        assertEquals(true, document.hopsTruncated)
+        assertTrue(document.hops.none { it.hopIndex == maxRecordedHops.toLong() })
+        assertTrue(document.hops.none { it.event != null })
+    }
+
+    @Test
     fun `hopsTruncated stays false and totalHopCount equals recordedHopCount while every hop is retained`() {
         val logger = newLogger()
         logger.startTestSession()
