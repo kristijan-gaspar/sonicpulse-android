@@ -4,30 +4,6 @@ import hr.sonicpulse.engine.DetectionEvent
 import hr.sonicpulse.engine.metrics.AudioLevelCalculator
 import hr.sonicpulse.engine.metrics.ClippingCalculator
 
-/**
- * Orchestrates the V2 adaptive detection pipeline for one hop at a time: DSP (rolling
- * analysis window, linear power), the Dufaux robust adaptive threshold, and the
- * admission/freeze decisions for background history — then hands the computed values to
- * [AdaptiveDetectionStateMachine], which owns event lifecycle alone.
- *
- * Locked onset semantics:
- * ```
- * energyExceeded = currentPower > adaptiveThreshold
- * impulsive      = crestDb > crestMinDb || clipRatio > clipRatioMin
- * trigger        = energyExceeded && impulsive
- * ```
- *
- * Background ownership (only this class decides admission, never the state machine):
- * - `IDLE`, no trigger: admit the current power into [AdaptiveBackgroundEstimator] and
- *   the current variation into [RobustVariationThresholdHistory].
- * - `IDLE`, on the triggering hop itself: admit neither.
- * - `DETECTING` / `COOLDOWN`: freeze both — neither history is touched.
- *
- * dBFS and clip ratio reuse V1's pure, stateless `AudioLevelCalculator` /
- * `ClippingCalculator` utilities unchanged, at the same 1024-sample-per-block
- * granularity V1 uses; crest factor is computed by [CrestFactorCalculator], V2's own
- * single-hop implementation (see its doc for why it doesn't reuse V1's windowed tracker).
- */
 class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = AdaptiveEngineConfig()) {
 
     private val analysisWindow = RollingAnalysisWindow(config)
@@ -42,20 +18,9 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
 
     val state: AdaptiveDetectionState get() = stateMachine.state
 
-    /**
-     * dBFS of the most recently processed hop. Updated for every valid-size hop passed to
-     * [process] — including the first hops while the 4096-sample analysis window is still
-     * filling and no power/trigger decision can be made yet — so callers always have a
-     * current level reading, not just once the window is full. `-120.0` (the dBFS floor)
-     * before the first hop is ever processed.
-     */
     var lastDbfs: Double = -120.0
         private set
 
-    /** Diagnostic snapshot of the most recently processed hop — see [AdaptiveHopDiagnostics].
-     * `null` before the first hop is ever processed; always set for every valid-size hop
-     * passed to [process], including during the analysis-window warmup. Observational only:
-     * nothing in this class's own decisions reads it back. */
     var lastDiagnostics: AdaptiveHopDiagnostics? = null
         private set
 
@@ -114,10 +79,8 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
         )
         val stateAfterProcess = stateMachine.state
 
-        if (stateAtEntry == AdaptiveDetectionState.IDLE && !trigger) {
-            backgroundEstimator.addObservation(currentPower)
-            evaluation?.let { variationHistory.addVariation(it.variation) }
-        }
+        backgroundEstimator.addObservation(currentPower)
+        evaluation?.let { variationHistory.addVariation(it.variation) }
 
         lastDiagnostics = AdaptiveHopDiagnostics(
             hopIndex = hopIndex,

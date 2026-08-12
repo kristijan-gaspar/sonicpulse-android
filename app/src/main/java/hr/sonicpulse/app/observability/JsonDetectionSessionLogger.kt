@@ -109,11 +109,13 @@ class JsonDetectionSessionLogger @Inject constructor(
      * `android.os.Build` at all. */
     fun startSession(manufacturer: String, model: String, sdkInt: Int) {
         synchronized(lock) {
-            preparedSession = PreparedSession(DeviceInfoSnapshot(manufacturer, model, sdkInt))
-            // Discards a still-in-progress (already activated) session's buffered data — but,
-            // deliberately, leaves completedDocument/hasCompletedSession untouched: the previous
-            // export must survive a capture attempt that never activates (see activateIfNeeded).
+            preparedSession = PreparedSession(
+                DeviceInfoSnapshot(manufacturer, model, sdkInt)
+            )
             activeSession = null
+
+            completedDocument = null
+            _hasCompletedSession.value = false
         }
     }
 
@@ -147,8 +149,6 @@ class JsonDetectionSessionLogger @Inject constructor(
         )
         activeSession = activated
         preparedSession = null
-        completedDocument = null
-        _hasCompletedSession.value = false
         return activated
     }
 
