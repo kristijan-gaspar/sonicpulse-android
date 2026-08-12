@@ -143,4 +143,34 @@ class AdaptiveDetectionEngineTest {
         engine.process(spike)
         assertEquals(AdaptiveDetectionState.IDLE, engine.state)
     }
+
+    @Test
+    fun `lastDbfs is updated from the first hop, even while the analysis window is still filling`() {
+        // analysisWindowSize (400) > hopSize (100): the window needs 4 hops to fill, so the
+        // first 3 process() calls return null with no power/trigger decision possible yet.
+        val fillUpConfig = config.copy(analysisWindowSize = 400)
+        val engine = AdaptiveDetectionEngine(fillUpConfig)
+
+        engine.process(uniformHop(1000))
+        val afterFirstHop = engine.lastDbfs
+
+        engine.process(uniformHop(5000))
+        val afterSecondHop = engine.lastDbfs
+
+        // Both hops are within the window fill-up phase (window not full until hop 4), yet
+        // lastDbfs already reflects each hop's own level, not a stale/default value.
+        assertEquals(true, afterFirstHop > -120.0)
+        assertEquals(true, afterSecondHop > afterFirstHop)
+    }
+
+    @Test
+    fun `reset clears lastDbfs back to the dBFS floor`() {
+        val engine = AdaptiveDetectionEngine(config)
+        engine.process(uniformHop(20_000))
+        assertEquals(true, engine.lastDbfs > -120.0)
+
+        engine.reset()
+
+        assertEquals(-120.0, engine.lastDbfs, 0.0)
+    }
 }

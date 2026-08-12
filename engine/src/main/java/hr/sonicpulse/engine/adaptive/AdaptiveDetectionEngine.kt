@@ -42,6 +42,16 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
 
     val state: AdaptiveDetectionState get() = stateMachine.state
 
+    /**
+     * dBFS of the most recently processed hop. Updated for every valid-size hop passed to
+     * [process] — including the first hops while the 4096-sample analysis window is still
+     * filling and no power/trigger decision can be made yet — so callers always have a
+     * current level reading, not just once the window is full. `-120.0` (the dBFS floor)
+     * before the first hop is ever processed.
+     */
+    var lastDbfs: Double = -120.0
+        private set
+
     fun process(hop: ShortArray): DetectionEvent? {
         require(hop.size == config.hopSize) {
             "hop must have exactly ${config.hopSize} samples, was ${hop.size}."
@@ -50,11 +60,13 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
         val hopIndex = processedHopIndex
         processedHopIndex++
 
+        lastDbfs = AudioLevelCalculator.calculate(hop).dbfs
+
         // Still filling the 4096-sample analysis window: no power yet, nothing to decide.
         val window = analysisWindow.update(hop) ?: return null
 
         val currentPower = PowerCalculator.calculate(window)
-        val currentDbfs = AudioLevelCalculator.calculate(hop).dbfs
+        val currentDbfs = lastDbfs
         val clipRatio = ClippingCalculator.calculateClipRatio(hop, config.clipLevel)
         val crestDb = CrestFactorCalculator.calculate(hop)
 
@@ -86,5 +98,6 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
         variationHistory.reset()
         stateMachine.reset()
         processedHopIndex = 0L
+        lastDbfs = -120.0
     }
 }
