@@ -198,4 +198,50 @@ class AdaptiveBackgroundEstimatorTest {
 
         assertEquals(3.0, estimator.statistics!!.medianPower, 1e-12)
     }
+
+    @Test
+    fun `robustVariation returns null before history is full`() {
+        val estimator = AdaptiveBackgroundEstimator(config)
+
+        repeat(capacity - 1) { estimator.addObservation(0.01) }
+
+        assertNull(estimator.robustVariation(referencePower = 0.5, conditionalMedianThreshold = 0.1))
+    }
+
+    @Test
+    fun `robustVariation medianPower matches statistics medianPower once ready`() {
+        val estimator = rampEstimator(config, capacity)
+
+        val variation = estimator.robustVariation(referencePower = 3.0, conditionalMedianThreshold = 1.0)!!
+
+        assertEquals(estimator.statistics!!.medianPower, variation.medianPower, 0.0)
+    }
+
+    @Test
+    fun `robustVariation suppresses an isolated spike used as the reference power`() {
+        val estimator = AdaptiveBackgroundEstimator(config)
+        val baseline = 0.01
+        repeat(capacity) { estimator.addObservation(baseline) }
+
+        val variation = estimator.robustVariation(referencePower = 5.0, conditionalMedianThreshold = 0.05)!!
+
+        assertEquals(baseline, variation.medianPower, 1e-12)
+        assertEquals(baseline, variation.conditionalMedianPower, 1e-12)
+        assertEquals(0.0, variation.difference, 1e-12)
+    }
+
+    @Test
+    fun `robustVariation does not mutate background state`() {
+        val estimator = rampEstimator(config, capacity)
+        val statisticsBefore = estimator.statistics!!
+
+        estimator.robustVariation(referencePower = 100.0, conditionalMedianThreshold = 0.5)
+        estimator.robustVariation(referencePower = 0.0, conditionalMedianThreshold = 0.5)
+
+        val statisticsAfter = estimator.statistics!!
+        assertEquals(statisticsBefore.medianPower, statisticsAfter.medianPower, 0.0)
+        assertEquals(statisticsBefore.stdPower, statisticsAfter.stdPower, 0.0)
+        assertEquals(statisticsBefore.sampleCount, statisticsAfter.sampleCount)
+        assertTrue(estimator.isReady)
+    }
 }

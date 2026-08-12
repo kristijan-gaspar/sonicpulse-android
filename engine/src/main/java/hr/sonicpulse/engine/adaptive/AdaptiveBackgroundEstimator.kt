@@ -29,6 +29,17 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
     val statistics: BackgroundStatistics?
         get() = if (isReady) computeStatistics() else null
 
+    /**
+     * Dufaux-style conditional-median background-variation signal over the retained
+     * history, for the supplied [referencePower] and explicit [conditionalMedianThreshold].
+     * Read-only: does not mutate background state. `null` before the history is full,
+     * matching [statistics].
+     */
+    fun robustVariation(referencePower: Double, conditionalMedianThreshold: Double): RobustBackgroundVariation? {
+        if (!isReady) return null
+        return ConditionalMedianCalculator.evaluate(history, referencePower, conditionalMedianThreshold)
+    }
+
     fun addObservation(power: Double) {
         require(power.isFinite() && power >= 0.0) {
             "power must be finite and non-negative, was $power."
