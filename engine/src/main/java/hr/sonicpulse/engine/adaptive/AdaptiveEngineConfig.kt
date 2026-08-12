@@ -5,15 +5,12 @@ data class AdaptiveEngineConfig(
     val hopSize: Int = 1024,
     val analysisWindowSize: Int = 4096,
     val backgroundHistoryMillis: Int = 5000,
-    val thresholdStdMultiplier: Double = 5.0,
-    val variationHistoryMillis: Int = 5000,
-    /**
-     * Dufaux's overshoot factor `ov` for the Eq. 3.9 adaptive variation threshold
-     * `th(k) = ov * max(recent variation)`. `1.5` is the value Dufaux uses as an example
-     * for this adaptive background-variation threshold; it is an initial,
-     * literature-grounded project default for SonicPulse, not a claim of universal
-     * optimality, and remains tunable.
-     */
+    val initialThaStdMultiplier: Double = 5.0,
+    val variationHistoryMillis: Int = 18_500,
+    val variationWarmupMillis: Int = 5000,
+
+    val minRelativePowerRiseDb: Double = 18.0,
+
     val ov: Double = 1.5,
     /** Minimum crest factor (peak/RMS, dB) for a hop to count as impulsive. */
     val crestMinDb: Double = 10.0,
@@ -26,7 +23,9 @@ data class AdaptiveEngineConfig(
     /** Maximum candidate event duration before it is rejected as too long. */
     val maxEventDurationMillis: Int = 700,
     /** Cooldown duration after leaving DETECTING (accepted or rejected alike). */
-    val cooldownMillis: Int = 700
+    val cooldownMillis: Int = 700,
+    // Short cooldown after a rejected candidate.
+    val rejectedCooldownHops: Int = 5
 ) {
     /**
      * Number of causal background power observations retained, one per hop (Dufaux's `L`).
@@ -41,6 +40,15 @@ data class AdaptiveEngineConfig(
      * therefore the same count.
      */
     val variationHistoryCapacity: Int = ceilingCapacity(variationHistoryMillis, sampleRate, hopSize)
+
+    /**
+     * Number of variation observations required before the rolling Eq. 3.9 threshold is
+     * considered warmed up enough to gate real detection ([RobustVariationThresholdHistory.isReady]).
+     * Deliberately a shorter warmup than [variationHistoryCapacity] (the full `D`-sized rolling
+     * window), so the adaptive engine does not have to wait for the whole D window to fill
+     * before it can start triggering.
+     */
+    val variationWarmupCapacity: Int = ceilingCapacity(variationWarmupMillis, sampleRate, hopSize)
 
     /** [maxEventDurationMillis] rounded up to whole hops. */
     val maxEventDurationHops: Int = ceilingCapacity(maxEventDurationMillis, sampleRate, hopSize)
@@ -66,8 +74,8 @@ data class AdaptiveEngineConfig(
         require(backgroundHistoryMillis > 0) {
             "backgroundHistoryMillis must be positive, was $backgroundHistoryMillis."
         }
-        require(thresholdStdMultiplier > 0.0) {
-            "thresholdStdMultiplier must be positive, was $thresholdStdMultiplier."
+        require(initialThaStdMultiplier.isFinite() && initialThaStdMultiplier > 0.0) {
+            "initialThaStdMultiplier must be finite and positive, was $initialThaStdMultiplier."
         }
         require(backgroundHistoryCapacity > 0) {
             "backgroundHistoryCapacity derived from backgroundHistoryMillis=$backgroundHistoryMillis, " +
@@ -82,7 +90,18 @@ data class AdaptiveEngineConfig(
                 "sampleRate=$sampleRate, hopSize=$hopSize must be at least 1; increase " +
                 "variationHistoryMillis or decrease hopSize."
         }
+        require(variationWarmupMillis > 0) {
+            "variationWarmupMillis must be positive, was $variationWarmupMillis."
+        }
+        require(variationWarmupCapacity > 0) {
+            "variationWarmupCapacity derived from variationWarmupMillis=$variationWarmupMillis, " +
+                "sampleRate=$sampleRate, hopSize=$hopSize must be at least 1; increase " +
+                "variationWarmupMillis or decrease hopSize."
+        }
         require(ov > 0.0) { "ov must be positive, was $ov." }
+        require(minRelativePowerRiseDb.isFinite() && minRelativePowerRiseDb >= 0.0) {
+            "minRelativePowerRiseDb must be finite and non-negative, was $minRelativePowerRiseDb."
+        }
         require(crestMinDb.isFinite() && crestMinDb >= 0.0) {
             "crestMinDb must be finite and non-negative, was $crestMinDb."
         }
@@ -104,6 +123,9 @@ data class AdaptiveEngineConfig(
         require(cooldownHops > 0) {
             "cooldownHops derived from cooldownMillis=$cooldownMillis, sampleRate=$sampleRate, " +
                 "hopSize=$hopSize must be at least 1."
+        }
+        require(rejectedCooldownHops > 0) {
+            "rejectedCooldownHops must be positive, was $rejectedCooldownHops."
         }
     }
 

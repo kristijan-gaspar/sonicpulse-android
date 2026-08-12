@@ -9,124 +9,58 @@ import org.junit.Test
 class AdaptiveThresholdEvaluatorTest {
 
     @Test
-    fun `multiplier comes from AdaptiveEngineConfig, whose default is 5_0`() {
-        val evaluator = AdaptiveThresholdEvaluator(AdaptiveEngineConfig().thresholdStdMultiplier)
+    fun `calculateThreshold is exactly mfa plus th`() {
+        val evaluator = AdaptiveThresholdEvaluator()
 
-        assertEquals(5.0, evaluator.thresholdStdMultiplier, 0.0)
+        assertEquals(0.05, evaluator.calculateThreshold(mfa = 0.02, th = 0.03), 1e-12)
     }
 
     @Test
-    fun `calculates threshold as median plus K times standard deviation`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
+    fun `calculateThreshold accepts a negative th`() {
+        val evaluator = AdaptiveThresholdEvaluator()
 
-        val threshold = evaluator.calculateThreshold(stats)
-
-        assertEquals(0.01 + 5.0 * 0.002, threshold, 1e-12)
+        assertEquals(0.01, evaluator.calculateThreshold(mfa = 0.02, th = -0.01), 1e-12)
     }
 
     @Test
-    fun `uses a configurable multiplier`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 3.0)
-        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
+    fun `rejects a negative mfa`() {
+        val evaluator = AdaptiveThresholdEvaluator()
 
-        val threshold = evaluator.calculateThreshold(stats)
-
-        assertEquals(0.01 + 3.0 * 0.002, threshold, 1e-12)
-    }
-
-    @Test
-    fun `evaluates power strictly greater than threshold as true`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
-        val threshold = evaluator.calculateThreshold(stats)
-
-        assertTrue(evaluator.exceedsThreshold(threshold + 1e-9, stats))
-    }
-
-    @Test
-    fun `evaluates power below threshold as false`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
-        val threshold = evaluator.calculateThreshold(stats)
-
-        assertFalse(evaluator.exceedsThreshold(threshold - 1e-9, stats))
-    }
-
-    @Test
-    fun `evaluates power exactly equal to threshold as false`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
-        val threshold = evaluator.calculateThreshold(stats)
-
-        assertFalse(evaluator.exceedsThreshold(threshold, stats))
-    }
-
-    @Test
-    fun `rejects a non-positive multiplier`() {
         assertThrows(IllegalArgumentException::class.java) {
-            AdaptiveThresholdEvaluator(thresholdStdMultiplier = 0.0)
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            AdaptiveThresholdEvaluator(thresholdStdMultiplier = -1.0)
+            evaluator.calculateThreshold(mfa = -0.01, th = 0.0)
         }
     }
 
     @Test
-    fun `rejects a negative current power`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
+    fun `rejects a non-finite mfa or th`() {
+        val evaluator = AdaptiveThresholdEvaluator()
 
         assertThrows(IllegalArgumentException::class.java) {
-            evaluator.exceedsThreshold(-0.1, stats)
+            evaluator.calculateThreshold(mfa = Double.NaN, th = 0.0)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            evaluator.calculateThreshold(mfa = 0.0, th = Double.NaN)
         }
     }
 
     @Test
-    fun `rejects a non-finite current power`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
+    fun `exceedsThreshold is strict - equal does not trigger`() {
+        val evaluator = AdaptiveThresholdEvaluator()
 
-        assertThrows(IllegalArgumentException::class.java) {
-            evaluator.exceedsThreshold(Double.NaN, stats)
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            evaluator.exceedsThreshold(Double.POSITIVE_INFINITY, stats)
-        }
+        assertFalse(evaluator.exceedsThreshold(currentPower = 0.05, mfa = 0.02, th = 0.03))
+        assertTrue(evaluator.exceedsThreshold(currentPower = 0.05 + 1e-9, mfa = 0.02, th = 0.03))
+        assertFalse(evaluator.exceedsThreshold(currentPower = 0.05 - 1e-9, mfa = 0.02, th = 0.03))
     }
 
     @Test
-    fun `calculateRobustThreshold is exactly mfa plus th`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-
-        assertEquals(0.05, evaluator.calculateRobustThreshold(mfa = 0.02, th = 0.03), 1e-12)
-    }
-
-    @Test
-    fun `exceedsRobustThreshold is strict - equal does not trigger`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-
-        assertFalse(evaluator.exceedsRobustThreshold(currentPower = 0.05, mfa = 0.02, th = 0.03))
-        assertTrue(evaluator.exceedsRobustThreshold(currentPower = 0.05 + 1e-9, mfa = 0.02, th = 0.03))
-        assertFalse(evaluator.exceedsRobustThreshold(currentPower = 0.05 - 1e-9, mfa = 0.02, th = 0.03))
-    }
-
-    @Test
-    fun `exceedsRobustThreshold rejects a negative or non-finite current power`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
+    fun `exceedsThreshold rejects a negative or non-finite current power`() {
+        val evaluator = AdaptiveThresholdEvaluator()
 
         assertThrows(IllegalArgumentException::class.java) {
-            evaluator.exceedsRobustThreshold(-0.1, mfa = 0.02, th = 0.03)
+            evaluator.exceedsThreshold(-0.1, mfa = 0.02, th = 0.03)
         }
         assertThrows(IllegalArgumentException::class.java) {
-            evaluator.exceedsRobustThreshold(Double.NaN, mfa = 0.02, th = 0.03)
+            evaluator.exceedsThreshold(Double.NaN, mfa = 0.02, th = 0.03)
         }
-    }
-
-    @Test
-    fun `calculateRobustThreshold accepts a negative th`() {
-        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-
-        assertEquals(0.01, evaluator.calculateRobustThreshold(mfa = 0.02, th = -0.01), 1e-12)
     }
 }

@@ -19,6 +19,7 @@ class LoggingAdaptiveDetectionProcessorTest {
         analysisWindowSize = 100,
         backgroundHistoryMillis = 500,   // L=5
         variationHistoryMillis = 500,    // D=5
+        variationWarmupMillis = 500,     // matched to D=5 so the warmup below reaches isReady
         maxEventDurationMillis = 2000,
         cooldownMillis = 200,
         endSilenceHops = 3

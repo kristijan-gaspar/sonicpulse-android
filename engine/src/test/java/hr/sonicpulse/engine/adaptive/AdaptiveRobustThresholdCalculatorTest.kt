@@ -14,15 +14,22 @@ class AdaptiveRobustThresholdCalculatorTest {
         analysisWindowSize = 400,
         backgroundHistoryMillis = 500,
         variationHistoryMillis = 500,
-        thresholdStdMultiplier = 5.0,
+        // Matched to variationHistoryMillis so isReady flips exactly after D=5 admissions,
+        // same as the pre-decoupling tests below assume.
+        variationWarmupMillis = 500,
+        initialThaStdMultiplier = 5.0,
         ov = 2.0
     )
 
     private fun setup(): Triple<AdaptiveBackgroundEstimator, RobustVariationThresholdHistory, AdaptiveRobustThresholdCalculator> {
         val background = AdaptiveBackgroundEstimator(config)
         val variationHistory = RobustVariationThresholdHistory(config)
-        val evaluator = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
-        return Triple(background, variationHistory, AdaptiveRobustThresholdCalculator(background, variationHistory, evaluator))
+        val evaluator = AdaptiveThresholdEvaluator()
+        return Triple(
+            background,
+            variationHistory,
+            AdaptiveRobustThresholdCalculator(config, background, variationHistory, evaluator)
+        )
     }
 
     @Test
@@ -34,20 +41,50 @@ class AdaptiveRobustThresholdCalculatorTest {
     }
 
     @Test
-    fun `bootstrap phase falls back exactly to the classic K times stdPower threshold`() {
+    fun `tha before any variation exists equals initialThaStdMultiplier times stdPower`() {
         val (background, variationHistory, calculator) = setup()
         // Chronological oldest->newest. mfa=1.0 (median), stdPower=3.6 (see AdaptiveBackgroundEstimatorTest).
         for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)
-        assertFalse(variationHistory.isReady)
+        assertNull(variationHistory.threshold) // no variation admitted yet -> tha must use the std seed
+        val stats = background.statistics!!
+        val expectedTha = config.initialThaStdMultiplier * stats.stdPower
+        val expectedVariation = background.robustVariation(conditionalMedianThreshold = expectedTha)!!.difference
 
         val result = calculator.evaluate(currentPower = 0.5)!!
 
         assertTrue(result.isBootstrapping)
-        val classicEvaluator = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
-        val classicThreshold = classicEvaluator.calculateThreshold(background.statistics!!)
-        assertEquals(classicThreshold, result.threshold, 1e-12)
-        assertEquals(1.0, result.mfa, 1e-12)
-        assertEquals(18.0, result.th, 1e-12) // 5.0 * 3.6
+        assertEquals(expectedVariation, result.variation, 0.0)
+    }
+
+    @Test
+    fun `th during bootstrap goes through Eq 3_9, never falls back directly to K times stdPower`() {
+        val (background, _, calculator) = setup()
+        for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)
+
+        val result = calculator.evaluate(currentPower = 0.5)!!
+
+        // e(k-d)=1.0, mfa=1.0 -> variation=0.0; th = ov * max(variation) = ov*0.0 = 0.0. If th
+        // had wrongly used the K*stdPower seed (18.0) directly instead of routing through
+        // Eq 3.9's thresholdIncluding, it would be 18.0, not 0.0.
+        assertEquals(0.0, result.variation, 1e-12)
+        assertEquals(0.0, result.th, 1e-12)
+        assertEquals(1.0, result.threshold, 1e-12) // mfa(1.0) + th(0.0)
+    }
+
+    @Test
+    fun `after the first variation is admitted, tha comes from the previous Eq 3_9 threshold, not stdPower again`() {
+        val (background, variationHistory, calculator) = setup()
+        for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)
+        variationHistory.addVariation(0.5) // one variation admitted -> threshold no longer null
+        val previousTh = variationHistory.threshold!!
+        val stats = background.statistics!!
+        val stdSeed = config.initialThaStdMultiplier * stats.stdPower
+        assertTrue(previousTh != stdSeed)
+        val expectedVariation = background.robustVariation(conditionalMedianThreshold = previousTh)!!.difference
+
+        val result = calculator.evaluate(currentPower = 0.5)!!
+
+        assertEquals(expectedVariation, result.variation, 0.0)
     }
 
     @Test
@@ -66,13 +103,6 @@ class AdaptiveRobustThresholdCalculatorTest {
         assertEquals(0.0, result.variation, 1e-12)
         assertEquals(1.0, result.th, 1e-12) // ov=2.0 * max(0.1..0.5, 0.0) = 2.0*0.5
         assertEquals(2.0, result.threshold, 1e-12) // mfa(1.0) + th(1.0)
-
-        val classicEvaluator = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
-        val classicThreshold = classicEvaluator.calculateThreshold(background.statistics!!)
-        assertTrue(
-            "robust threshold must differ from the classic K*std threshold once ready",
-            result.threshold != classicThreshold
-        )
     }
 
     @Test
@@ -143,10 +173,10 @@ class AdaptiveRobustThresholdCalculatorTest {
             variationHistoryB.addVariation(value)
         }
 
-        val evaluatorA = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
-        val evaluatorB = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
-        val calculatorA = AdaptiveRobustThresholdCalculator(backgroundA, variationHistoryA, evaluatorA)
-        val calculatorB = AdaptiveRobustThresholdCalculator(backgroundB, variationHistoryB, evaluatorB)
+        val evaluatorA = AdaptiveThresholdEvaluator()
+        val evaluatorB = AdaptiveThresholdEvaluator()
+        val calculatorA = AdaptiveRobustThresholdCalculator(config, backgroundA, variationHistoryA, evaluatorA)
+        val calculatorB = AdaptiveRobustThresholdCalculator(config, backgroundB, variationHistoryB, evaluatorB)
 
         val resultA = calculatorA.evaluate(currentPower = 1.0)!!
         val resultB = calculatorB.evaluate(currentPower = 1.0)!!

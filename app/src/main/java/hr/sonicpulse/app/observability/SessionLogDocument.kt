@@ -57,7 +57,7 @@ data class AdaptiveEngineConfigSnapshot(
     val hopSize: Int,
     val analysisWindowSize: Int,
     val backgroundHistoryMillis: Int,
-    val thresholdStdMultiplier: Double,
+    val initialThaStdMultiplier: Double,
     val variationHistoryMillis: Int,
     val ov: Double,
     val crestMinDb: Double,

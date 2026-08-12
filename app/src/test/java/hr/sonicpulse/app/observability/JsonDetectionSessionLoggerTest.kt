@@ -393,7 +393,7 @@ class JsonDetectionSessionLoggerTest {
             hopSize = 2048,
             analysisWindowSize = 8192,
             backgroundHistoryMillis = 6000,
-            thresholdStdMultiplier = 4.0,
+            initialThaStdMultiplier = 4.0,
             variationHistoryMillis = 4000,
             ov = 1.8,
             crestMinDb = 9.0,
@@ -414,7 +414,7 @@ class JsonDetectionSessionLoggerTest {
         assertEquals(customConfig.hopSize, snapshot.hopSize)
         assertEquals(customConfig.analysisWindowSize, snapshot.analysisWindowSize)
         assertEquals(customConfig.backgroundHistoryMillis, snapshot.backgroundHistoryMillis)
-        assertEquals(customConfig.thresholdStdMultiplier, snapshot.thresholdStdMultiplier, 0.0)
+        assertEquals(customConfig.initialThaStdMultiplier, snapshot.initialThaStdMultiplier, 0.0)
         assertEquals(customConfig.variationHistoryMillis, snapshot.variationHistoryMillis)
         assertEquals(customConfig.ov, snapshot.ov, 0.0)
         assertEquals(customConfig.crestMinDb, snapshot.crestMinDb, 0.0)

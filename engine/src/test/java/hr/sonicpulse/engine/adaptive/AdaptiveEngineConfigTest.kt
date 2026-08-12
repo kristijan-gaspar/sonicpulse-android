@@ -60,7 +60,7 @@ class AdaptiveEngineConfigTest {
         val config = AdaptiveEngineConfig()
 
         assertEquals(5000, config.backgroundHistoryMillis)
-        assertEquals(5.0, config.thresholdStdMultiplier, 0.0)
+        assertEquals(5.0, config.initialThaStdMultiplier, 0.0)
     }
 
     @Test
@@ -113,9 +113,9 @@ class AdaptiveEngineConfigTest {
     }
 
     @Test
-    fun `rejects non-positive thresholdStdMultiplier`() {
-        assertRejected { AdaptiveEngineConfig(thresholdStdMultiplier = 0.0) }
-        assertRejected { AdaptiveEngineConfig(thresholdStdMultiplier = -5.0) }
+    fun `rejects non-positive initialThaStdMultiplier`() {
+        assertRejected { AdaptiveEngineConfig(initialThaStdMultiplier = 0.0) }
+        assertRejected { AdaptiveEngineConfig(initialThaStdMultiplier = -5.0) }
     }
 
     @Test

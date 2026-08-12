@@ -3,16 +3,21 @@ package hr.sonicpulse.engine.adaptive
 import hr.sonicpulse.engine.DetectionEvent
 import hr.sonicpulse.engine.metrics.AudioLevelCalculator
 import hr.sonicpulse.engine.metrics.ClippingCalculator
+import kotlin.math.pow
 
 class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = AdaptiveEngineConfig()) {
 
     private val analysisWindow = RollingAnalysisWindow(config)
     private val backgroundEstimator = AdaptiveBackgroundEstimator(config)
     private val variationHistory = RobustVariationThresholdHistory(config)
-    private val thresholdEvaluator = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
+    private val thresholdEvaluator = AdaptiveThresholdEvaluator()
     private val robustThresholdCalculator =
-        AdaptiveRobustThresholdCalculator(backgroundEstimator, variationHistory, thresholdEvaluator)
+        AdaptiveRobustThresholdCalculator(config, backgroundEstimator, variationHistory, thresholdEvaluator)
     private val stateMachine = AdaptiveDetectionStateMachine(config)
+
+    // Power-domain rise: currentPower > mfa * 10^(minRelativePowerRiseDb / 10), NOT the
+    // amplitude-domain 20*log10 form - power ratios use a base-10 divisor of 10, not 20.
+    private val relativePowerRiseFactor = 10.0.pow(config.minRelativePowerRiseDb / 10.0)
 
     private var processedHopIndex = 0L
 
@@ -34,7 +39,6 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
 
         lastDbfs = AudioLevelCalculator.calculate(hop).dbfs
 
-        // Still filling the 4096-sample analysis window: no power yet, nothing to decide.
         val window = analysisWindow.update(hop)
         if (window == null) {
             val stateNow = stateMachine.state
@@ -65,9 +69,12 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
         val crestDb = CrestFactorCalculator.calculate(hop)
 
         val evaluation = robustThresholdCalculator.evaluate(currentPower)
+        val adaptiveReady = evaluation != null && !evaluation.isBootstrapping
         val energyExceeded = evaluation?.exceedsThreshold ?: false
+        val relativePowerExceeded =
+            evaluation != null && currentPower > evaluation.mfa * relativePowerRiseFactor
         val impulsive = (crestDb != null && crestDb > config.crestMinDb) || clipRatio > config.clipRatioMin
-        val trigger = energyExceeded && impulsive
+        val trigger = adaptiveReady && energyExceeded && relativePowerExceeded && impulsive
 
         val stateAtEntry = stateMachine.state
         val event = stateMachine.process(

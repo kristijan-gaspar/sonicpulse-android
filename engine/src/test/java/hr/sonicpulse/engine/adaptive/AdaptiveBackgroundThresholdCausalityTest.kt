@@ -22,16 +22,17 @@ class AdaptiveBackgroundThresholdCausalityTest {
     @Test
     fun `evaluating and thresholding a much larger power does not mutate background until explicitly added`() {
         val estimator = AdaptiveBackgroundEstimator(config)
-        val evaluator = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
+        val evaluator = AdaptiveThresholdEvaluator()
+        val th = 0.001
         val baseline = 0.01
         repeat(capacity) { estimator.addObservation(baseline) }
         assertTrue(estimator.isReady)
 
         val statisticsBefore = estimator.statistics!!
-        val thresholdBefore = evaluator.calculateThreshold(statisticsBefore)
+        val thresholdBefore = evaluator.calculateThreshold(statisticsBefore.medianPower, th)
 
         val currentPower = thresholdBefore * 10.0
-        val exceeded = evaluator.exceedsThreshold(currentPower, statisticsBefore)
+        val exceeded = evaluator.exceedsThreshold(currentPower, statisticsBefore.medianPower, th)
         assertTrue(exceeded)
 
         val statisticsAfterEvaluation = estimator.statistics!!
@@ -39,7 +40,7 @@ class AdaptiveBackgroundThresholdCausalityTest {
         assertEquals(statisticsBefore.stdPower, statisticsAfterEvaluation.stdPower, 0.0)
         assertEquals(
             thresholdBefore,
-            evaluator.calculateThreshold(statisticsAfterEvaluation),
+            evaluator.calculateThreshold(statisticsAfterEvaluation.medianPower, th),
             0.0
         )
 

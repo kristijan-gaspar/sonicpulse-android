@@ -4,9 +4,10 @@ package hr.sonicpulse.engine.adaptive
  * Snapshot of one Dufaux Method-3 robust threshold evaluation: `mfa(k)`, `th(k)`, the
  * resulting `variation(k) = cmfa(k) - mfa(k)`, the final threshold `T(k) = mfa(k) + th(k)`,
  * and the strict trigger decision for the evaluated power. [isBootstrapping] is `true`
- * while the rolling variation-threshold history has not yet accumulated `D` observations,
- * during which `th` falls back to the classic `thresholdStdMultiplier * stdPower` (see
- * [AdaptiveRobustThresholdCalculator]).
+ * until the rolling variation-threshold history reaches its (shorter) warmup capacity
+ * ([RobustVariationThresholdHistory.isReady]); `th` itself always goes through Eq. 3.9
+ * regardless — only the conditional-median reference `tha` falls back to a std-based seed
+ * before the very first variation exists (see [AdaptiveRobustThresholdCalculator]).
  */
 data class RobustThresholdEvaluation(
     val mfa: Double,

@@ -268,6 +268,49 @@ class AdaptiveDetectionStateMachineTest {
     }
 
     @Test
+    fun `an accepted event uses the full cooldownHops, not rejectedCooldownHops`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -10.0, blockIndex = 0, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 1, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 2, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 3, adaptiveThreshold = 2.0)
+        assertEquals(AdaptiveDetectionState.COOLDOWN, sm.state)
+
+        // cooldownHops=2: still COOLDOWN after 1 hop, IDLE after 2 - contrast with the
+        // rejectedCooldownHops (default 5) path in the test below.
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 4, adaptiveThreshold = 2.0)
+        assertEquals(AdaptiveDetectionState.COOLDOWN, sm.state)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 5, adaptiveThreshold = 2.0)
+        assertEquals(AdaptiveDetectionState.IDLE, sm.state)
+    }
+
+    @Test
+    fun `a TOO_LONG rejected candidate uses rejectedCooldownHops, not cooldownHops`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -10.0, blockIndex = 0, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 1, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 2, adaptiveThreshold = 2.0)
+        // blockIndex 3 -> duration 4 > maxEventDurationHops=3: rejected as TOO_LONG.
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 3, adaptiveThreshold = 2.0)
+        assertEquals(AdaptiveDetectionState.COOLDOWN, sm.state)
+
+        // rejectedCooldownHops defaults to 5, longer than cooldownHops=2: still COOLDOWN
+        // well past where the accepted-path cooldown above would already have hit IDLE.
+        for (blockIndex in 4L..7L) {
+            sm.process(
+                trigger = false,
+                currentPower = 0.0,
+                currentDbfs = -50.0,
+                blockIndex = blockIndex,
+                adaptiveThreshold = 2.0
+            )
+            assertEquals(AdaptiveDetectionState.COOLDOWN, sm.state)
+        }
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 8, adaptiveThreshold = 2.0)
+        assertEquals(AdaptiveDetectionState.IDLE, sm.state)
+    }
+
+    @Test
     fun `rejects a negative or non-finite currentPower`() {
         val sm = AdaptiveDetectionStateMachine(config)
 

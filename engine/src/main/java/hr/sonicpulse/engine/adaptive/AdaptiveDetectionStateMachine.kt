@@ -15,6 +15,7 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
 
     private var consecutiveInactiveHops = 0
     private var cooldownHopCount = 0
+    private var activeCooldownTargetHops = 0
     private var eventStartBlockIndex = 0L
     private var lastActiveBlockIndex = 0L
     private var eventPeakDbfs = Double.NEGATIVE_INFINITY
@@ -59,6 +60,7 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
         state = AdaptiveDetectionState.IDLE
         consecutiveInactiveHops = 0
         cooldownHopCount = 0
+        activeCooldownTargetHops = 0
         resetEventTracking()
     }
 
@@ -99,8 +101,9 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
             return null
         }
 
-        // Too long: reject silently (no separate TOO_LONG state/reporting) and cool down.
-        enterCooldown()
+        // Too long: reject silently (no separate TOO_LONG state/reporting) and cool down
+        // using the shorter rejected-candidate cooldown, not the accepted-event cooldown.
+        enterCooldown(config.rejectedCooldownHops)
         resetEventTracking()
         return null
     }
@@ -119,23 +122,24 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
             peakBlockIndex = eventPeakBlockIndex,
             durationBlocks = durationHops
         )
-        enterCooldown()
+        enterCooldown(config.cooldownHops)
         resetEventTracking()
         return event
     }
 
     private fun handleCooldown(): DetectionEvent? {
         cooldownHopCount++
-        if (cooldownHopCount >= config.cooldownHops) {
+        if (cooldownHopCount >= activeCooldownTargetHops) {
             state = AdaptiveDetectionState.IDLE
         }
         return null
     }
 
-    private fun enterCooldown() {
-        state = AdaptiveDetectionState.COOLDOWN
+    private fun enterCooldown(targetHops: Int) {
+        activeCooldownTargetHops = targetHops
         cooldownHopCount = 0
         consecutiveInactiveHops = 0
+        state = if (targetHops <= 0) AdaptiveDetectionState.IDLE else AdaptiveDetectionState.COOLDOWN
     }
 
     private fun resetEventTracking() {

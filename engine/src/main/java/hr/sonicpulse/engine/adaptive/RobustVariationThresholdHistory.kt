@@ -15,18 +15,33 @@ class RobustVariationThresholdHistory(private val config: AdaptiveEngineConfig) 
     private var writeIndex = 0
     private var filledCount = 0
 
-    val isReady: Boolean get() = filledCount >= capacity
+    /**
+     * Ready once at least [AdaptiveEngineConfig.variationWarmupCapacity] variations have been
+     * admitted — a shorter warmup than the full `D`-sized rolling window ([capacity]), so the
+     * adaptive engine does not have to wait for the whole Eq. 3.9 window to fill before it can
+     * start using this threshold for real detection.
+     */
+    val isReady: Boolean get() = filledCount >= config.variationWarmupCapacity
 
-    /** `th`, based only on variation values already explicitly added. `null` until ready. */
+    /** True once the full `D`-sized rolling window has filled — the point [addVariation]
+     * starts evicting the oldest retained value (FIFO) instead of only appending. */
+    private val isFull: Boolean get() = filledCount >= capacity
+
+    /**
+     * `th`, based only on variation values already explicitly added. `null` until at least one
+     * variation has been added — deliberately NOT gated by [isReady]: Eq. 3.9's rolling max is
+     * well-defined over however many variations are currently retained, even a single one.
+     */
     val threshold: Double?
-        get() = if (isReady) config.ov * maxOfRetained(candidate = null, excludeOldest = false) else null
+        get() = if (filledCount == 0) null else config.ov * maxOfRetained(candidate = null, excludeOldest = isFull)
 
     /**
      * The Eq. 3.9 threshold as it would be if [candidateVariation] were also included in
      * the rolling max window — without mutating this history. This lets a caller compute
      * `th(k)`, which by Eq. 3.9 includes the current step's own variation(k), while still
      * leaving admission of variation(k) into the rolling history as an explicit, separate
-     * decision via [addVariation].
+     * decision via [addVariation]. Works correctly even while the history is still filling
+     * (fewer than `D` variations retained so far) or completely empty.
      *
      * Once full, actually admitting [candidateVariation] via [addVariation] would evict
      * the oldest retained value (FIFO). This must mirror that eviction so the window
@@ -37,7 +52,7 @@ class RobustVariationThresholdHistory(private val config: AdaptiveEngineConfig) 
         require(candidateVariation.isFinite()) {
             "candidateVariation must be finite, was $candidateVariation."
         }
-        return config.ov * maxOfRetained(candidate = candidateVariation, excludeOldest = isReady)
+        return config.ov * maxOfRetained(candidate = candidateVariation, excludeOldest = isFull)
     }
 
     fun addVariation(value: Double) {

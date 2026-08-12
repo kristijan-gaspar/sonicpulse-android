@@ -15,6 +15,7 @@ class AdaptiveDetectionEngineTest {
         analysisWindowSize = 100,
         backgroundHistoryMillis = 500,   // L=5
         variationHistoryMillis = 500,    // D=5
+        variationWarmupMillis = 500,     // matched to D=5 so warmedUpEngine() reaches isReady
         maxEventDurationMillis = 2000,   // generous - not the focus of these tests
         cooldownMillis = 200,            // D=2 hops
         endSilenceHops = 3
@@ -44,6 +45,41 @@ class AdaptiveDetectionEngineTest {
         // Uniform (crest=0dB) and unclipped: energyExceeded should be true, but not impulsive.
         engine.process(uniformHop(25_000))
 
+        assertEquals(AdaptiveDetectionState.IDLE, engine.state)
+    }
+
+    @Test
+    fun `a loud and impulsive hop does not trigger while the adaptive model is still bootstrapping`() {
+        // variationWarmupMillis far beyond L: background readies at hop 5, but isReady
+        // (gated by variationWarmupCapacity=50) stays false throughout this test's warmup.
+        val slowWarmupConfig = config.copy(variationWarmupMillis = 5000)
+        val engine = AdaptiveDetectionEngine(slowWarmupConfig)
+        val quietAmplitudes = listOf(95, 100, 105, 90, 110)
+        repeat(15) { i -> engine.process(uniformHop(quietAmplitudes[i % quietAmplitudes.size])) }
+        assertEquals(true, engine.lastDiagnostics!!.isBootstrapping)
+
+        // Loud and impulsive enough to trigger many times over once ready - must still not
+        // open DETECTING while the adaptive model is bootstrapping.
+        engine.process(mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3))
+
+        assertEquals(AdaptiveDetectionState.IDLE, engine.state)
+    }
+
+    @Test
+    fun `energy and crest exceed their own thresholds but the 18dB relative-rise pre-gate still blocks the trigger`() {
+        val engine = warmedUpEngine()
+
+        // bulkValue=0 keeps average power well below the mfa*10^(18/10) relative-rise gate,
+        // while the few spiking samples alone are still enough to exceed both the adaptive
+        // energy threshold (close to mfa for this stable, quiet background) and the crest
+        // criterion.
+        engine.process(mixedHop(bulkValue = 0, spikeValue = 2_500, spikeCount = 3))
+        val diagnostics = engine.lastDiagnostics!!
+
+        assertEquals(false, diagnostics.isBootstrapping)
+        assertEquals(true, diagnostics.energyExceeded)
+        assertEquals(true, diagnostics.impulsive)
+        assertEquals(false, diagnostics.trigger) // blocked by the missing 18dB relative rise
         assertEquals(AdaptiveDetectionState.IDLE, engine.state)
     }
 

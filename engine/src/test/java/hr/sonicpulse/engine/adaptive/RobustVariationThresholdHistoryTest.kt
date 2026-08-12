@@ -14,9 +14,24 @@ class RobustVariationThresholdHistoryTest {
         hopSize = 100,
         analysisWindowSize = 400,
         variationHistoryMillis = 500,
+        // Matched to variationHistoryMillis so isReady flips exactly at the full D window,
+        // same as pre-decoupling behavior - see the dedicated decoupledConfig tests below
+        // for isReady/full-window independence.
+        variationWarmupMillis = 500,
         ov = 2.0
     )
     private val capacity = config.variationHistoryCapacity
+
+    // D = 10 hops, warmup = 3 hops: deliberately mismatched, to prove isReady (warmup-gated)
+    // and FIFO eviction (full-D-gated) are independent.
+    private val decoupledConfig = AdaptiveEngineConfig(
+        sampleRate = 1000,
+        hopSize = 100,
+        analysisWindowSize = 400,
+        variationHistoryMillis = 1000,
+        variationWarmupMillis = 300,
+        ov = 2.0
+    )
 
     @Test
     fun `derived test capacity D is 5`() {
@@ -168,5 +183,45 @@ class RobustVariationThresholdHistoryTest {
         for (value in listOf(-5.0, -3.0, -1.0, -4.0, -2.0)) history.addVariation(value)
 
         assertEquals(-2.0, history.threshold!!, 1e-12) // ov=2.0 * max(-5..-1)=-1 -> -2.0
+    }
+
+    @Test
+    fun `threshold is non-null as soon as a single variation is added, well before isReady`() {
+        val history = RobustVariationThresholdHistory(decoupledConfig)
+
+        history.addVariation(4.0)
+
+        assertFalse(history.isReady) // warmup capacity is 3, only 1 admitted so far
+        assertEquals(8.0, history.threshold!!, 1e-12) // ov=2.0 * max(4.0)=8.0
+    }
+
+    @Test
+    fun `isReady switches after variationWarmupCapacity, independent of the full D window`() {
+        val history = RobustVariationThresholdHistory(decoupledConfig)
+
+        repeat(2) { history.addVariation(1.0) }
+        assertFalse(history.isReady)
+
+        history.addVariation(1.0) // 3rd addition -> warmup capacity (3) reached
+
+        assertTrue(history.isReady)
+    }
+
+    @Test
+    fun `history keeps growing without eviction past isReady, until the full D window fills`() {
+        val history = RobustVariationThresholdHistory(decoupledConfig)
+
+        for (value in listOf(9.0, 1.0, 1.0)) history.addVariation(value) // isReady flips here
+        assertTrue(history.isReady)
+
+        // Still below the full D=10 capacity: no eviction yet, so the early 9.0 still dominates.
+        for (value in listOf(1.0, 1.0, 1.0, 1.0, 1.0, 1.0)) history.addVariation(value) // 9 total
+        assertEquals(18.0, history.threshold!!, 1e-12) // ov=2.0 * max(9.0, 1.0...)=18.0
+
+        history.addVariation(1.0) // 10th addition -> D window now exactly full, still no eviction
+        assertEquals(18.0, history.threshold!!, 1e-12)
+
+        history.addVariation(2.0) // 11th addition -> evicts the oldest retained value, 9.0
+        assertEquals(4.0, history.threshold!!, 1e-12) // ov=2.0 * max(1.0..1.0, 2.0)=4.0
     }
 }

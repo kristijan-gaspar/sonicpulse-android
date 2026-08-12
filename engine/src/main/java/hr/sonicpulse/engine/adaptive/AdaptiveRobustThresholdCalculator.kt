@@ -8,12 +8,19 @@ package hr.sonicpulse.engine.adaptive
  * ([variationHistory]) implementing Eq. 3.9, and final threshold evaluation
  * ([thresholdEvaluator]) — into the single active detection threshold `T(k) = mfa(k) + th(k)`.
  *
- * Bootstrap: before [RobustVariationThresholdHistory.isReady], there is no real `th(k-1)`
- * yet, so both the conditional-median reference threshold `tha(k)` and the active `th(k)`
- * fall back to the classic `thresholdStdMultiplier * stdPower` — a SonicPulse
- * initialization adaptation, not a claim from Dufaux's paper. Once the rolling variation
- * history is ready, `stdPower` no longer contributes to the active threshold; it stays
- * available on [BackgroundStatistics] purely for diagnostics/logging.
+ * Bootstrap: before the very first variation is admitted into [variationHistory] (i.e. while
+ * [RobustVariationThresholdHistory.threshold] is still `null`), there is no real `th(k-1)`
+ * yet, so the conditional-median reference threshold `tha(k)` falls back to
+ * [AdaptiveEngineConfig.initialThaStdMultiplier] `* stdPower` — a SonicPulse
+ * initialization seed, not a claim from Dufaux's paper. From the first admitted variation
+ * onward, `tha(k) = th(k-1)` (pure Eq. 3.9 recursion) and the std-based seed is never
+ * consulted again. Crucially, this seed only ever feeds `tha` (the conditional-median
+ * suppression threshold) — `th(k)` itself always goes through
+ * [RobustVariationThresholdHistory.thresholdIncluding], so the std-based seed is never
+ * used as the active detection threshold. [RobustThresholdEvaluation.isBootstrapping]
+ * separately tracks [RobustVariationThresholdHistory.isReady] (the shorter warmup window),
+ * which governs whether the adaptive engine is allowed to actually use this threshold for
+ * detection.
  *
  * [evaluate] is purely a read: it never mutates [backgroundEstimator] or
  * [variationHistory]. Admission of the current power into background history
@@ -22,6 +29,7 @@ package hr.sonicpulse.engine.adaptive
  * remain the caller's explicit, separate decisions — this class does not call either.
  */
 class AdaptiveRobustThresholdCalculator(
+    private val config: AdaptiveEngineConfig,
     private val backgroundEstimator: AdaptiveBackgroundEstimator,
     private val variationHistory: RobustVariationThresholdHistory,
     private val thresholdEvaluator: AdaptiveThresholdEvaluator
@@ -29,17 +37,16 @@ class AdaptiveRobustThresholdCalculator(
 
     fun evaluate(currentPower: Double): RobustThresholdEvaluation? {
         val statistics = backgroundEstimator.statistics ?: return null
-        val bootstrapValue = thresholdEvaluator.thresholdStdMultiplier * statistics.stdPower
-        val variationHistoryReady = variationHistory.isReady
+        val seededThreshold = variationHistory.threshold
+        val tha = seededThreshold ?: (config.initialThaStdMultiplier * statistics.stdPower)
 
-        val tha = if (variationHistoryReady) requireNotNull(variationHistory.threshold) else bootstrapValue
         val variationResult = backgroundEstimator.robustVariation(conditionalMedianThreshold = tha)
             ?: return null
         val variation = variationResult.difference
 
-        val th = if (variationHistoryReady) variationHistory.thresholdIncluding(variation) else bootstrapValue
-        val threshold = thresholdEvaluator.calculateRobustThreshold(statistics.medianPower, th)
-        val exceeds = thresholdEvaluator.exceedsRobustThreshold(currentPower, statistics.medianPower, th)
+        val th = variationHistory.thresholdIncluding(variation)
+        val threshold = thresholdEvaluator.calculateThreshold(statistics.medianPower, th)
+        val exceeds = thresholdEvaluator.exceedsThreshold(currentPower, statistics.medianPower, th)
 
         return RobustThresholdEvaluation(
             mfa = statistics.medianPower,
@@ -47,7 +54,7 @@ class AdaptiveRobustThresholdCalculator(
             variation = variation,
             threshold = threshold,
             exceedsThreshold = exceeds,
-            isBootstrapping = !variationHistoryReady
+            isBootstrapping = !variationHistory.isReady
         )
     }
 }
