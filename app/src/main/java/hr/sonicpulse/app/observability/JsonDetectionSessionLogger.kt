@@ -69,11 +69,24 @@ class JsonDetectionSessionLogger @Inject constructor(
         var totalHopCount = 0
             private set
 
+        /** True while another [HopLogEntry] can still be retained — callers must check this
+         * *before* mapping [AdaptiveHopDiagnostics] to a [HopLogEntry], never after, so that
+         * (potentially expensive, definitely wasteful once discarded) mapping/allocation is
+         * only ever performed for a hop that will actually be kept. */
+        val canRetainAnotherHop: Boolean
+            get() = hops.size < MAX_RECORDED_HOPS_PER_SESSION
+
+        /** Retains [entry] and counts it — only ever called while [canRetainAnotherHop] held at
+         * the time [entry] was built. */
         fun recordHop(entry: HopLogEntry) {
             totalHopCount++
-            if (hops.size < MAX_RECORDED_HOPS_PER_SESSION) {
-                hops += entry
-            }
+            hops += entry
+        }
+
+        /** Counts a hop that was never mapped to a [HopLogEntry] at all — see
+         * [SessionLogDocument.hopsTruncated]. */
+        fun countDiscardedHop() {
+            totalHopCount++
         }
     }
 
@@ -107,7 +120,14 @@ class JsonDetectionSessionLogger @Inject constructor(
     override fun onHop(diagnostics: AdaptiveHopDiagnostics, event: DetectionEvent?) {
         synchronized(lock) {
             val session = activateIfNeeded() ?: return
-            session.recordHop(diagnostics.toLogEntry(event))
+            // canRetainAnotherHop is checked *before* toLogEntry() runs: past the retention
+            // cap, the mapping/allocation would only ever be discarded, so it must never run
+            // on the audio thread for a hop that won't be kept — only the count still ticks.
+            if (session.canRetainAnotherHop) {
+                session.recordHop(diagnostics.toLogEntry(event))
+            } else {
+                session.countDiscardedHop()
+            }
         }
     }
 
