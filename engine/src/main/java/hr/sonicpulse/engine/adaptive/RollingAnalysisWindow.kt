@@ -9,7 +9,7 @@ class RollingAnalysisWindow(private val config: AdaptiveEngineConfig) {
 
     private val buffer = ShortArray(config.analysisWindowSize)
 
-    /** Index of the oldest retained sample; also where the next hop is written. */
+    /** Index of the next hop to be written; once the buffer is full, this is also the oldest retained sample. */
     private var writeIndex = 0
     private var filledSamples = 0
 
