@@ -171,6 +171,33 @@ class AdaptiveRobustThresholdCalculatorTest {
     }
 
     @Test
+    fun `stdPower, tha and cmfa are exposed from the same calculation path that owns them`() {
+        val (background, variationHistory, calculator) = setup()
+        // Chronological oldest->newest: mfa=1.0, stdPower=3.6 (see AdaptiveBackgroundEstimatorTest).
+        for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)
+        for (value in listOf(0.1, 0.2, 0.3, 0.4, 0.5)) variationHistory.addVariation(value)
+
+        val result = calculator.evaluate(currentPower = 0.5)!!
+
+        assertEquals(background.statistics!!.stdPower, result.stdPower, 0.0)
+        assertEquals(variationHistory.threshold!!, result.tha, 1e-12) // ready -> tha = th(k-1)
+        // e(k-d)=1.0, mfa=1.0, tha=1.0: |1-1|=0 <= 1.0 -> not suppressed -> cmfa = e(k-d).
+        val direct = background.robustVariation(conditionalMedianThreshold = result.tha)!!
+        assertEquals(direct.conditionalMedianPower, result.cmfa, 0.0)
+    }
+
+    @Test
+    fun `during bootstrap, tha equals the bootstrap value, not a D-window threshold`() {
+        val (background, variationHistory, calculator) = setup()
+        for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)
+        assertFalse(variationHistory.isReady)
+
+        val result = calculator.evaluate(currentPower = 0.5)!!
+
+        assertEquals(config.thresholdStdMultiplier * background.statistics!!.stdPower, result.tha, 1e-12)
+    }
+
+    @Test
     fun `no current-sample self-contamination - only exceedsThreshold changes with currentPower`() {
         val (background, variationHistory, calculator) = setup()
         for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)

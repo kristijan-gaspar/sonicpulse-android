@@ -52,6 +52,13 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
     var lastDbfs: Double = -120.0
         private set
 
+    /** Diagnostic snapshot of the most recently processed hop — see [AdaptiveHopDiagnostics].
+     * `null` before the first hop is ever processed; always set (possibly with `analysisReady
+     * = false`) immediately after any [process] call for a valid-size hop. Testing-only:
+     * nothing in this class's own decisions reads it back. */
+    var lastDiagnostics: AdaptiveHopDiagnostics? = null
+        private set
+
     fun process(hop: ShortArray): DetectionEvent? {
         require(hop.size == config.hopSize) {
             "hop must have exactly ${config.hopSize} samples, was ${hop.size}."
@@ -61,21 +68,55 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
         processedHopIndex++
 
         lastDbfs = AudioLevelCalculator.calculate(hop).dbfs
-
-        // Still filling the 4096-sample analysis window: no power yet, nothing to decide.
-        val window = analysisWindow.update(hop) ?: return null
-
-        val currentPower = PowerCalculator.calculate(window)
-        val currentDbfs = lastDbfs
+        // Neither depends on the 4096-sample analysis window - both are genuinely available
+        // from this hop alone, so diagnostics can report them even while the window fills.
         val clipRatio = ClippingCalculator.calculateClipRatio(hop, config.clipLevel)
         val crestDb = CrestFactorCalculator.calculate(hop)
 
+        val window = analysisWindow.update(hop)
+        if (window == null) {
+            val stateNow = stateMachine.state
+            lastDiagnostics = AdaptiveHopDiagnostics(
+                hopIndex = hopIndex,
+                analysisReady = false,
+                dbfs = lastDbfs,
+                power = null,
+                crestDb = crestDb,
+                clipRatio = clipRatio,
+                backgroundSampleCount = backgroundEstimator.admittedCount,
+                mfa = null,
+                stdPower = null,
+                cmfa = null,
+                tha = null,
+                variation = null,
+                th = null,
+                threshold = null,
+                isBootstrapping = null,
+                energyExceeded = null,
+                crestExceeded = null,
+                clipExceeded = null,
+                impulsive = null,
+                trigger = null,
+                stateBefore = stateNow,
+                stateAfter = stateNow,
+                activeEventThreshold = stateMachine.activeEventThreshold,
+                candidateCompletion = null
+            )
+            return null
+        }
+
+        val currentPower = PowerCalculator.calculate(window)
+        val currentDbfs = lastDbfs
+
         val evaluation = robustThresholdCalculator.evaluate(currentPower)
         val energyExceeded = evaluation?.exceedsThreshold ?: false
-        val impulsive = (crestDb != null && crestDb > config.crestMinDb) || clipRatio > config.clipRatioMin
+        val crestExceeded = crestDb != null && crestDb > config.crestMinDb
+        val clipExceeded = clipRatio > config.clipRatioMin
+        val impulsive = crestExceeded || clipExceeded
         val trigger = energyExceeded && impulsive
 
         val stateAtEntry = stateMachine.state
+        val activeEventThreshold = stateMachine.activeEventThreshold
         val event = stateMachine.process(
             trigger = trigger,
             currentPower = currentPower,
@@ -83,11 +124,39 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
             blockIndex = hopIndex,
             adaptiveThreshold = evaluation?.threshold ?: 0.0
         )
+        val completion = stateMachine.lastCandidateCompletion
 
         if (stateAtEntry == AdaptiveDetectionState.IDLE && !trigger) {
             backgroundEstimator.addObservation(currentPower)
             evaluation?.let { variationHistory.addVariation(it.variation) }
         }
+
+        lastDiagnostics = AdaptiveHopDiagnostics(
+            hopIndex = hopIndex,
+            analysisReady = true,
+            dbfs = currentDbfs,
+            power = currentPower,
+            crestDb = crestDb,
+            clipRatio = clipRatio,
+            backgroundSampleCount = backgroundEstimator.admittedCount,
+            mfa = evaluation?.mfa,
+            stdPower = evaluation?.stdPower,
+            cmfa = evaluation?.cmfa,
+            tha = evaluation?.tha,
+            variation = evaluation?.variation,
+            th = evaluation?.th,
+            threshold = evaluation?.threshold,
+            isBootstrapping = evaluation?.isBootstrapping,
+            energyExceeded = energyExceeded,
+            crestExceeded = crestExceeded,
+            clipExceeded = clipExceeded,
+            impulsive = impulsive,
+            trigger = trigger,
+            stateBefore = stateAtEntry,
+            stateAfter = stateMachine.state,
+            activeEventThreshold = activeEventThreshold,
+            candidateCompletion = completion
+        )
 
         return event
     }
@@ -99,5 +168,6 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
         stateMachine.reset()
         processedHopIndex = 0L
         lastDbfs = -120.0
+        lastDiagnostics = null
     }
 }

@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdaptiveDetectionStateMachineTest {
@@ -265,6 +266,71 @@ class AdaptiveDetectionStateMachineTest {
         )!!
 
         assertEquals(DetectionEvent(peakDbfs = -20.0, peakBlockIndex = 100L, durationBlocks = 1), event)
+    }
+
+    @Test
+    fun `activeEventThreshold is null outside DETECTING and equals the frozen threshold during it`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+        assertNull(sm.activeEventThreshold)
+
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -10.0, blockIndex = 0, adaptiveThreshold = 2.0)
+        assertEquals(2.0, sm.activeEventThreshold!!, 0.0)
+
+        // A different live adaptiveThreshold on a later hop must not change the frozen value.
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 1, adaptiveThreshold = 99.0)
+        assertEquals(2.0, sm.activeEventThreshold!!, 0.0)
+
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 2, adaptiveThreshold = 99.0)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 3, adaptiveThreshold = 99.0)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 4, adaptiveThreshold = 99.0)
+        assertNull(sm.activeEventThreshold) // COOLDOWN now - no active event
+    }
+
+    @Test
+    fun `lastCandidateCompletion is null on ordinary hops and cleared each call`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+
+        sm.process(trigger = false, currentPower = 1.0, currentDbfs = -10.0, blockIndex = 0, adaptiveThreshold = 0.5)
+        assertNull(sm.lastCandidateCompletion)
+
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -10.0, blockIndex = 1, adaptiveThreshold = 2.0)
+        assertNull(sm.lastCandidateCompletion) // opening a candidate is not a completion
+    }
+
+    @Test
+    fun `lastCandidateCompletion is Accepted on exactly the hop that accepts the event`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -5.0, blockIndex = 0, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 1, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 2, adaptiveThreshold = 2.0)
+
+        val event = sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 3, adaptiveThreshold = 2.0)!!
+
+        val completion = sm.lastCandidateCompletion
+        assertTrue(completion is AdaptiveCandidateCompletion.Accepted)
+        assertEquals(event, (completion as AdaptiveCandidateCompletion.Accepted).event)
+
+        // The very next hop (nothing completes) must read null again, not a stale value.
+        sm.process(trigger = false, currentPower = 0.0, currentDbfs = -50.0, blockIndex = 4, adaptiveThreshold = 2.0)
+        assertNull(sm.lastCandidateCompletion)
+    }
+
+    @Test
+    fun `lastCandidateCompletion is Rejected TOO_LONG on the hop that rejects it, and no DetectionEvent is returned`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -10.0, blockIndex = 0, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 1, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 2, adaptiveThreshold = 2.0)
+
+        // blockIndex 3 -> duration 4 > maxEventDurationHops(3): rejected.
+        val result = sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 3, adaptiveThreshold = 2.0)
+
+        assertNull(result) // production behavior unchanged: no DetectionEvent
+        val completion = sm.lastCandidateCompletion
+        assertTrue(completion is AdaptiveCandidateCompletion.Rejected)
+        val rejected = completion as AdaptiveCandidateCompletion.Rejected
+        assertEquals(AdaptiveCandidateRejectionReason.TOO_LONG, rejected.reason)
+        assertEquals(4, rejected.durationHops)
     }
 
     @Test

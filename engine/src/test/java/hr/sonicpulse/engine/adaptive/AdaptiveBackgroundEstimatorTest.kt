@@ -33,6 +33,32 @@ class AdaptiveBackgroundEstimatorTest {
     }
 
     @Test
+    fun `admittedCount tracks observations admitted so far, capped at capacity`() {
+        val estimator = AdaptiveBackgroundEstimator(config)
+
+        assertEquals(0, estimator.admittedCount)
+        repeat(capacity - 1) { estimator.addObservation(0.01) }
+        assertEquals(capacity - 1, estimator.admittedCount)
+
+        estimator.addObservation(0.01)
+        assertEquals(capacity, estimator.admittedCount)
+
+        estimator.addObservation(0.01) // one more, past capacity - count does not exceed it
+        assertEquals(capacity, estimator.admittedCount)
+    }
+
+    @Test
+    fun `reset clears admittedCount back to zero`() {
+        val estimator = AdaptiveBackgroundEstimator(config)
+        repeat(capacity) { estimator.addObservation(0.01) }
+        assertEquals(capacity, estimator.admittedCount)
+
+        estimator.reset()
+
+        assertEquals(0, estimator.admittedCount)
+    }
+
+    @Test
     fun `is not ready before history is full`() {
         val estimator = AdaptiveBackgroundEstimator(config)
 

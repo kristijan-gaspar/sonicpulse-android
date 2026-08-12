@@ -39,6 +39,38 @@ class AdaptiveDetectionProcessorTest {
     }
 
     @Test
+    fun `exposes the exact AdaptiveEngineConfig instance the engine was built from`() {
+        val processor = AdaptiveDetectionProcessor(config)
+
+        assertEquals(config, processor.engineConfig)
+    }
+
+    @Test
+    fun `result diagnostics correspond to the exact hop just processed`() {
+        val processor = AdaptiveDetectionProcessor(config)
+
+        val first = processor.process(uniformBlock(100))
+        assertEquals(0L, first.diagnostics.hopIndex)
+        assertEquals(first.dbfs, first.diagnostics.dbfs, 0.0)
+
+        val second = processor.process(uniformBlock(200))
+        assertEquals(1L, second.diagnostics.hopIndex)
+        assertEquals(second.dbfs, second.diagnostics.dbfs, 0.0)
+    }
+
+    @Test
+    fun `diagnostics report analysisReady=false and no fabricated power while the window is filling`() {
+        val fillUpConfig = config.copy(analysisWindowSize = 400)
+        val processor = AdaptiveDetectionProcessor(fillUpConfig)
+
+        val result = processor.process(uniformBlock(20_000))
+
+        assertEquals(false, result.diagnostics.analysisReady)
+        assertNull(result.diagnostics.power)
+        assertNull(result.diagnostics.trigger)
+    }
+
+    @Test
     fun `uses AdaptiveEngineConfig defaults when none is supplied`() {
         val processor = AdaptiveDetectionProcessor()
 

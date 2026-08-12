@@ -1,22 +1,25 @@
 package hr.sonicpulse.app.observability
 
-import hr.sonicpulse.engine.BlockMetrics
-import hr.sonicpulse.engine.CandidateCompletion
-import hr.sonicpulse.engine.EngineConfig
-import java.time.Instant
+import hr.sonicpulse.engine.adaptive.AdaptiveEngineConfig
+import hr.sonicpulse.engine.adaptive.AdaptiveHopDiagnostics
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Testing-only, candidate-centric diagnostic log of one monitoring session — not general
+ * Testing-only, per-hop diagnostic log of one V2 monitoring session — not general
  * application logging (see the observability package). [JsonDetectionSessionLogger] and
  * [NoOpDetectionSessionLogger] are selected once, in `di/ObservabilityModule`, behind
  * `BuildConfig.ENABLE_SESSION_LOGGING` — no caller of this interface (in particular
  * [hr.sonicpulse.app.service.MonitoringService]) branches on that flag itself.
  *
- * Threading contract: [onBlock] is called synchronously from the audio capture thread and must
- * stay cheap (no I/O, no JSON, no unbounded allocation) — see [JsonDetectionSessionLogger]'s KDoc
- * for how it stays cheap. [startSession] and [finishSession] are called from the service's own
- * (main) thread. [exportJson] is called from whatever dispatcher the caller chooses (expected to
+ * Unlike a candidate-centric log (V1's original design), every hop is retained — including
+ * ones where [AdaptiveHopDiagnostics.trigger] never fired — so a missed real-world impulse
+ * (a false negative) still leaves a trace in the export, not just accepted/rejected
+ * candidates.
+ *
+ * Threading contract: [onBlock] is called synchronously from the audio capture thread and
+ * must stay cheap (bounded in-memory append only — no I/O, no JSON, no unbounded
+ * allocation). [startSession] and [finishSession] are called from the service's own (main)
+ * thread. [exportJson] is called from whatever dispatcher the caller chooses (expected to
  * be off the audio thread) — implementations must not assume a specific one.
  */
 interface DetectionSessionLogger {
@@ -31,14 +34,12 @@ interface DetectionSessionLogger {
      * session — a capture attempt that never produces a single block (e.g. a synchronous
      * `AudioRecord` failure) must not destroy the last export. The previous completed session is
      * only discarded once this prepared session is genuinely activated — see [onBlock]. */
-    fun startSession(config: EngineConfig)
+    fun startSession(config: AdaptiveEngineConfig)
 
-    /** [finalizedCandidate] is non-null exactly on the block where the engine's
-     * `lastCandidateCompletion` was set — accepted or rejected alike, see [FinalizedCandidate].
-     * Must be safe to call before [startSession] (a no-op) and safe to call many times per second.
-     * The *first* call after a [startSession] genuinely activates that session (see
-     * implementations for what that means). */
-    fun onBlock(metrics: BlockMetrics, finalizedCandidate: FinalizedCandidate?)
+    /** Records one hop's diagnostics. Must be safe to call before [startSession] (a no-op) and
+     * safe to call many times per second. The *first* call after a [startSession] genuinely
+     * activates that session (see implementations for what that means). */
+    fun onBlock(diagnostics: AdaptiveHopDiagnostics)
 
     /** Finalizes the in-progress session into the latest completed session, if one was genuinely
      * activated (received at least one [onBlock] call). Idempotent: a no-op when no session is
@@ -52,9 +53,3 @@ interface DetectionSessionLogger {
      * was completed last). */
     fun exportJson(): String?
 }
-
-/** Pairs a finalized [CandidateCompletion] — accepted or rejected alike — with the peak instant
- * [hr.sonicpulse.app.service.MonitoringService] computes via
- * [hr.sonicpulse.app.data.audio.PeakTimeCalculator] from the completion's own peak block index.
- * The logger never (re)computes detection timing itself, so the two can never drift apart. */
-data class FinalizedCandidate(val completion: CandidateCompletion, val peakTimeClient: Instant)
