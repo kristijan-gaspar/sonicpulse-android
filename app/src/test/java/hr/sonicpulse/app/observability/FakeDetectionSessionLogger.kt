@@ -1,7 +1,7 @@
 package hr.sonicpulse.app.observability
 
-import hr.sonicpulse.engine.adaptive.AdaptiveEngineConfig
-import hr.sonicpulse.engine.adaptive.AdaptiveHopDiagnostics
+import hr.sonicpulse.engine.BlockMetrics
+import hr.sonicpulse.engine.EngineConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,8 +20,8 @@ class FakeDetectionSessionLogger(
     private val _hasCompletedSession = MutableStateFlow(initialHasCompletedSession)
     override val hasCompletedSession: StateFlow<Boolean> = _hasCompletedSession.asStateFlow()
 
-    val startedSessions = mutableListOf<AdaptiveEngineConfig>()
-    val hops = mutableListOf<AdaptiveHopDiagnostics>()
+    val startedSessions = mutableListOf<EngineConfig>()
+    val blocks = mutableListOf<Pair<BlockMetrics, FinalizedCandidate?>>()
     var finishSessionCallCount = 0
         private set
 
@@ -31,14 +31,14 @@ class FakeDetectionSessionLogger(
         _hasCompletedSession.value = value
     }
 
-    override fun startSession(config: AdaptiveEngineConfig) {
+    override fun startSession(config: EngineConfig) {
         startedSessions += config
         sessionStarted = true
         _hasCompletedSession.value = false
     }
 
-    override fun onBlock(diagnostics: AdaptiveHopDiagnostics) {
-        hops += diagnostics
+    override fun onBlock(metrics: BlockMetrics, finalizedCandidate: FinalizedCandidate?) {
+        blocks += metrics to finalizedCandidate
     }
 
     override fun finishSession() {

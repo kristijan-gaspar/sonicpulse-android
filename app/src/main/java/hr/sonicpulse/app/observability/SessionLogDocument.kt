@@ -4,15 +4,13 @@ import kotlinx.serialization.Serializable
 
 /** Schema version of the exported session-log JSON — bump only on a breaking shape change.
  * Version 2 replaced the accepted-only `detections` list with an outcome-carrying `candidates`
- * list and added candidate-retention accounting. Version 3 replaced the baseline-relative
- * `releaseSpikeMin` field with the peak-relative `releaseDropDb`. Version 4 replaced the whole
- * V1 candidate-centric, `EngineConfig`-based document with the V2 adaptive-engine document
- * below: a full per-hop [HopLogEntry] trace (so a hop where the detector never triggered is
- * still visible — needed to diagnose false negatives, which a candidate-only log cannot show)
- * and an [AdaptiveEngineConfigSnapshot] mirroring [hr.sonicpulse.engine.adaptive.AdaptiveEngineConfig].
- * A testing-only artifact gated behind `BuildConfig.ENABLE_SESSION_LOGGING`, so no migration
- * path for existing exported files. */
-const val SESSION_LOG_SCHEMA_VERSION = 4
+ * list (see [CandidateLogEntry]) and added candidate-retention accounting
+ * ([SessionLogDocument.totalCandidateCount], [SessionLogDocument.recordedCandidateCount],
+ * [SessionLogDocument.candidatesTruncated]). Version 3 replaced the baseline-relative
+ * `releaseSpikeMin` field with the peak-relative `releaseDropDb` (see
+ * [hr.sonicpulse.engine.EngineConfig.releaseDropDb]) — a testing-only artifact gated behind
+ * `BuildConfig.ENABLE_SESSION_LOGGING`, so no migration path for existing exported files. */
+const val SESSION_LOG_SCHEMA_VERSION = 3
 
 /** One completed monitoring session, ready to serialize and export — the top-level exported
  * document. All instants are ISO-8601 strings (`java.time.Instant.toString()`), not epoch
@@ -24,17 +22,19 @@ data class SessionLogDocument(
     val startedAt: String,
     val endedAt: String,
     val device: DeviceInfoSnapshot,
-    val engineConfig: AdaptiveEngineConfigSnapshot,
-    val hops: List<HopLogEntry>,
-    /** Every hop actually processed in the session — keeps increasing past
-     * [JsonDetectionSessionLogger]'s retention limit even once [hops] itself stops growing. */
-    val totalHopCount: Int,
-    /** `hops.size` — never exceeds the logger's retention limit. */
-    val recordedHopCount: Int,
-    /** True once [totalHopCount] exceeds [recordedHopCount] — i.e. at least one processed hop
-     * was counted but not retained in detail. Never silent: always computable from the two
-     * counts above, even without this flag. */
-    val hopsTruncated: Boolean
+    val sampleRate: Int,
+    val blockSize: Int,
+    val engineConfig: EngineConfigSnapshot,
+    val candidates: List<CandidateLogEntry>,
+    /** Every finalized candidate in the session, accepted or rejected alike — keeps increasing
+     * past [MAX_RECORDED_CANDIDATES_PER_SESSION][JsonDetectionSessionLogger] even once
+     * [candidates] itself stops growing. */
+    val totalCandidateCount: Int,
+    /** `candidates.size` — never exceeds `MAX_RECORDED_CANDIDATES_PER_SESSION`. */
+    val recordedCandidateCount: Int,
+    /** True once [totalCandidateCount] exceeds [recordedCandidateCount] — i.e. at least one
+     * finalized candidate was counted but not retained in detail. */
+    val candidatesTruncated: Boolean
 )
 
 @Serializable
@@ -44,79 +44,86 @@ data class DeviceInfoSnapshot(
     val sdkInt: Int
 )
 
-/** 1:1 field mirror of [hr.sonicpulse.engine.adaptive.AdaptiveEngineConfig] — kept as a
- * separate, `:app`-local `@Serializable` type rather than annotating the engine config
- * itself, so `:engine` never gains a serialization dependency it doesn't otherwise need. */
+/** 1:1 field mirror of [hr.sonicpulse.engine.EngineConfig] — kept as a separate, `:app`-local
+ * `@Serializable` type rather than annotating `EngineConfig` itself, so `:engine` never gains a
+ * serialization dependency it doesn't otherwise need. */
 @Serializable
-data class AdaptiveEngineConfigSnapshot(
+data class EngineConfigSnapshot(
     val sampleRate: Int,
-    val hopSize: Int,
-    val analysisWindowSize: Int,
-    val backgroundHistoryMillis: Int,
-    val backgroundHistoryCapacity: Int,
-    val thresholdStdMultiplier: Double,
-    val variationHistoryMillis: Int,
-    val variationHistoryCapacity: Int,
-    val ov: Double,
-    val crestMinDb: Double,
+    val blockSize: Int,
+    val alphaDown: Double,
+    val alphaUp: Double,
+    val dbfsMin: Double,
+    val spikeMin: Double,
+    val releaseDropDb: Double,
+    val crestMin: Double,
+    val crestWindowBlocks: Int,
     val clipLevel: Int,
     val clipRatioMin: Double,
-    val endSilenceHops: Int,
-    val maxEventDurationMillis: Int,
-    val maxEventDurationHops: Int,
-    val cooldownMillis: Int,
-    val cooldownHops: Int
+    val endSilenceBlocks: Int,
+    val maxEventDurationBlocks: Int,
+    val cooldownBlocks: Int,
+    val rejectedCooldownBlocks: Int,
+    val warmupBlocks: Int,
+    val dbfsFloor: Double
 )
 
-/** One finalized candidate completion — accepted or rejected alike, embedded on exactly the
- * [HopLogEntry] it finished on. [outcome] is `"ACCEPTED"` or `"REJECTED"` and
- * [rejectionReason] is `null` for an accepted candidate or the engine's
- * [hr.sonicpulse.engine.adaptive.AdaptiveCandidateRejectionReason] name (currently only
- * `"TOO_LONG"`) for a rejected one — a plain string, not a mirrored `@Serializable` enum,
- * matching how [HopLogEntry.stateBefore]/[HopLogEntry.stateAfter] already store
- * [hr.sonicpulse.engine.adaptive.AdaptiveDetectionState] as a name rather than a dedicated
- * type. [peakDbfs]/[peakBlockIndex]/[durationHops] come directly from the engine's
- * [hr.sonicpulse.engine.adaptive.AdaptiveCandidateCompletion] — never recomputed here. */
+/** One finalized [hr.sonicpulse.engine.CandidateCompletion] — accepted or rejected alike, with
+ * enough context to understand why the engine decided what it did. [outcome] is `"ACCEPTED"` or
+ * `"REJECTED"` and [rejectionReason] is `null` for an accepted candidate or the engine's
+ * [hr.sonicpulse.engine.CandidateRejectionReason] name (currently only `"TOO_LONG"`) for a
+ * rejected one — plain strings, not a mirrored `@Serializable` enum, matching how [BlockLogEntry.state]
+ * already stores [hr.sonicpulse.engine.DetectionState] as a name rather than a dedicated type.
+ *
+ * [peakDbfs]/[peakBlockIndex]/[durationBlocks] come directly from the engine's
+ * [hr.sonicpulse.engine.CandidateCompletion] — never recomputed here. [durationBlocks]/[durationMillis]
+ * and [maxDbfs]/[maxSpike]/[maxCrestFactorDb]/[maxClipRatio] describe the *complete* candidate
+ * (its release-active blocks plus any internal inactive gaps, and — for an accepted candidate —
+ * its trailing inactive confirmation blocks), derived from every block that actually arrived —
+ * regardless of [blocksTruncated]. [blocks] additionally includes the small pre-event ring-buffer
+ * context for reference, so it covers a slightly wider span than the duration/max figures do, and
+ * — for an accepted candidate — may also include trailing inactive confirmation blocks beyond
+ * [durationBlocks]; [durationBlocks] is never inferred from [blocks].
+ *
+ * [totalEventBlockCount] is the real number of blocks the candidate consisted of;
+ * [recordedBlockCount] is `blocks.size` (pre-event context plus however many detailed blocks were
+ * actually retained). The two differ, and [blocksTruncated] is true, only for a candidate long
+ * enough to exceed [JsonDetectionSessionLogger.MAX_DETAILED_EVENT_BLOCKS] — a pathological
+ * sustained trigger, not a normal impulsive event. */
 @Serializable
-data class HopCompletionLogEntry(
+data class CandidateLogEntry(
     val outcome: String,
     val rejectionReason: String?,
+    val detectedAt: String,
     val peakDbfs: Double,
     val peakBlockIndex: Long,
-    val durationHops: Int
+    val durationBlocks: Int,
+    val durationMillis: Long,
+    val maxDbfs: Double,
+    val maxSpike: Double,
+    val maxCrestFactorDb: Double?,
+    val maxClipRatio: Double,
+    val totalEventBlockCount: Int,
+    val recordedBlockCount: Int,
+    val blocksTruncated: Boolean,
+    val blocks: List<BlockLogEntry>
 )
 
-/** One [hr.sonicpulse.engine.adaptive.AdaptiveHopDiagnostics] record. Fields the detector
- * genuinely could not compute yet (the 4096-sample analysis window still filling, or
- * background history not yet ready) are `null`, matching [analysisReady] — never a
- * fabricated placeholder. [crestDb] is a peak-to-RMS ratio expressed in dB, not a level
- * relative to digital full scale — despite the sibling fields' `Dbfs`/`db`-adjacent naming,
- * crest factor is never dBFS. [completion] is non-null exactly on the hop a candidate
- * finished on, accepted or rejected alike. */
+/** One [hr.sonicpulse.engine.BlockMetrics] record belonging to a candidate — either part of the
+ * candidate itself, or the small pre-event ring-buffer context that preceded it (both are
+ * present in [CandidateLogEntry.blocks]; [relativeToPeakMillis] can be negative for pre-event or
+ * early-candidate blocks). [crestFactorDb] is a peak-to-RMS ratio expressed in dB, not a level
+ * relative to digital full scale — despite the sibling fields' `Dbfs` naming, crest factor is
+ * never dBFS. */
 @Serializable
-data class HopLogEntry(
-    val hopIndex: Long,
-    val analysisReady: Boolean,
+data class BlockLogEntry(
+    val blockIndex: Long,
+    val relativeToPeakMillis: Long,
+    val rms: Double,
     val dbfs: Double,
-    val power: Double?,
-    val crestDb: Double?,
-    val clipRatio: Double?,
-    val backgroundSampleCount: Int,
-    val mfa: Double?,
-    val stdPower: Double?,
-    val cmfa: Double?,
-    val tha: Double?,
-    val variation: Double?,
-    val th: Double?,
-    val threshold: Double?,
-    val isBootstrapping: Boolean?,
-    val energyExceeded: Boolean?,
-    val crestExceeded: Boolean?,
-    val clipExceeded: Boolean?,
-    val impulsive: Boolean?,
-    val trigger: Boolean?,
-    val stateBefore: String,
-    val stateAfter: String,
-    val activeEventThreshold: Double?,
-    val completion: HopCompletionLogEntry?
+    val baselineDbfs: Double,
+    val spikeDb: Double,
+    val crestFactorDb: Double?,
+    val clipRatio: Double,
+    val state: String
 )

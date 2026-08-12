@@ -23,18 +23,6 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
     /** The adaptive threshold frozen at the moment the current event's `DETECTING` began. */
     private var frozenEventThreshold = 0.0
 
-    /** [frozenEventThreshold] while an event is active, for diagnostics — mirrors
-     * [AdaptiveDetectionEngine.lastDbfs]'s always-available-after-the-fact shape. `null`
-     * outside `DETECTING`. */
-    val activeEventThreshold: Double?
-        get() = if (state == AdaptiveDetectionState.DETECTING) frozenEventThreshold else null
-
-    /** How the most recently finished candidate (this [process] call, if any) concluded —
-     * diagnostic-only, see [AdaptiveCandidateCompletion]. `null` on every hop that did not
-     * just finish a candidate, cleared at the start of every [process] call. */
-    var lastCandidateCompletion: AdaptiveCandidateCompletion? = null
-        private set
-
     /**
      * Processes one hop's already-computed values and returns the [DetectionEvent] that
      * just closed on this hop, or `null` on every other hop.
@@ -60,8 +48,6 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
             "adaptiveThreshold must be finite, was $adaptiveThreshold."
         }
 
-        lastCandidateCompletion = null
-
         return when (state) {
             AdaptiveDetectionState.IDLE -> handleIdle(trigger, currentDbfs, blockIndex, adaptiveThreshold)
             AdaptiveDetectionState.DETECTING -> handleDetecting(currentPower, currentDbfs, blockIndex)
@@ -73,7 +59,6 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
         state = AdaptiveDetectionState.IDLE
         consecutiveInactiveHops = 0
         cooldownHopCount = 0
-        lastCandidateCompletion = null
         resetEventTracking()
     }
 
@@ -114,15 +99,7 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
             return null
         }
 
-        // Too long: no DetectionEvent (production behavior unchanged) — but record the
-        // diagnostic completion so this rejection is observable outside this class.
-        val durationHops = durationHopsLong.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        lastCandidateCompletion = AdaptiveCandidateCompletion.Rejected(
-            reason = AdaptiveCandidateRejectionReason.TOO_LONG,
-            peakDbfs = eventPeakDbfs,
-            peakBlockIndex = eventPeakBlockIndex,
-            durationHops = durationHops
-        )
+        // Too long: reject silently (no separate TOO_LONG state/reporting) and cool down.
         enterCooldown()
         resetEventTracking()
         return null
@@ -142,7 +119,6 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
             peakBlockIndex = eventPeakBlockIndex,
             durationBlocks = durationHops
         )
-        lastCandidateCompletion = AdaptiveCandidateCompletion.Accepted(event)
         enterCooldown()
         resetEventTracking()
         return event

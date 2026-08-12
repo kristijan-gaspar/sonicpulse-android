@@ -11,8 +11,9 @@ import org.junit.Test
 /**
  * Proves the composition [MonitoringService.handleBlock] uses for the V2 adaptive path:
  * `peakTimeClient` is derived directly from a [DetectionEvent]'s own `peakBlockIndex` via
- * [PeakTimeCalculator.calculate] — no candidate-completion wrapper, and no offset for the
- * 4096-sample adaptive analysis window — then passed straight into [sessionDetectionFor].
+ * [PeakTimeCalculator.calculate] — no [hr.sonicpulse.engine.CandidateCompletion]/
+ * `finalizedCandidateFor` wrapper, and no offset for the 4096-sample adaptive analysis
+ * window — then passed straight into [sessionDetectionFor].
  */
 class EventPeakTimeCompositionTest {
 

@@ -43,9 +43,6 @@ class AdaptiveRobustThresholdCalculator(
 
         return RobustThresholdEvaluation(
             mfa = statistics.medianPower,
-            stdPower = statistics.stdPower,
-            tha = tha,
-            cmfa = variationResult.conditionalMedianPower,
             th = th,
             variation = variation,
             threshold = threshold,

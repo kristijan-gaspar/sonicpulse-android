@@ -26,10 +26,6 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
 
     val isReady: Boolean get() = filledCount >= capacity
 
-    /** Number of observations admitted so far, up to [AdaptiveEngineConfig.backgroundHistoryCapacity]
-     * once [isReady]. Diagnostic only — nothing in this class's own behavior depends on it. */
-    val admittedCount: Int get() = filledCount
-
     val statistics: BackgroundStatistics?
         get() = if (isReady) computeStatistics() else null
 
