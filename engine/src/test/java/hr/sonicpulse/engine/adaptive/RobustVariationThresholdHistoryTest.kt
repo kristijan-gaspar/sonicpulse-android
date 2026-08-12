@@ -124,6 +124,45 @@ class RobustVariationThresholdHistoryTest {
     }
 
     @Test
+    fun `thresholdIncluding excludes the oldest retained value once full, not just adds the candidate`() {
+        val history = RobustVariationThresholdHistory(config)
+        for (value in listOf(100.0, 1.0, 2.0, 3.0, 4.0)) history.addVariation(value)
+        assertTrue(history.isReady)
+
+        // Admitting candidate=5 for real would evict the oldest retained value, 100.0
+        // (FIFO), leaving {1,2,3,4,5}. The candidate-inclusive max must therefore be 5,
+        // not 100 - the bug was including all D retained values (D+1 total) instead of
+        // the newest D-1 plus the candidate.
+        val including = history.thresholdIncluding(candidateVariation = 5.0)
+
+        assertEquals(10.0, including, 1e-12) // ov=2.0 * max(1,2,3,4,5)=5 -> 10, not ov*100=200
+    }
+
+    @Test
+    fun `thresholdIncluding matches the threshold obtained by actually adding the same candidate`() {
+        val history = RobustVariationThresholdHistory(config)
+        for (value in listOf(100.0, 1.0, 2.0, 3.0, 4.0)) history.addVariation(value)
+
+        val including = history.thresholdIncluding(candidateVariation = 5.0)
+
+        history.addVariation(5.0)
+        assertEquals(including, history.threshold!!, 0.0)
+    }
+
+    @Test
+    fun `thresholdIncluding does not exclude anything while the history is still filling`() {
+        val history = RobustVariationThresholdHistory(config)
+        for (value in listOf(100.0, 1.0, 2.0, 3.0)) history.addVariation(value) // capacity-1, not ready
+        assertFalse(history.isReady)
+
+        // Not full yet: admitting the candidate for real would not evict anything, so the
+        // candidate-inclusive max must still consider all currently retained values.
+        val including = history.thresholdIncluding(candidateVariation = 5.0)
+
+        assertEquals(200.0, including, 1e-12) // ov=2.0 * max(100,1,2,3,5)=100 -> 200
+    }
+
+    @Test
     fun `a negative variation is accepted since variation can legitimately be negative`() {
         val history = RobustVariationThresholdHistory(config)
         for (value in listOf(-5.0, -3.0, -1.0, -4.0, -2.0)) history.addVariation(value)
