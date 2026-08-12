@@ -2,6 +2,7 @@ package hr.sonicpulse.engine.adaptive
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AdaptiveDetectionEngineTest {
@@ -172,5 +173,115 @@ class AdaptiveDetectionEngineTest {
         engine.reset()
 
         assertEquals(-120.0, engine.lastDbfs, 0.0)
+    }
+
+    @Test
+    fun `lastDiagnostics corresponds to the exact hop just processed`() {
+        val engine = AdaptiveDetectionEngine(config)
+
+        engine.process(uniformHop(100))
+        assertEquals(0L, engine.lastDiagnostics!!.hopIndex)
+
+        engine.process(uniformHop(200))
+        val second = engine.lastDiagnostics!!
+        assertEquals(1L, second.hopIndex)
+        assertEquals(engine.lastDbfs, second.dbfs, 0.0)
+    }
+
+    @Test
+    fun `warm-up diagnostics report analysisReady=false with the actual dbfs and every other field null`() {
+        // analysisWindowSize (400) > hopSize (100): window not full until hop 4.
+        val fillUpConfig = config.copy(analysisWindowSize = 400)
+        val engine = AdaptiveDetectionEngine(fillUpConfig)
+
+        engine.process(uniformHop(20_000))
+        val diagnostics = engine.lastDiagnostics!!
+
+        assertEquals(0L, diagnostics.hopIndex)
+        assertEquals(false, diagnostics.analysisReady)
+        assertEquals(engine.lastDbfs, diagnostics.dbfs, 0.0)
+        assertEquals(true, diagnostics.dbfs > -120.0) // genuinely available, not fabricated
+        assertNull(diagnostics.power)
+        assertNull(diagnostics.crestDb)
+        assertNull(diagnostics.clipRatio)
+        assertNull(diagnostics.mfa)
+        assertNull(diagnostics.variation)
+        assertNull(diagnostics.th)
+        assertNull(diagnostics.threshold)
+        assertNull(diagnostics.isBootstrapping)
+        assertNull(diagnostics.energyExceeded)
+        assertNull(diagnostics.impulsive)
+        assertNull(diagnostics.trigger)
+        assertEquals(AdaptiveDetectionState.IDLE, diagnostics.stateBefore)
+        assertEquals(AdaptiveDetectionState.IDLE, diagnostics.stateAfter)
+    }
+
+    @Test
+    fun `once analysis is ready, decision fields are copied unchanged for a loud, non-impulsive hop`() {
+        val engine = warmedUpEngine()
+
+        engine.process(uniformHop(25_000))
+        val diagnostics = engine.lastDiagnostics!!
+
+        assertEquals(true, diagnostics.analysisReady)
+        assertNotNull(diagnostics.power)
+        assertEquals(true, diagnostics.energyExceeded)
+        assertEquals(false, diagnostics.impulsive) // uniform hop -> crest 0dB, no clipping
+        assertEquals(false, diagnostics.trigger)
+    }
+
+    @Test
+    fun `once analysis is ready, decision fields are copied unchanged for an impulsive but insufficiently loud hop`() {
+        val engine = warmedUpEngine()
+
+        engine.process(mixedHop(bulkValue = 5, spikeValue = 150, spikeCount = 3))
+        val diagnostics = engine.lastDiagnostics!!
+
+        assertEquals(false, diagnostics.energyExceeded)
+        assertEquals(true, diagnostics.impulsive)
+        assertEquals(false, diagnostics.trigger) // energy criterion not met
+    }
+
+    @Test
+    fun `once analysis is ready, decision fields are copied unchanged for a loud and impulsive triggering hop`() {
+        val engine = warmedUpEngine()
+
+        engine.process(mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3))
+        val diagnostics = engine.lastDiagnostics!!
+
+        assertEquals(true, diagnostics.energyExceeded)
+        assertEquals(true, diagnostics.impulsive)
+        assertEquals(true, diagnostics.trigger)
+        assertEquals(AdaptiveDetectionState.IDLE, diagnostics.stateBefore)
+        assertEquals(AdaptiveDetectionState.DETECTING, diagnostics.stateAfter)
+    }
+
+    @Test
+    fun `stateBefore and stateAfter reflect the state machine transition around the process call`() {
+        val engine = warmedUpEngine()
+        val spike = mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3)
+
+        // Triggering hop: IDLE -> DETECTING.
+        engine.process(spike)
+        val onset = engine.lastDiagnostics!!
+        assertEquals(AdaptiveDetectionState.IDLE, onset.stateBefore)
+        assertEquals(AdaptiveDetectionState.DETECTING, onset.stateAfter)
+
+        // Still-active hop: DETECTING -> DETECTING (no transition).
+        engine.process(spike)
+        val stillDetecting = engine.lastDiagnostics!!
+        assertEquals(AdaptiveDetectionState.DETECTING, stillDetecting.stateBefore)
+        assertEquals(AdaptiveDetectionState.DETECTING, stillDetecting.stateAfter)
+    }
+
+    @Test
+    fun `reset clears lastDiagnostics back to null`() {
+        val engine = AdaptiveDetectionEngine(config)
+        engine.process(uniformHop(20_000))
+        assertNotNull(engine.lastDiagnostics)
+
+        engine.reset()
+
+        assertNull(engine.lastDiagnostics)
     }
 }
