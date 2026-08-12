@@ -77,13 +77,12 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
         return BackgroundStatistics(medianPower = medianPower, stdPower = std, sampleCount = capacity)
     }
 
-    /**
-     * `e(k-d)`: the retained sample `d = capacity/2 - 1` positions behind the newest one,
-     * in chronological (not sorted) order — the same `writeIndex`-relative indexing
-     * [RollingAnalysisWindow] uses for its chronological view.
-     */
     private fun delayedSample(): Double {
-        val d = capacity / 2 - 1
+        val d = if (capacity % 2 == 0) {
+            capacity / 2 - 1
+        } else {
+            (capacity - 1) / 2
+        }
         val chronologicalIndexFromOldest = capacity - 1 - d
         val physicalIndex = (writeIndex + chronologicalIndexFromOldest) % capacity
         return history[physicalIndex]

@@ -55,7 +55,7 @@ class JsonDetectionSessionLogger @Inject constructor(
          * Every hop past this limit still counts toward [ActiveSession.totalHopCount]; only
          * the detailed [HopLogEntry] stops being retained — never a silent truncation, since
          * [SessionLogDocument.hopsTruncated] always reflects it. */
-        const val MAX_RECORDED_HOPS_PER_SESSION = 5_000
+        const val MAX_RECORDED_HOPS_PER_SESSION = 10_000
     }
 
     /** A session that [startSession] has captured device identity for, but that has not yet
