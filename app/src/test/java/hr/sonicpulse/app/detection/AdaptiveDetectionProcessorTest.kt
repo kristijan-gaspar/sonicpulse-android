@@ -58,6 +58,17 @@ class AdaptiveDetectionProcessorTest {
     }
 
     @Test
+    fun `lastDiagnostics reflects the exact hop just processed`() {
+        val processor = AdaptiveDetectionProcessor(config)
+
+        processor.process(uniformBlock(100))
+        assertEquals(0L, processor.lastDiagnostics!!.hopIndex)
+
+        processor.process(uniformBlock(200))
+        assertEquals(1L, processor.lastDiagnostics!!.hopIndex)
+    }
+
+    @Test
     fun `no event on hops that do not close a candidate`() {
         val processor = AdaptiveDetectionProcessor(config)
 

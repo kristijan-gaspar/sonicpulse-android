@@ -272,10 +272,6 @@ class MonitoringService : Service() {
             return
         }
 
-        // Session diagnostic logging is V1-specific (EngineConfig/BlockMetrics/CandidateCompletion)
-        // and is not wired up for the V2 adaptive path yet — see DetectionSessionLogger's KDoc for
-        // why finishSession() (tearDownSession() below) remains safe to call regardless: it is a
-        // no-op for a session that was never activated via onBlock().
         val processor = detectionProcessorFactory.create()
         val recorder = AudioRecorder(
             getSystemService(AudioManager::class.java),
@@ -284,6 +280,17 @@ class MonitoringService : Service() {
         )
         session.recorder = recorder
         session.submissionTracker = SubmissionJobTracker()
+
+        // Only prepares the log session — it is not genuinely activated (and does not disturb
+        // a previously completed, still-exportable session) until the first real hop reaches
+        // the logging decorator wrapped inside `processor` — see LoggingAdaptiveDetectionProcessor
+        // and DetectionSessionLogger's KDoc. Safe to call here unconditionally:
+        // MonitoringSessionRunner guarantees the previous session's finishSession() (inside
+        // tearDownSession(), run sequentially before any restart is ever begun) has already
+        // fully completed by the time a new session can reach this line. Must happen before
+        // sessionCoordinator.startSession() below, which is what lets the first block reach
+        // the decorator.
+        detectionSessionLogger.startSession()
 
         // MonitoringSessionCoordinator guarantees monitoringStarted() runs before recorder.start().
         // It has no opinion on whether a capture error still belongs to this session — it only
