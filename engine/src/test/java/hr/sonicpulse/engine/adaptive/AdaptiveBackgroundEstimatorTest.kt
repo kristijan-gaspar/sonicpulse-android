@@ -8,14 +8,6 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The estimator applies a causal median-of-3 pre-filter to the raw observation stream
- * before a value ever reaches the retained history (see [AdaptiveBackgroundEstimator]).
- * That filter needs two prior raw observations before it can produce its first output,
- * so filling a history of [capacity] requires `capacity + MEDIAN_FILTER_WARMUP` raw
- * `addObservation` calls, not just `capacity` calls. Tests below account for this
- * explicitly rather than hardcoding call counts.
- */
 class AdaptiveBackgroundEstimatorTest {
 
     private val config = AdaptiveEngineConfig(
@@ -26,53 +18,44 @@ class AdaptiveBackgroundEstimatorTest {
     )
     private val capacity = config.backgroundHistoryCapacity
 
+    private val evenConfig = AdaptiveEngineConfig(
+        sampleRate = 1000,
+        hopSize = 100,
+        analysisWindowSize = 400,
+        backgroundHistoryMillis = 400
+    )
+    private val evenCapacity = evenConfig.backgroundHistoryCapacity
+
     @Test
-    fun `derived test capacity is 5`() {
+    fun `derived test capacities are 5 (odd) and 4 (even)`() {
         assertEquals(5, capacity)
+        assertEquals(4, evenCapacity)
     }
 
     @Test
     fun `is not ready before history is full`() {
         val estimator = AdaptiveBackgroundEstimator(config)
 
-        repeat(capacity + MEDIAN_FILTER_WARMUP - 1) { estimator.addObservation(0.01) }
+        repeat(capacity - 1) { estimator.addObservation(0.01) }
 
         assertFalse(estimator.isReady)
         assertNull(estimator.statistics)
     }
 
     @Test
-    fun `is ready exactly when history is full`() {
+    fun `is ready exactly when exactly capacity observations have been accepted`() {
         val estimator = AdaptiveBackgroundEstimator(config)
 
-        repeat(capacity + MEDIAN_FILTER_WARMUP) { estimator.addObservation(0.01) }
+        repeat(capacity - 1) { estimator.addObservation(0.01) }
+        assertFalse(estimator.isReady)
+
+        estimator.addObservation(0.01)
 
         assertTrue(estimator.isReady)
         assertEquals(capacity, estimator.statistics!!.sampleCount)
     }
 
-    @Test
-    fun `constant background gives the correct mean`() {
-        val estimator = AdaptiveBackgroundEstimator(config)
-
-        repeat(capacity + MEDIAN_FILTER_WARMUP) { estimator.addObservation(0.02) }
-
-        assertEquals(0.02, estimator.statistics!!.meanPower, 1e-12)
-    }
-
-    @Test
-    fun `constant background gives zero standard deviation`() {
-        val estimator = AdaptiveBackgroundEstimator(config)
-
-        repeat(capacity + MEDIAN_FILTER_WARMUP) { estimator.addObservation(0.02) }
-
-        assertEquals(0.0, estimator.statistics!!.stdPower, 1e-12)
-    }
-
-    // Feeding a monotonic ramp r(i) = i makes the median-of-3 filter fully predictable:
-    // for any 3 consecutive increasing values, the median is always the middle (i.e.
-    // previous) one, so the filtered output at raw call k (k >= 3) is exactly r(k-1).
-    private fun rampEstimator(rawCallCount: Int): AdaptiveBackgroundEstimator {
+    private fun rampEstimator(config: AdaptiveEngineConfig, rawCallCount: Int): AdaptiveBackgroundEstimator {
         val estimator = AdaptiveBackgroundEstimator(config)
         for (i in 1..rawCallCount) {
             estimator.addObservation(i.toDouble())
@@ -81,75 +64,92 @@ class AdaptiveBackgroundEstimatorTest {
     }
 
     @Test
-    fun `deterministic ramp values give the correct arithmetic mean on first fill`() {
-        // 7 raw calls (capacity 5 + warmup 2) retain filtered outputs r(2)..r(6) = 2..6.
-        val estimator = rampEstimator(capacity + MEDIAN_FILTER_WARMUP)
+    fun `odd retained count uses the central sorted value as the median`() {
+        val estimator = AdaptiveBackgroundEstimator(config)
+        for (value in listOf(5.0, 1.0, 4.0, 2.0, 3.0)) estimator.addObservation(value)
 
-        assertEquals(4.0, estimator.statistics!!.meanPower, 1e-12)
+        // sorted {1,2,3,4,5}, capacity 5 -> index 5/2=2 -> 3.0.
+        assertEquals(3.0, estimator.statistics!!.medianPower, 1e-12)
     }
 
     @Test
-    fun `deterministic ramp values give the correct population standard deviation on first fill`() {
-        val estimator = rampEstimator(capacity + MEDIAN_FILTER_WARMUP)
+    fun `even retained count uses the higher of the two central sorted values`() {
+        val estimator = AdaptiveBackgroundEstimator(evenConfig)
+        for (value in listOf(4.0, 1.0, 3.0, 2.0)) estimator.addObservation(value)
 
-        // Retained set {2,3,4,5,6}, mean 4: population std = sqrt(mean((x-4)^2)) = sqrt(2).
-        assertEquals(sqrt(2.0), estimator.statistics!!.stdPower, 1e-12)
+        // sorted {1,2,3,4}, capacity 4 -> index 4/2=2 -> 3.0 (not the average of 2 and 3).
+        assertEquals(3.0, estimator.statistics!!.medianPower, 1e-12)
     }
 
     @Test
-    fun `oldest observation is replaced by the next filtered value`() {
-        // After the first fill (7 raw calls) the history holds {2,3,4,5,6}. One more raw
-        // call (r=8) filters to r(7)=7 and evicts the oldest retained value, 2.
-        val estimator = rampEstimator(capacity + MEDIAN_FILTER_WARMUP + 1)
+    fun `oldest observation is replaced by the next accepted observation`() {
+        val estimator = rampEstimator(config, capacity)
+        // First fill {1,2,3,4,5}: median = sorted[2] = 3.
 
-        // New retained set {3,4,5,6,7}, mean 5.
-        assertEquals(5.0, estimator.statistics!!.meanPower, 1e-12)
+        estimator.addObservation(6.0)
+
+        // New retained set {2,3,4,5,6}: median = sorted[2] = 4.
+        assertEquals(4.0, estimator.statistics!!.medianPower, 1e-12)
     }
 
     @Test
-    fun `history stays bounded across multiple circular wrap-arounds`() {
-        // capacity 5: 10 extra raw calls past the first fill is exactly two full wraps.
-        val estimator = rampEstimator(capacity + MEDIAN_FILTER_WARMUP + 2 * capacity)
+    fun `history stays bounded and correct across multiple circular wrap-arounds`() {
+        // capacity 5: 2 extra full wraps past the first fill is 10 extra observations.
+        val estimator = rampEstimator(config, capacity + 2 * capacity)
 
         assertEquals(capacity, estimator.statistics!!.sampleCount)
-        // Retained set is the 5 most recent filtered outputs: r(12)..r(16) = {12..16}, mean 14.
-        assertEquals(14.0, estimator.statistics!!.meanPower, 1e-12)
+        // Retained set is the 5 most recent values: {11,12,13,14,15}.
+        assertEquals(13.0, estimator.statistics!!.medianPower, 1e-12)
         assertEquals(sqrt(2.0), estimator.statistics!!.stdPower, 1e-12)
     }
 
     @Test
-    fun `an isolated single-hop spike has no influence on the background estimate`() {
+    fun `sigma is the population standard deviation of the retained observations, independent of the median`() {
         val estimator = AdaptiveBackgroundEstimator(config)
+        for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) estimator.addObservation(value)
+
+        val stats = estimator.statistics!!
+        // sorted {1,1,1,1,10}: median = sorted[2] = 1.0, but arithmeticMean = 2.8 and
+        // population std = sqrt(((1-2.8)^2*4 + (10-2.8)^2) / 5) = 3.6.
+        assertEquals(1.0, stats.medianPower, 1e-12)
+        assertEquals(3.6, stats.stdPower, 1e-9)
+    }
+
+    @Test
+    fun `one isolated high value in a sufficiently populated history does not dominate the median`() {
+        val defaultConfig = AdaptiveEngineConfig()
+        val estimator = AdaptiveBackgroundEstimator(defaultConfig)
         val baseline = 0.01
         val spike = 5.0
+        val capacity = defaultConfig.backgroundHistoryCapacity
 
-        estimator.addObservation(baseline)
-        estimator.addObservation(baseline)
+        repeat(capacity / 2) { estimator.addObservation(baseline) }
         estimator.addObservation(spike)
-        repeat(capacity + MEDIAN_FILTER_WARMUP - 3) { estimator.addObservation(baseline) }
+        repeat(capacity - capacity / 2 - 1) { estimator.addObservation(baseline) }
 
         assertTrue(estimator.isReady)
-        assertEquals(baseline, estimator.statistics!!.meanPower, 1e-12)
-        assertEquals(0.0, estimator.statistics!!.stdPower, 1e-12)
+        assertEquals(baseline, estimator.statistics!!.medianPower, 1e-12)
+        // The spike is still part of the retained history and does move sigma.
+        assertTrue(estimator.statistics!!.stdPower > 0.0)
     }
 
     @Test
     fun `statistics remain finite and non-negative for a varied sequence with a spike`() {
         val estimator = AdaptiveBackgroundEstimator(config)
-        val values = listOf(0.01, 0.03, 5.0, 0.02, 0.015, 0.04, 0.01, 0.05, 0.02, 0.03)
+        val values = listOf(0.01, 0.03, 5.0, 0.02, 0.015)
 
         for (value in values) estimator.addObservation(value)
 
         val stats = estimator.statistics!!
-        assertTrue(stats.meanPower.isFinite())
-        assertTrue(stats.meanPower >= 0.0)
+        assertTrue(stats.medianPower.isFinite())
+        assertTrue(stats.medianPower >= 0.0)
         assertTrue(stats.stdPower.isFinite())
         assertTrue(stats.stdPower >= 0.0)
     }
 
     @Test
-    fun `reset fully clears background state, including pending median filter state`() {
-        val estimator = rampEstimator(capacity + MEDIAN_FILTER_WARMUP + 2 * capacity)
+    fun `reset fully clears background state`() {
+        val estimator = rampEstimator(config, capacity + 2 * capacity)
         assertTrue(estimator.isReady)
 
         estimator.reset()
@@ -157,11 +157,11 @@ class AdaptiveBackgroundEstimatorTest {
         assertFalse(estimator.isReady)
         assertNull(estimator.statistics)
 
-        // A fresh ramp starting from 1 again must reproduce exactly the first-fill result,
-        // with no trace of the raw or pending values seen before reset.
-        repeat(capacity + MEDIAN_FILTER_WARMUP) { estimator.addObservation((it + 1).toDouble()) }
+        // A fresh ramp starting from 1 again must reproduce exactly the first-fill
+        // result, with no trace of the values seen before reset.
+        for (i in 1..capacity) estimator.addObservation(i.toDouble())
 
-        assertEquals(4.0, estimator.statistics!!.meanPower, 1e-12)
+        assertEquals(3.0, estimator.statistics!!.medianPower, 1e-12)
     }
 
     @Test
@@ -192,16 +192,10 @@ class AdaptiveBackgroundEstimatorTest {
 
         assertThrows(IllegalArgumentException::class.java) { estimator.addObservation(Double.NaN) }
 
-        // Continuing the ramp as if the rejected call never happened must reproduce
-        // exactly the same first-fill result as the plain ramp scenario.
-        for (i in 3..(capacity + MEDIAN_FILTER_WARMUP)) {
-            estimator.addObservation(i.toDouble())
-        }
+        // Continuing as if the rejected call never happened must reproduce exactly the
+        // same first-fill result as the plain ramp scenario.
+        for (i in 3..capacity) estimator.addObservation(i.toDouble())
 
-        assertEquals(4.0, estimator.statistics!!.meanPower, 1e-12)
-    }
-
-    private companion object {
-        const val MEDIAN_FILTER_WARMUP = 2
+        assertEquals(3.0, estimator.statistics!!.medianPower, 1e-12)
     }
 }

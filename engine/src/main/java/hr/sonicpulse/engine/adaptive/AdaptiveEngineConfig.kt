@@ -7,9 +7,14 @@ data class AdaptiveEngineConfig(
     val backgroundHistoryMillis: Int = 5000,
     val thresholdStdMultiplier: Double = 5.0
 ) {
-    /** Number of causal background power observations retained, one per hop. */
+    /**
+     * Number of causal background power observations retained, one per hop. Rounded up
+     * so the retained history always covers at least [backgroundHistoryMillis].
+     */
     val backgroundHistoryCapacity: Int = if (hopSize > 0) {
-        ((backgroundHistoryMillis.toLong() * sampleRate) / (1000L * hopSize)).toInt()
+        val numerator = backgroundHistoryMillis.toLong() * sampleRate
+        val denominator = 1000L * hopSize
+        ((numerator + denominator - 1) / denominator).toInt()
     } else {
         0
     }

@@ -2,6 +2,7 @@ package hr.sonicpulse.engine.adaptive
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdaptiveEngineConfigTest {
@@ -63,12 +64,10 @@ class AdaptiveEngineConfigTest {
     }
 
     @Test
-    fun `derives the default background history capacity from sample rate, hop size and duration`() {
+    fun `default background history capacity is 216`() {
         val config = AdaptiveEngineConfig()
 
-        // capacity = backgroundHistoryMillis/1000 * sampleRate / hopSize, floored.
-        val expected = (5000L * 44_100L) / (1000L * 1024L)
-        assertEquals(expected.toInt(), config.backgroundHistoryCapacity)
+        assertEquals(216, config.backgroundHistoryCapacity)
     }
 
     @Test
@@ -80,8 +79,31 @@ class AdaptiveEngineConfigTest {
             backgroundHistoryMillis = 2000
         )
 
-        val expected = (2000L * 16_000L) / (1000L * 512L)
-        assertEquals(expected.toInt(), config.backgroundHistoryCapacity)
+        // 2000ms * 16_000Hz / 512 samples-per-hop = 62.5 hops, rounded up.
+        val expected = kotlin.math.ceil(2000.0 * 16_000 / (1000.0 * 512)).toInt()
+        assertEquals(63, expected)
+        assertEquals(expected, config.backgroundHistoryCapacity)
+    }
+
+    @Test
+    fun `derived capacity always covers at least the configured duration`() {
+        val configs = listOf(
+            AdaptiveEngineConfig(),
+            AdaptiveEngineConfig(sampleRate = 16_000, hopSize = 512, analysisWindowSize = 2048, backgroundHistoryMillis = 2000),
+            AdaptiveEngineConfig(sampleRate = 8_000, hopSize = 256, analysisWindowSize = 1024, backgroundHistoryMillis = 1),
+            AdaptiveEngineConfig(sampleRate = 44_100, hopSize = 1024, analysisWindowSize = 4096, backgroundHistoryMillis = 5001)
+        )
+
+        for (config in configs) {
+            val coveredMillis = config.backgroundHistoryCapacity.toLong() * config.hopSize * 1000L
+            val requiredMillis = config.backgroundHistoryMillis.toLong() * config.sampleRate
+            assertTrue(
+                "capacity=${config.backgroundHistoryCapacity} must cover at least " +
+                    "${config.backgroundHistoryMillis}ms for sampleRate=${config.sampleRate}, " +
+                    "hopSize=${config.hopSize}",
+                coveredMillis >= requiredMillis
+            )
+        }
     }
 
     @Test
@@ -94,12 +116,5 @@ class AdaptiveEngineConfigTest {
     fun `rejects non-positive thresholdStdMultiplier`() {
         assertRejected { AdaptiveEngineConfig(thresholdStdMultiplier = 0.0) }
         assertRejected { AdaptiveEngineConfig(thresholdStdMultiplier = -5.0) }
-    }
-
-    @Test
-    fun `rejects a backgroundHistoryMillis too small to yield at least one observation`() {
-        assertRejected {
-            AdaptiveEngineConfig(sampleRate = 44_100, hopSize = 1024, backgroundHistoryMillis = 1)
-        }
     }
 }

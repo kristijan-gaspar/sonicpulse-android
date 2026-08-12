@@ -17,16 +17,14 @@ class AdaptiveBackgroundThresholdCausalityTest {
         analysisWindowSize = 400,
         backgroundHistoryMillis = 500
     )
-
-    // Median-of-3 warm-up: see AdaptiveBackgroundEstimatorTest.
-    private val rawCallsToFill = config.backgroundHistoryCapacity + 2
+    private val capacity = config.backgroundHistoryCapacity
 
     @Test
     fun `evaluating and thresholding a much larger power does not mutate background until explicitly added`() {
         val estimator = AdaptiveBackgroundEstimator(config)
-        val evaluator = AdaptiveThresholdEvaluator()
+        val evaluator = AdaptiveThresholdEvaluator(config.thresholdStdMultiplier)
         val baseline = 0.01
-        repeat(rawCallsToFill) { estimator.addObservation(baseline) }
+        repeat(capacity) { estimator.addObservation(baseline) }
         assertTrue(estimator.isReady)
 
         val statisticsBefore = estimator.statistics!!
@@ -37,7 +35,7 @@ class AdaptiveBackgroundThresholdCausalityTest {
         assertTrue(exceeded)
 
         val statisticsAfterEvaluation = estimator.statistics!!
-        assertEquals(statisticsBefore.meanPower, statisticsAfterEvaluation.meanPower, 0.0)
+        assertEquals(statisticsBefore.medianPower, statisticsAfterEvaluation.medianPower, 0.0)
         assertEquals(statisticsBefore.stdPower, statisticsAfterEvaluation.stdPower, 0.0)
         assertEquals(
             thresholdBefore,
@@ -45,17 +43,15 @@ class AdaptiveBackgroundThresholdCausalityTest {
             0.0
         )
 
-        // A single addObservation call only queues the value into the median-of-3
-        // filter; because it's still a minority value in that window, it does not yet
-        // reach the retained history (matching the isolated-spike robustness behavior
-        // verified in AdaptiveBackgroundEstimatorTest). Adding it three times in a row
-        // makes it the majority value in the window, so it is explicitly admitted.
-        repeat(3) { estimator.addObservation(currentPower) }
+        // A single addObservation call replaces only the oldest of `capacity` retained
+        // values; with capacity 5 the large value must become the retained majority
+        // (more than half) before it can move the median, so repeat past that point.
+        repeat(capacity / 2 + 1) { estimator.addObservation(currentPower) }
 
         val statisticsAfterAdd = estimator.statistics!!
         assertTrue(
-            "explicitly adding the large observation enough times must change the background mean",
-            statisticsAfterAdd.meanPower != statisticsBefore.meanPower
+            "explicitly adding the large observation enough times must change the background median",
+            statisticsAfterAdd.medianPower != statisticsBefore.medianPower
         )
     }
 }

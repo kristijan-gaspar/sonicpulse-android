@@ -3,17 +3,16 @@ package hr.sonicpulse.engine.adaptive
 import kotlin.math.sqrt
 
 /**
- * Owns a bounded, causal history of previous background linear-power observations and
- * exposes their mean/standard deviation as [BackgroundStatistics].
+ * Owns a bounded, causal history of previous accepted background linear-power
+ * observations and exposes it as [BackgroundStatistics].
  *
- * Robustness: before an observation is retained, it passes through a causal median-of-3
- * filter over the raw observation stream (the current value and the two immediately
- * preceding it). A single isolated high-power observation is always the minority value
- * in that 3-sample window, so its median is one of its stable neighbors — the spike is
- * filtered out and never contaminates the retained history. This needs no extra
- * coefficients, thresholds or separately configured time window: 3 is the smallest
- * window for which "median" differs from "raw value", and it runs over the same
- * per-hop observation stream the ~5 s history is already built from.
+ * The background level is the causal long-term median of the retained history (Dufaux's
+ * long-term median background estimate): once full, the retained observations are
+ * sorted and the value at index `size / 2` is taken. For an odd retained count this is
+ * the central sorted value; for an even count, integer division on `size / 2` lands on
+ * the upper of the two central sorted values, matching Dufaux's convention. A single
+ * isolated high-power observation shifts at most one position in that sorted order, so
+ * with a sufficiently populated history it cannot dominate the median.
  *
  * [addObservation] is the only way history changes; nothing else in this class mutates
  * state, so callers fully control when an observation is allowed into the background.
@@ -25,9 +24,6 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
     private var writeIndex = 0
     private var filledCount = 0
 
-    private var pendingRaw1: Double? = null
-    private var pendingRaw2: Double? = null
-
     val isReady: Boolean get() = filledCount >= capacity
 
     val statistics: BackgroundStatistics?
@@ -38,8 +34,7 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
             "power must be finite and non-negative, was $power."
         }
 
-        val filtered = advanceMedianFilter(power) ?: return
-        history[writeIndex] = filtered
+        history[writeIndex] = power
         writeIndex = (writeIndex + 1) % capacity
         filledCount = (filledCount + 1).coerceAtMost(capacity)
     }
@@ -48,38 +43,24 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
         history.fill(0.0)
         writeIndex = 0
         filledCount = 0
-        pendingRaw1 = null
-        pendingRaw2 = null
     }
-
-    private fun advanceMedianFilter(power: Double): Double? {
-        val previous1 = pendingRaw1
-        val previous2 = pendingRaw2
-        pendingRaw1 = pendingRaw2
-        pendingRaw2 = power
-
-        return if (previous1 != null && previous2 != null) {
-            medianOf3(previous1, previous2, power)
-        } else {
-            null
-        }
-    }
-
-    private fun medianOf3(a: Double, b: Double, c: Double): Double =
-        listOf(a, b, c).sorted()[1]
 
     private fun computeStatistics(): BackgroundStatistics {
+        val sorted = history.copyOf()
+        sorted.sort()
+        val medianPower = sorted[capacity / 2]
+
         var sum = 0.0
         for (i in 0 until capacity) sum += history[i]
-        val mean = sum / capacity
+        val arithmeticMean = sum / capacity
 
         var sumOfSquaredDeviations = 0.0
         for (i in 0 until capacity) {
-            val deviation = history[i] - mean
+            val deviation = history[i] - arithmeticMean
             sumOfSquaredDeviations += deviation * deviation
         }
         val std = sqrt(sumOfSquaredDeviations / capacity)
 
-        return BackgroundStatistics(meanPower = mean, stdPower = std, sampleCount = capacity)
+        return BackgroundStatistics(medianPower = medianPower, stdPower = std, sampleCount = capacity)
     }
 }

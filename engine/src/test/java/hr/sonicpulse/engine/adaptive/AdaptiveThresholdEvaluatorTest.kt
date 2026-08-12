@@ -9,16 +9,16 @@ import org.junit.Test
 class AdaptiveThresholdEvaluatorTest {
 
     @Test
-    fun `default multiplier is 5_0`() {
-        val evaluator = AdaptiveThresholdEvaluator()
+    fun `multiplier comes from AdaptiveEngineConfig, whose default is 5_0`() {
+        val evaluator = AdaptiveThresholdEvaluator(AdaptiveEngineConfig().thresholdStdMultiplier)
 
         assertEquals(5.0, evaluator.thresholdStdMultiplier, 0.0)
     }
 
     @Test
-    fun `calculates threshold as mean plus K times standard deviation`() {
+    fun `calculates threshold as median plus K times standard deviation`() {
         val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(meanPower = 0.01, stdPower = 0.002, sampleCount = 215)
+        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
 
         val threshold = evaluator.calculateThreshold(stats)
 
@@ -28,7 +28,7 @@ class AdaptiveThresholdEvaluatorTest {
     @Test
     fun `uses a configurable multiplier`() {
         val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 3.0)
-        val stats = BackgroundStatistics(meanPower = 0.01, stdPower = 0.002, sampleCount = 215)
+        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
 
         val threshold = evaluator.calculateThreshold(stats)
 
@@ -38,7 +38,7 @@ class AdaptiveThresholdEvaluatorTest {
     @Test
     fun `evaluates power strictly greater than threshold as true`() {
         val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(meanPower = 0.01, stdPower = 0.002, sampleCount = 215)
+        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
         val threshold = evaluator.calculateThreshold(stats)
 
         assertTrue(evaluator.exceedsThreshold(threshold + 1e-9, stats))
@@ -47,7 +47,7 @@ class AdaptiveThresholdEvaluatorTest {
     @Test
     fun `evaluates power below threshold as false`() {
         val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(meanPower = 0.01, stdPower = 0.002, sampleCount = 215)
+        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
         val threshold = evaluator.calculateThreshold(stats)
 
         assertFalse(evaluator.exceedsThreshold(threshold - 1e-9, stats))
@@ -56,7 +56,7 @@ class AdaptiveThresholdEvaluatorTest {
     @Test
     fun `evaluates power exactly equal to threshold as false`() {
         val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
-        val stats = BackgroundStatistics(meanPower = 0.01, stdPower = 0.002, sampleCount = 215)
+        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
         val threshold = evaluator.calculateThreshold(stats)
 
         assertFalse(evaluator.exceedsThreshold(threshold, stats))
@@ -74,8 +74,8 @@ class AdaptiveThresholdEvaluatorTest {
 
     @Test
     fun `rejects a negative current power`() {
-        val evaluator = AdaptiveThresholdEvaluator()
-        val stats = BackgroundStatistics(meanPower = 0.01, stdPower = 0.002, sampleCount = 215)
+        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
+        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
 
         assertThrows(IllegalArgumentException::class.java) {
             evaluator.exceedsThreshold(-0.1, stats)
@@ -84,8 +84,8 @@ class AdaptiveThresholdEvaluatorTest {
 
     @Test
     fun `rejects a non-finite current power`() {
-        val evaluator = AdaptiveThresholdEvaluator()
-        val stats = BackgroundStatistics(meanPower = 0.01, stdPower = 0.002, sampleCount = 215)
+        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
+        val stats = BackgroundStatistics(medianPower = 0.01, stdPower = 0.002, sampleCount = 216)
 
         assertThrows(IllegalArgumentException::class.java) {
             evaluator.exceedsThreshold(Double.NaN, stats)
