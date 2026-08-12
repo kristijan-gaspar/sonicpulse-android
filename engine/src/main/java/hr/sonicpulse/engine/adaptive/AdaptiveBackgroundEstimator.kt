@@ -31,13 +31,15 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
 
     /**
      * Dufaux-style conditional-median background-variation signal over the retained
-     * history, for the supplied [referencePower] and explicit [conditionalMedianThreshold].
-     * Read-only: does not mutate background state. `null` before the history is full,
-     * matching [statistics].
+     * history, for the explicit [conditionalMedianThreshold] (`tha`). The reference power
+     * is not supplied by the caller: it is the causal delayed sample `e(k-d)` selected
+     * internally from the retained chronological history, with delay `d = L/2 - 1` for
+     * even `L` (Dufaux's causal median-filter delay). Read-only: does not mutate
+     * background state. `null` before the history is full, matching [statistics].
      */
-    fun robustVariation(referencePower: Double, conditionalMedianThreshold: Double): RobustBackgroundVariation? {
+    fun robustVariation(conditionalMedianThreshold: Double): RobustBackgroundVariation? {
         if (!isReady) return null
-        return ConditionalMedianCalculator.evaluate(history, referencePower, conditionalMedianThreshold)
+        return ConditionalMedianCalculator.evaluate(history, delayedSample(), conditionalMedianThreshold)
     }
 
     fun addObservation(power: Double) {
@@ -73,5 +75,17 @@ class AdaptiveBackgroundEstimator(private val config: AdaptiveEngineConfig) {
         val std = sqrt(sumOfSquaredDeviations / capacity)
 
         return BackgroundStatistics(medianPower = medianPower, stdPower = std, sampleCount = capacity)
+    }
+
+    /**
+     * `e(k-d)`: the retained sample `d = capacity/2 - 1` positions behind the newest one,
+     * in chronological (not sorted) order — the same `writeIndex`-relative indexing
+     * [RollingAnalysisWindow] uses for its chronological view.
+     */
+    private fun delayedSample(): Double {
+        val d = capacity / 2 - 1
+        val chronologicalIndexFromOldest = capacity - 1 - d
+        val physicalIndex = (writeIndex + chronologicalIndexFromOldest) % capacity
+        return history[physicalIndex]
     }
 }

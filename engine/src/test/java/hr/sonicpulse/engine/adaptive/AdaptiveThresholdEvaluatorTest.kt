@@ -94,4 +94,39 @@ class AdaptiveThresholdEvaluatorTest {
             evaluator.exceedsThreshold(Double.POSITIVE_INFINITY, stats)
         }
     }
+
+    @Test
+    fun `calculateRobustThreshold is exactly mfa plus th`() {
+        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
+
+        assertEquals(0.05, evaluator.calculateRobustThreshold(mfa = 0.02, th = 0.03), 1e-12)
+    }
+
+    @Test
+    fun `exceedsRobustThreshold is strict - equal does not trigger`() {
+        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
+
+        assertFalse(evaluator.exceedsRobustThreshold(currentPower = 0.05, mfa = 0.02, th = 0.03))
+        assertTrue(evaluator.exceedsRobustThreshold(currentPower = 0.05 + 1e-9, mfa = 0.02, th = 0.03))
+        assertFalse(evaluator.exceedsRobustThreshold(currentPower = 0.05 - 1e-9, mfa = 0.02, th = 0.03))
+    }
+
+    @Test
+    fun `exceedsRobustThreshold rejects a negative or non-finite current power`() {
+        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            evaluator.exceedsRobustThreshold(-0.1, mfa = 0.02, th = 0.03)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            evaluator.exceedsRobustThreshold(Double.NaN, mfa = 0.02, th = 0.03)
+        }
+    }
+
+    @Test
+    fun `calculateRobustThreshold accepts a negative th`() {
+        val evaluator = AdaptiveThresholdEvaluator(thresholdStdMultiplier = 5.0)
+
+        assertEquals(0.01, evaluator.calculateRobustThreshold(mfa = 0.02, th = -0.01), 1e-12)
+    }
 }

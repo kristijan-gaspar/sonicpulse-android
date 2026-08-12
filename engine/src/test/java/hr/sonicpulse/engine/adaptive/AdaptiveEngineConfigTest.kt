@@ -117,4 +117,45 @@ class AdaptiveEngineConfigTest {
         assertRejected { AdaptiveEngineConfig(thresholdStdMultiplier = 0.0) }
         assertRejected { AdaptiveEngineConfig(thresholdStdMultiplier = -5.0) }
     }
+
+    @Test
+    fun `default ov is 1_5 and default variationHistoryMillis is 5000`() {
+        val config = AdaptiveEngineConfig()
+
+        assertEquals(1.5, config.ov, 0.0)
+        assertEquals(5000, config.variationHistoryMillis)
+    }
+
+    @Test
+    fun `default variation history capacity (D) is 216`() {
+        val config = AdaptiveEngineConfig()
+
+        assertEquals(216, config.variationHistoryCapacity)
+    }
+
+    @Test
+    fun `L and D are independently configurable even though defaults coincide`() {
+        val defaultConfig = AdaptiveEngineConfig()
+        assertEquals(defaultConfig.backgroundHistoryCapacity, defaultConfig.variationHistoryCapacity)
+
+        val differentD = AdaptiveEngineConfig(variationHistoryMillis = 2000)
+        assertEquals(defaultConfig.backgroundHistoryCapacity, differentD.backgroundHistoryCapacity)
+        assertTrue(differentD.variationHistoryCapacity < defaultConfig.variationHistoryCapacity)
+
+        val differentL = AdaptiveEngineConfig(backgroundHistoryMillis = 2000)
+        assertEquals(defaultConfig.variationHistoryCapacity, differentL.variationHistoryCapacity)
+        assertTrue(differentL.backgroundHistoryCapacity < defaultConfig.backgroundHistoryCapacity)
+    }
+
+    @Test
+    fun `rejects non-positive ov`() {
+        assertRejected { AdaptiveEngineConfig(ov = 0.0) }
+        assertRejected { AdaptiveEngineConfig(ov = -1.5) }
+    }
+
+    @Test
+    fun `rejects non-positive variationHistoryMillis`() {
+        assertRejected { AdaptiveEngineConfig(variationHistoryMillis = 0) }
+        assertRejected { AdaptiveEngineConfig(variationHistoryMillis = -1) }
+    }
 }

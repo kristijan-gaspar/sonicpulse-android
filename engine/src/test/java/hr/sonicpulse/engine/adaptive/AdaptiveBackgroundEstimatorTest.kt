@@ -205,29 +205,62 @@ class AdaptiveBackgroundEstimatorTest {
 
         repeat(capacity - 1) { estimator.addObservation(0.01) }
 
-        assertNull(estimator.robustVariation(referencePower = 0.5, conditionalMedianThreshold = 0.1))
+        assertNull(estimator.robustVariation(conditionalMedianThreshold = 0.1))
     }
 
     @Test
     fun `robustVariation medianPower matches statistics medianPower once ready`() {
         val estimator = rampEstimator(config, capacity)
 
-        val variation = estimator.robustVariation(referencePower = 3.0, conditionalMedianThreshold = 1.0)!!
+        val variation = estimator.robustVariation(conditionalMedianThreshold = 1.0)!!
 
         assertEquals(estimator.statistics!!.medianPower, variation.medianPower, 0.0)
     }
 
     @Test
-    fun `robustVariation suppresses an isolated spike used as the reference power`() {
+    fun `robustVariation selects e(k-d), not the sorted median position - chronological order matters`() {
+        // capacity 5: d = 5/2-1 = 1, delayed chronological index (from oldest) = 5-1-1 = 3.
+        val estimator = AdaptiveBackgroundEstimator(config)
+        // Descending insertion order oldest->newest: [5,4,3,2,1]. Chronological index 3 = 2.
+        for (value in listOf(5.0, 4.0, 3.0, 2.0, 1.0)) estimator.addObservation(value)
+
+        // Large threshold: cmfa passes through unsuppressed, so conditionalMedianPower == e(k-d).
+        val result = estimator.robustVariation(conditionalMedianThreshold = 1000.0)!!
+
+        assertEquals(2.0, result.conditionalMedianPower, 1e-12)
+        // mfa = sorted median of {1,2,3,4,5} = 3.0, distinct from e(k-d) = 2.0.
+        assertEquals(3.0, result.medianPower, 1e-12)
+    }
+
+    @Test
+    fun `robustVariation uses the even-L delay d = L2 minus 1 for a different capacity`() {
+        // evenCapacity 4: d = 4/2-1 = 1, delayed chronological index (from oldest) = 4-1-1 = 2.
+        val estimator = AdaptiveBackgroundEstimator(evenConfig)
+        // Insertion order oldest->newest: [1,2,3,4]. Chronological index 2 = 3.
+        for (value in listOf(1.0, 2.0, 3.0, 4.0)) estimator.addObservation(value)
+
+        val result = estimator.robustVariation(conditionalMedianThreshold = 1000.0)!!
+
+        assertEquals(3.0, result.conditionalMedianPower, 1e-12)
+    }
+
+    @Test
+    fun `robustVariation suppresses an isolated spike at the delayed sample position`() {
+        // capacity 5: delayed chronological index (from oldest) = 3. Put the spike there.
         val estimator = AdaptiveBackgroundEstimator(config)
         val baseline = 0.01
-        repeat(capacity) { estimator.addObservation(baseline) }
+        val spike = 5.0
+        for (value in listOf(baseline, baseline, baseline, spike, baseline)) {
+            estimator.addObservation(value)
+        }
 
-        val variation = estimator.robustVariation(referencePower = 5.0, conditionalMedianThreshold = 0.05)!!
+        val suppressed = estimator.robustVariation(conditionalMedianThreshold = 0.05)!!
+        assertEquals(baseline, suppressed.medianPower, 1e-12)
+        assertEquals(baseline, suppressed.conditionalMedianPower, 1e-12)
+        assertEquals(0.0, suppressed.difference, 1e-12)
 
-        assertEquals(baseline, variation.medianPower, 1e-12)
-        assertEquals(baseline, variation.conditionalMedianPower, 1e-12)
-        assertEquals(0.0, variation.difference, 1e-12)
+        val passedThrough = estimator.robustVariation(conditionalMedianThreshold = 1000.0)!!
+        assertEquals(spike, passedThrough.conditionalMedianPower, 1e-12)
     }
 
     @Test
@@ -235,8 +268,8 @@ class AdaptiveBackgroundEstimatorTest {
         val estimator = rampEstimator(config, capacity)
         val statisticsBefore = estimator.statistics!!
 
-        estimator.robustVariation(referencePower = 100.0, conditionalMedianThreshold = 0.5)
-        estimator.robustVariation(referencePower = 0.0, conditionalMedianThreshold = 0.5)
+        estimator.robustVariation(conditionalMedianThreshold = 0.5)
+        estimator.robustVariation(conditionalMedianThreshold = 100.0)
 
         val statisticsAfter = estimator.statistics!!
         assertEquals(statisticsBefore.medianPower, statisticsAfter.medianPower, 0.0)
