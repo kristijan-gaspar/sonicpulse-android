@@ -158,4 +158,41 @@ class AdaptiveEngineConfigTest {
         assertRejected { AdaptiveEngineConfig(variationHistoryMillis = 0) }
         assertRejected { AdaptiveEngineConfig(variationHistoryMillis = -1) }
     }
+
+    @Test
+    fun `default detection parameter values are set correctly`() {
+        val config = AdaptiveEngineConfig()
+
+        assertEquals(10.0, config.crestMinDb, 0.0)
+        assertEquals(32_000, config.clipLevel)
+        assertEquals(0.02, config.clipRatioMin, 0.0)
+        assertEquals(3, config.endSilenceHops)
+        assertEquals(700, config.maxEventDurationMillis)
+        assertEquals(700, config.cooldownMillis)
+    }
+
+    @Test
+    fun `default maxEventDurationHops and cooldownHops are both 31`() {
+        val config = AdaptiveEngineConfig()
+
+        // ceil(700ms * 44100Hz / (1000 * 1024 samples-per-hop)) = ceil(30.146...) = 31.
+        assertEquals(31, config.maxEventDurationHops)
+        assertEquals(31, config.cooldownHops)
+    }
+
+    @Test
+    fun `rejects an out-of-range crestMinDb or clipLevel or clipRatioMin`() {
+        assertRejected { AdaptiveEngineConfig(crestMinDb = -1.0) }
+        assertRejected { AdaptiveEngineConfig(clipLevel = 0) }
+        assertRejected { AdaptiveEngineConfig(clipLevel = 40_000) }
+        assertRejected { AdaptiveEngineConfig(clipRatioMin = -0.1) }
+        assertRejected { AdaptiveEngineConfig(clipRatioMin = 1.1) }
+    }
+
+    @Test
+    fun `rejects non-positive endSilenceHops, maxEventDurationMillis or cooldownMillis`() {
+        assertRejected { AdaptiveEngineConfig(endSilenceHops = 0) }
+        assertRejected { AdaptiveEngineConfig(maxEventDurationMillis = 0) }
+        assertRejected { AdaptiveEngineConfig(cooldownMillis = 0) }
+    }
 }

@@ -14,7 +14,19 @@ data class AdaptiveEngineConfig(
      * literature-grounded project default for SonicPulse, not a claim of universal
      * optimality, and remains tunable.
      */
-    val ov: Double = 1.5
+    val ov: Double = 1.5,
+    /** Minimum crest factor (peak/RMS, dB) for a hop to count as impulsive. */
+    val crestMinDb: Double = 10.0,
+    /** Absolute PCM16 sample magnitude at/above which a sample counts as clipped. */
+    val clipLevel: Int = 32_000,
+    /** Minimum fraction of clipped samples in a hop for it to count as impulsive. */
+    val clipRatioMin: Double = 0.02,
+    /** Consecutive inactive hops in DETECTING before a candidate event is accepted. */
+    val endSilenceHops: Int = 3,
+    /** Maximum candidate event duration before it is rejected as too long. */
+    val maxEventDurationMillis: Int = 700,
+    /** Cooldown duration after leaving DETECTING (accepted or rejected alike). */
+    val cooldownMillis: Int = 700
 ) {
     /**
      * Number of causal background power observations retained, one per hop (Dufaux's `L`).
@@ -29,6 +41,12 @@ data class AdaptiveEngineConfig(
      * therefore the same count.
      */
     val variationHistoryCapacity: Int = ceilingCapacity(variationHistoryMillis, sampleRate, hopSize)
+
+    /** [maxEventDurationMillis] rounded up to whole hops. */
+    val maxEventDurationHops: Int = ceilingCapacity(maxEventDurationMillis, sampleRate, hopSize)
+
+    /** [cooldownMillis] rounded up to whole hops. */
+    val cooldownHops: Int = ceilingCapacity(cooldownMillis, sampleRate, hopSize)
 
     init {
         require(sampleRate > 0) { "sampleRate must be positive, was $sampleRate." }
@@ -65,9 +83,33 @@ data class AdaptiveEngineConfig(
                 "variationHistoryMillis or decrease hopSize."
         }
         require(ov > 0.0) { "ov must be positive, was $ov." }
+        require(crestMinDb.isFinite() && crestMinDb >= 0.0) {
+            "crestMinDb must be finite and non-negative, was $crestMinDb."
+        }
+        require(clipLevel in 1..PCM_16_MAX_ABSOLUTE_MAGNITUDE) {
+            "clipLevel must be between 1 and $PCM_16_MAX_ABSOLUTE_MAGNITUDE, was $clipLevel."
+        }
+        require(clipRatioMin.isFinite() && clipRatioMin in 0.0..1.0) {
+            "clipRatioMin must be finite and within 0.0..1.0, was $clipRatioMin."
+        }
+        require(endSilenceHops > 0) { "endSilenceHops must be positive, was $endSilenceHops." }
+        require(maxEventDurationMillis > 0) {
+            "maxEventDurationMillis must be positive, was $maxEventDurationMillis."
+        }
+        require(cooldownMillis > 0) { "cooldownMillis must be positive, was $cooldownMillis." }
+        require(maxEventDurationHops > 0) {
+            "maxEventDurationHops derived from maxEventDurationMillis=$maxEventDurationMillis, " +
+                "sampleRate=$sampleRate, hopSize=$hopSize must be at least 1."
+        }
+        require(cooldownHops > 0) {
+            "cooldownHops derived from cooldownMillis=$cooldownMillis, sampleRate=$sampleRate, " +
+                "hopSize=$hopSize must be at least 1."
+        }
     }
 
     private companion object {
+        const val PCM_16_MAX_ABSOLUTE_MAGNITUDE = 32_768
+
         fun ceilingCapacity(millis: Int, sampleRate: Int, hopSize: Int): Int {
             if (hopSize <= 0) return 0
             val numerator = millis.toLong() * sampleRate
