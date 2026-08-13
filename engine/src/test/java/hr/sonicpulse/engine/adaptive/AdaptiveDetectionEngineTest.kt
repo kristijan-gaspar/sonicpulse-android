@@ -65,6 +65,12 @@ class AdaptiveDetectionEngineTest {
         // open DETECTING while the adaptive model is bootstrapping.
         engine.process(mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3))
 
+        val diagnostics = engine.lastDiagnostics!!
+
+        assertEquals(true, diagnostics.isBootstrapping)
+        assertEquals(false, diagnostics.energyExceeded)
+        assertEquals(false, diagnostics.relativePowerExceeded)
+        assertEquals(false, diagnostics.trigger)
         assertEquals(AdaptiveDetectionState.IDLE, engine.state)
     }
 

@@ -249,4 +249,42 @@ class AdaptiveRobustThresholdCalculatorTest {
         assertFalse(small.exceedsThreshold)
         assertTrue(large.exceedsThreshold)
     }
+
+    @Test
+    fun `after readiness a zero previous th uses the std seed to recover`() {
+        val (background, variationHistory, calculator) = setup()
+
+        // mfa = 10.0, delayed reference e(k-d) = 17.0.
+        // The non-zero spread gives a non-zero std-based recovery tha.
+        for (value in listOf(10.0, 10.0, 17.0, 10.0, 10.0)) {
+            background.addObservation(value)
+        }
+
+        // Make the variation history ready, but with an effective previous th of exactly 0.
+        repeat(config.variationWarmupCapacity) {
+            variationHistory.addVariation(0.0)
+        }
+
+        assertTrue(variationHistory.isReady)
+        assertEquals(0.0, variationHistory.threshold!!, 0.0)
+
+        val statistics = background.statistics!!
+        val recoveryTha =
+            config.initialThaStdMultiplier * statistics.stdPower
+
+        val expectedVariation =
+            background.robustVariation(
+                conditionalMedianThreshold = recoveryTha
+            )!!.difference
+
+        // With tha=0 this would collapse to variation=0.
+        // With the std-based recovery seed, the delayed reference survives here.
+        assertEquals(7.0, expectedVariation, 1e-12)
+
+        val result = calculator.evaluate(currentPower = 0.5)!!
+
+        assertFalse(result.isBootstrapping)
+        assertEquals(expectedVariation, result.variation, 1e-12)
+        assertEquals(config.ov * expectedVariation, result.th, 1e-12)
+    }
 }

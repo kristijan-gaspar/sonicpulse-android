@@ -37,4 +37,32 @@ class CrestFactorCalculatorTest {
             CrestFactorCalculator.calculate(shortArrayOf())
         }
     }
+
+    @Test
+    fun `sample window overload returns zero dB for uniform samples`() {
+        val samples = ShortArray(4096) { 5000 }
+
+        val window = object : SampleWindow {
+            override val size = samples.size
+            override fun get(index: Int): Short = samples[index]
+        }
+
+        assertEquals(0.0, CrestFactorCalculator.calculate(window)!!, 1e-9)
+    }
+
+    @Test
+    fun `sample window overload matches short array calculation`() {
+        val samples = ShortArray(4096) { 5 }
+        samples[123] = 500
+
+        val window = object : SampleWindow {
+            override val size = samples.size
+            override fun get(index: Int): Short = samples[index]
+        }
+
+        val fromArray = CrestFactorCalculator.calculate(samples)
+        val fromWindow = CrestFactorCalculator.calculate(window)
+
+        assertEquals(fromArray!!, fromWindow!!, 1e-12)
+    }
 }
