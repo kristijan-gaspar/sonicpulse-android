@@ -40,4 +40,6 @@ interface MonitoringStateRepository {
         permissionLevel: LocationPermissionLevel,
         servicesEnabled: Boolean
     )
+
+    fun publishAudioLevel(dbfs: Double)
 }

@@ -25,10 +25,10 @@ import hr.sonicpulse.app.data.audio.PeakTimeCalculator
 import hr.sonicpulse.app.data.location.LocationProvider
 import hr.sonicpulse.app.data.location.LocationStartResult
 import hr.sonicpulse.app.data.remote.DetectionSubmitter
+import hr.sonicpulse.app.detection.DetectionProcessor
+import hr.sonicpulse.app.detection.DetectionProcessorFactory
 import hr.sonicpulse.app.observability.DetectionSessionLogger
 import hr.sonicpulse.app.repository.MonitoringStateRepository
-import hr.sonicpulse.engine.DetectionEngine
-import hr.sonicpulse.engine.EngineConfig
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
@@ -59,8 +59,10 @@ class MonitoringService : Service() {
     @Inject
     lateinit var detectionSessionLogger: DetectionSessionLogger
 
+    @Inject
+    lateinit var detectionProcessorFactory: DetectionProcessorFactory
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val engineConfig = EngineConfig()
     private val sessionCoordinator by lazy { MonitoringSessionCoordinator(monitoringStateRepository) }
     private val lifecycleCoordinator = MonitoringLifecycleCoordinator()
     private val refreshCoordinator = MonitoringRefreshCoordinator()
@@ -270,22 +272,25 @@ class MonitoringService : Service() {
             return
         }
 
-        // Only prepares the log session — it is not genuinely activated (and does not disturb a
-        // previously completed, still-exportable session) until the first real block arrives via
-        // onBlock() in handleBlock() below. See DetectionSessionLogger's KDoc. Safe to call here
-        // unconditionally: MonitoringSessionRunner guarantees the previous session's
-        // finishSession() (inside tearDownSession(), run sequentially before any restart is ever
-        // begun) has already fully completed by the time a new session can reach this line.
-        detectionSessionLogger.startSession(engineConfig)
-
-        val engine = DetectionEngine(engineConfig)
+        val processor = detectionProcessorFactory.create()
         val recorder = AudioRecorder(
             getSystemService(AudioManager::class.java),
-            engineConfig.sampleRate,
-            engineConfig.blockSize
+            processor.sampleRate,
+            processor.blockSize
         )
         session.recorder = recorder
         session.submissionTracker = SubmissionJobTracker()
+
+        // Only prepares the log session — it is not genuinely activated (and does not disturb
+        // a previously completed, still-exportable session) until the first real hop reaches
+        // the logging decorator wrapped inside `processor` — see LoggingAdaptiveDetectionProcessor
+        // and DetectionSessionLogger's KDoc. Safe to call here unconditionally:
+        // MonitoringSessionRunner guarantees the previous session's finishSession() (inside
+        // tearDownSession(), run sequentially before any restart is ever begun) has already
+        // fully completed by the time a new session can reach this line. Must happen before
+        // sessionCoordinator.startSession() below, which is what lets the first block reach
+        // the decorator.
+        detectionSessionLogger.startSession()
 
         // MonitoringSessionCoordinator guarantees monitoringStarted() runs before recorder.start().
         // It has no opinion on whether a capture error still belongs to this session — it only
@@ -298,7 +303,7 @@ class MonitoringService : Service() {
                 recorder.start(onBlock, onError)
             },
             onBlock = { block ->
-                handleBlockSafely(session, engine, block)
+                handleBlockSafely(session, processor, block)
             },
             onCaptureError = { error ->
                 serviceScope.launch {
@@ -338,7 +343,7 @@ class MonitoringService : Service() {
     /**
      * The boundary between AudioRecorder's dedicated capture thread and this service's own
      * block-processing logic. AudioRecorder must only ever see genuine capture failures
-     * (init/permission/read/lifecycle) — never a bug in [DetectionEngine.process], the session
+     * (init/permission/read/lifecycle) — never a bug in [DetectionProcessor.process], the session
      * logger, or detection construction, which would otherwise escape as
      * [AudioCaptureError.Unexpected] and be misreported as a microphone hardware failure. Those
      * are caught here instead and reported through the distinct processing-failure path.
@@ -353,7 +358,7 @@ class MonitoringService : Service() {
      * this session has already stopped being current (a stale callback from a torn-down session,
      * however that happened) is silently dropped instead of corrupting a newer session's view.
      */
-    private fun handleBlockSafely(session: MonitoringSession, engine: DetectionEngine, block: ShortArray) {
+    private fun handleBlockSafely(session: MonitoringSession, processor: DetectionProcessor, block: ShortArray) {
         if (sessionRunner.currentSession !== session) {
             return
         }
@@ -363,7 +368,7 @@ class MonitoringService : Service() {
             return
         }
         try {
-            handleBlock(session, engine, block)
+            handleBlock(session, processor, block)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -374,67 +379,52 @@ class MonitoringService : Service() {
         }
     }
 
-    private fun handleBlock(session: MonitoringSession, engine: DetectionEngine, block: ShortArray) {
+    private fun handleBlock(session: MonitoringSession, processor: DetectionProcessor, block: ShortArray) {
         // The first completed block only becomes observable here one full block duration after
         // capture actually began (see PeakTimeCalculator.blockZeroInstant) — Instant.now() at
         // this point is the end of that first block, not its start.
         val startInstant = session.firstBlockInstant ?: PeakTimeCalculator.blockZeroInstant(
             Instant.now(),
-            engineConfig.sampleRate,
-            engineConfig.blockSize
+            processor.sampleRate,
+            processor.blockSize
         ).also { session.firstBlockInstant = it }
 
-        val event = engine.process(block)
-        // Read immediately after process(): all three only describe the block just processed, and
-        // a later engine.process() call (the next block) would overwrite them.
-        val completion = engine.lastCandidateCompletion
-        val metrics = engine.lastBlockMetrics
+        val result = processor.process(block)
+        monitoringStateRepository.publishAudioLevel(result.dbfs)
 
-        // Computed at most once per finalized candidate, from completion's own peak block index
-        // (see finalizedCandidateFor) — completion is Accepted together with a non-null event on
-        // the same block, so finalizedCandidate is guaranteed non-null whenever event is. Its
-        // peakTimeClient is reused below by both onBlock() (diagnostics, every completion) and
-        // sessionDetectionFor() (backend submission, accepted only) — never recalculated.
-        val finalizedCandidate = completion?.let {
-            finalizedCandidateFor(it, startInstant, engineConfig.sampleRate, engineConfig.blockSize)
-        }
+        val event = result.event ?: return
 
-        if (metrics != null) {
-            monitoringStateRepository.publishMetrics(metrics)
-            detectionSessionLogger.onBlock(metrics, finalizedCandidate)
-        }
+        // Captured here, on the audio thread, at the exact moment of handoff — not inside the
+        // coroutine below, whose scheduling could otherwise let a newer location/permission/
+        // services state arrive first and misrepresent what was actually known when this
+        // detection occurred. currentSubmittableLocationSnapshot() re-checks permission and
+        // services fresh (never assumes a cached Valid snapshot is still legitimately
+        // obtainable — see its KDoc) before sessionDetectionFor() additionally requires the
+        // snapshot itself to be Valid.
+        val locationSnapshot = currentSubmittableLocationSnapshot(
+            permissionLevel = locationProvider.permissionLevel(),
+            servicesEnabled = locationProvider.areLocationServicesEnabled(),
+            snapshot = locationProvider.currentSnapshot
+        ) ?: return
 
-        if (event != null) {
-            // Captured here, on the audio thread, at the exact moment of handoff — not inside the
-            // coroutine below, whose scheduling could otherwise let a newer location/permission/
-            // services state arrive first and misrepresent what was actually known when this
-            // detection occurred. currentSubmittableLocationSnapshot() re-checks permission and
-            // services fresh (never assumes a cached Valid snapshot is still legitimately
-            // obtainable — see its KDoc) before sessionDetectionFor() additionally requires the
-            // snapshot itself to be Valid.
-            val locationSnapshot = currentSubmittableLocationSnapshot(
-                permissionLevel = locationProvider.permissionLevel(),
-                servicesEnabled = locationProvider.areLocationServicesEnabled(),
-                snapshot = locationProvider.currentSnapshot
-            )
-            if (locationSnapshot != null) {
-                val sessionDetection = sessionDetectionFor(
-                    event.peakDbfs,
-                    finalizedCandidate!!.peakTimeClient,
-                    locationSnapshot
-                )
+        // Derived directly from the event's own peak block index — never Instant.now() (see
+        // PeakTimeCalculator's KDoc) and no additional offset for the 4096-sample adaptive
+        // analysis window: the engine's block index already counts 1024-sample hops from the
+        // same startInstant, exactly like V1's block index did.
+        val peakTimeClient = PeakTimeCalculator.calculate(
+            startInstant,
+            event.peakBlockIndex,
+            processor.sampleRate,
+            processor.blockSize
+        )
+        val sessionDetection = sessionDetectionFor(event.peakDbfs, peakTimeClient, locationSnapshot) ?: return
 
-                if (sessionDetection != null) {
-                    // Published synchronously (MutableStateFlow.update is thread-safe) so the
-                    // detection is visibly Pending before any submission attempt is even
-                    // scheduled — insertion and submission are deliberately not both inside the
-                    // launched coroutine below, so a cancelled/never-started submission coroutine
-                    // can never leave the detection unlisted.
-                    monitoringStateRepository.localDetectionOccurred(sessionDetection)
-                    submitTracked(session, sessionDetection)
-                }
-            }
-        }
+        // Published synchronously (MutableStateFlow.update is thread-safe) so the detection is
+        // visibly Pending before any submission attempt is even scheduled — insertion and
+        // submission are deliberately not both inside the launched coroutine below, so a
+        // cancelled/never-started submission coroutine can never leave the detection unlisted.
+        monitoringStateRepository.localDetectionOccurred(sessionDetection)
+        submitTracked(session, sessionDetection)
     }
 
     /** Creates the submission job lazily and only ever starts it if the session's tracker
@@ -488,7 +478,7 @@ class MonitoringService : Service() {
 
     /**
      * Location-only refresh for the precise-location upgrade flow: never touches audio capture,
-     * DetectionEngine, the session, or the foreground notification — only the location subscription
+     * the detection processor, the session, or the foreground notification — only the location subscription
      * is stopped and restarted, since [LocationProvider.start] is itself a no-op while already
      * active and Android does not auto-upgrade an active subscription to precise fixes on its own.
      * The current session's location-polling job is left running throughout and simply observes

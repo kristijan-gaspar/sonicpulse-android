@@ -134,4 +134,17 @@ class DefaultMonitoringStateRepository @Inject constructor() : MonitoringStateRe
             )
         }
     }
+
+    override fun publishAudioLevel(dbfs: Double) {
+        if (!throttle.shouldEmit()) {
+            return
+        }
+
+        _state.update {
+            it.copy(
+                liveDbfs = dbfs,
+                dbfsHistory = (it.dbfsHistory + dbfs).takeLast(MAX_DBFS_HISTORY)
+            )
+        }
+    }
 }

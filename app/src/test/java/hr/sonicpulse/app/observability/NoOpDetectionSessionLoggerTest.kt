@@ -1,12 +1,8 @@
 package hr.sonicpulse.app.observability
 
-import hr.sonicpulse.engine.BlockMetrics
-import hr.sonicpulse.engine.CandidateCompletion
-import hr.sonicpulse.engine.CandidateRejectionReason
 import hr.sonicpulse.engine.DetectionEvent
-import hr.sonicpulse.engine.DetectionState
-import hr.sonicpulse.engine.EngineConfig
-import java.time.Instant
+import hr.sonicpulse.engine.adaptive.AdaptiveDetectionState
+import hr.sonicpulse.engine.adaptive.AdaptiveHopDiagnostics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -15,35 +11,45 @@ import org.junit.Test
  * this implementation in `di/ObservabilityModule`) collects and allocates nothing. */
 class NoOpDetectionSessionLoggerTest {
 
+    private fun diagnostics(trigger: Boolean = false) = AdaptiveHopDiagnostics(
+        hopIndex = 0,
+        analysisReady = true,
+        dbfs = -10.0,
+        power = 0.01,
+        crestDb = 12.0,
+        crestWindowDb = 10.0,
+        clipRatio = 0.0,
+        mfa = 0.01,
+        variation = 0.0,
+        th = 0.005,
+        threshold = 0.015,
+        isBootstrapping = false,
+        energyExceeded = trigger,
+        relativePowerExceeded = trigger,
+        impulsive = trigger,
+        trigger = trigger,
+        stateBefore = AdaptiveDetectionState.IDLE,
+        stateAfter = if (trigger) AdaptiveDetectionState.DETECTING else AdaptiveDetectionState.IDLE
+    )
+
     @Test
-    fun `hasCompletedSession stays false through a full start-block-finish cycle`() {
+    fun `hasCompletedSession stays false through a full start-hop-finish cycle`() {
         val logger = NoOpDetectionSessionLogger()
 
-        logger.startSession(EngineConfig())
-        val metrics = BlockMetrics(
-            rms = 0.0, dbfs = -10.0, baseline = -60.0, spike = 50.0, crest = 10.0,
-            clipRatio = 0.0, state = DetectionState.DETECTING, blockIndex = 0
-        )
-        val completion = CandidateCompletion.Accepted(DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 1))
-        logger.onBlock(metrics, FinalizedCandidate(completion, Instant.EPOCH))
+        logger.startSession()
+        val event = DetectionEvent(peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 1)
+        logger.onHop(diagnostics(trigger = true), event)
         logger.finishSession()
 
         assertEquals(false, logger.hasCompletedSession.value)
     }
 
     @Test
-    fun `a rejected completion also leaves hasCompletedSession false and exportJson null`() {
+    fun `a hop with no closing event also leaves hasCompletedSession false and exportJson null`() {
         val logger = NoOpDetectionSessionLogger()
 
-        logger.startSession(EngineConfig())
-        val metrics = BlockMetrics(
-            rms = 0.0, dbfs = -10.0, baseline = -60.0, spike = 20.0, crest = 10.0,
-            clipRatio = 0.0, state = DetectionState.COOLDOWN, blockIndex = 30
-        )
-        val completion = CandidateCompletion.Rejected(
-            reason = CandidateRejectionReason.TOO_LONG, peakDbfs = -10.0, peakBlockIndex = 0, durationBlocks = 31
-        )
-        logger.onBlock(metrics, FinalizedCandidate(completion, Instant.EPOCH))
+        logger.startSession()
+        logger.onHop(diagnostics(trigger = false), null)
         logger.finishSession()
 
         assertEquals(false, logger.hasCompletedSession.value)
@@ -54,7 +60,7 @@ class NoOpDetectionSessionLoggerTest {
     fun `exportJson is always null`() {
         val logger = NoOpDetectionSessionLogger()
 
-        logger.startSession(EngineConfig())
+        logger.startSession()
         logger.finishSession()
 
         assertNull(logger.exportJson())

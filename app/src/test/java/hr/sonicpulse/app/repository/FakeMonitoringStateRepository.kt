@@ -130,6 +130,15 @@ class FakeMonitoringStateRepository : MonitoringStateRepository {
         }
     }
 
+    override fun publishAudioLevel(dbfs: Double) {
+        _state.update {
+            it.copy(
+                liveDbfs = dbfs,
+                dbfsHistory = (it.dbfsHistory + dbfs).takeLast(MAX_DBFS_HISTORY)
+            )
+        }
+    }
+
     fun setState(state: MonitoringState) {
         _state.value = state
     }

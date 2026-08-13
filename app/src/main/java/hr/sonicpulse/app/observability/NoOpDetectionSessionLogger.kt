@@ -1,7 +1,7 @@
 package hr.sonicpulse.app.observability
 
-import hr.sonicpulse.engine.BlockMetrics
-import hr.sonicpulse.engine.EngineConfig
+import hr.sonicpulse.engine.DetectionEvent
+import hr.sonicpulse.engine.adaptive.AdaptiveHopDiagnostics
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,9 +18,9 @@ class NoOpDetectionSessionLogger @Inject constructor() : DetectionSessionLogger 
     private val _hasCompletedSession = MutableStateFlow(false)
     override val hasCompletedSession: StateFlow<Boolean> = _hasCompletedSession.asStateFlow()
 
-    override fun startSession(config: EngineConfig) = Unit
+    override fun startSession() = Unit
 
-    override fun onBlock(metrics: BlockMetrics, finalizedCandidate: FinalizedCandidate?) = Unit
+    override fun onHop(diagnostics: AdaptiveHopDiagnostics, event: DetectionEvent?) = Unit
 
     override fun finishSession() = Unit
 

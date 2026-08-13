@@ -1,6 +1,5 @@
 package hr.sonicpulse.app.observability
 
-import hr.sonicpulse.engine.EngineConfig
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -13,7 +12,7 @@ class FakeDetectionSessionLoggerTest {
     fun `startSession sets hasCompletedSession to false`() {
         val logger = FakeDetectionSessionLogger(initialHasCompletedSession = true)
 
-        logger.startSession(EngineConfig())
+        logger.startSession()
 
         assertEquals(false, logger.hasCompletedSession.value)
     }
@@ -22,7 +21,7 @@ class FakeDetectionSessionLoggerTest {
     fun `finishSession sets hasCompletedSession to true when a session was started`() {
         val logger = FakeDetectionSessionLogger()
 
-        logger.startSession(EngineConfig())
+        logger.startSession()
         logger.finishSession()
 
         assertEquals(true, logger.hasCompletedSession.value)
@@ -41,7 +40,7 @@ class FakeDetectionSessionLoggerTest {
     @Test
     fun `calling finishSession twice stays safe and keeps the call counter accurate`() {
         val logger = FakeDetectionSessionLogger()
-        logger.startSession(EngineConfig())
+        logger.startSession()
 
         logger.finishSession()
         logger.finishSession()

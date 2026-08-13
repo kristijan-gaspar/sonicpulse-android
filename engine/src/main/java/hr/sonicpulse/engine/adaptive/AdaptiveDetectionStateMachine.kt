@@ -1,0 +1,180 @@
+package hr.sonicpulse.engine.adaptive
+
+import hr.sonicpulse.engine.DetectionEvent
+
+/**
+ * Owns only the V2 event lifecycle/state (`IDLE -> DETECTING -> COOLDOWN -> IDLE`) — no
+ * DSP, no Dufaux/background internals. [process] receives already-computed per-hop
+ * values from [AdaptiveDetectionEngine] and decides state transitions and peak tracking
+ * from them alone.
+ */
+class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
+
+    var state: AdaptiveDetectionState = AdaptiveDetectionState.IDLE
+        private set
+
+    private var consecutiveInactiveHops = 0
+    private var cooldownHopCount = 0
+    private var activeCooldownTargetHops = 0
+    private var eventStartBlockIndex = 0L
+    private var lastActiveBlockIndex = 0L
+    private var eventPeakDbfs = Double.NEGATIVE_INFINITY
+    private var eventPeakBlockIndex = 0L
+
+    private data class PeakCandidate(
+        val blockIndex: Long,
+        val dbfs: Double
+    )
+
+    private val preTriggerHistory = ArrayDeque<PeakCandidate>()
+
+    private val preTriggerHistoryCapacity =
+        config.analysisWindowSize / config.hopSize
+
+    /** The adaptive threshold frozen at the moment the current event's `DETECTING` began. */
+    private var frozenEventThreshold = 0.0
+
+    /**
+     * Processes one hop's already-computed values and returns the [DetectionEvent] that
+     * just closed on this hop, or `null` on every other hop.
+     *
+     * [trigger] and [adaptiveThreshold] are only consulted while in [AdaptiveDetectionState.IDLE]
+     * (trigger opens a new event and freezes [adaptiveThreshold] as this event's threshold);
+     * [currentPower] is only consulted while [AdaptiveDetectionState.DETECTING] (compared
+     * against the frozen threshold to decide whether the event is still active).
+     */
+    fun process(
+        trigger: Boolean,
+        currentPower: Double,
+        currentDbfs: Double,
+        blockIndex: Long,
+        adaptiveThreshold: Double
+    ): DetectionEvent? {
+        require(currentPower.isFinite() && currentPower >= 0.0) {
+            "currentPower must be finite and non-negative, was $currentPower."
+        }
+        require(currentDbfs.isFinite()) { "currentDbfs must be finite, was $currentDbfs." }
+        require(blockIndex >= 0) { "blockIndex must be non-negative, was $blockIndex." }
+        require(adaptiveThreshold.isFinite()) {
+            "adaptiveThreshold must be finite, was $adaptiveThreshold."
+        }
+
+        if (state == AdaptiveDetectionState.IDLE) {
+            preTriggerHistory.addLast(
+                PeakCandidate(
+                    blockIndex = blockIndex,
+                    dbfs = currentDbfs
+                )
+            )
+
+            while (preTriggerHistory.size > preTriggerHistoryCapacity) {
+                preTriggerHistory.removeFirst()
+            }
+        }
+
+        return when (state) {
+            AdaptiveDetectionState.IDLE -> handleIdle(trigger, currentDbfs, blockIndex, adaptiveThreshold)
+            AdaptiveDetectionState.DETECTING -> handleDetecting(currentPower, currentDbfs, blockIndex)
+            AdaptiveDetectionState.COOLDOWN -> handleCooldown()
+        }
+    }
+
+    fun reset() {
+        state = AdaptiveDetectionState.IDLE
+        consecutiveInactiveHops = 0
+        cooldownHopCount = 0
+        activeCooldownTargetHops = 0
+        resetEventTracking()
+        preTriggerHistory.clear()
+    }
+
+    private fun handleIdle(
+        trigger: Boolean,
+        dbfs: Double,
+        blockIndex: Long,
+        adaptiveThreshold: Double
+    ): DetectionEvent? {
+        if (trigger) {
+            state = AdaptiveDetectionState.DETECTING
+            frozenEventThreshold = adaptiveThreshold
+            eventStartBlockIndex = blockIndex
+            lastActiveBlockIndex = blockIndex
+            val peak = preTriggerHistory.maxByOrNull { it.dbfs }
+
+            eventPeakDbfs = peak?.dbfs ?: dbfs
+            eventPeakBlockIndex = peak?.blockIndex ?: blockIndex
+
+            preTriggerHistory.clear()
+            consecutiveInactiveHops = 0
+        }
+        return null
+    }
+
+    private fun handleDetecting(currentPower: Double, dbfs: Double, blockIndex: Long): DetectionEvent? {
+        val stillActive = currentPower > frozenEventThreshold
+        return if (stillActive) handleActiveHop(dbfs, blockIndex) else handleInactiveHop()
+    }
+
+    private fun handleActiveHop(dbfs: Double, blockIndex: Long): DetectionEvent? {
+        lastActiveBlockIndex = blockIndex
+        consecutiveInactiveHops = 0
+        if (dbfs > eventPeakDbfs) {
+            eventPeakDbfs = dbfs
+            eventPeakBlockIndex = blockIndex
+        }
+
+        // Span from onset to the latest active hop, inclusive.
+        val durationHopsLong = blockIndex - eventStartBlockIndex + 1L
+        if (durationHopsLong <= config.maxEventDurationHops.toLong()) {
+            return null
+        }
+
+        // Too long: reject silently (no separate TOO_LONG state/reporting) and cool down
+        // using the shorter rejected-candidate cooldown, not the accepted-event cooldown.
+        enterCooldown(config.rejectedCooldownHops)
+        resetEventTracking()
+        return null
+    }
+
+    private fun handleInactiveHop(): DetectionEvent? {
+        consecutiveInactiveHops++
+        if (consecutiveInactiveHops < config.endSilenceHops) {
+            return null
+        }
+
+        // Up to the last hop that was actually still active.
+        val durationHopsLong = lastActiveBlockIndex - eventStartBlockIndex + 1L
+        val durationHops = durationHopsLong.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val event = DetectionEvent(
+            peakDbfs = eventPeakDbfs,
+            peakBlockIndex = eventPeakBlockIndex,
+            durationBlocks = durationHops
+        )
+        enterCooldown(config.cooldownHops)
+        resetEventTracking()
+        return event
+    }
+
+    private fun handleCooldown(): DetectionEvent? {
+        cooldownHopCount++
+        if (cooldownHopCount >= activeCooldownTargetHops) {
+            state = AdaptiveDetectionState.IDLE
+        }
+        return null
+    }
+
+    private fun enterCooldown(targetHops: Int) {
+        activeCooldownTargetHops = targetHops
+        cooldownHopCount = 0
+        consecutiveInactiveHops = 0
+        state = if (targetHops <= 0) AdaptiveDetectionState.IDLE else AdaptiveDetectionState.COOLDOWN
+    }
+
+    private fun resetEventTracking() {
+        eventStartBlockIndex = 0L
+        lastActiveBlockIndex = 0L
+        eventPeakDbfs = Double.NEGATIVE_INFINITY
+        eventPeakBlockIndex = 0L
+        frozenEventThreshold = 0.0
+    }
+}
