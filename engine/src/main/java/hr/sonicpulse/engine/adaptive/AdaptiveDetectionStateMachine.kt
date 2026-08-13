@@ -21,6 +21,16 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
     private var eventPeakDbfs = Double.NEGATIVE_INFINITY
     private var eventPeakBlockIndex = 0L
 
+    private data class PeakCandidate(
+        val blockIndex: Long,
+        val dbfs: Double
+    )
+
+    private val preTriggerHistory = ArrayDeque<PeakCandidate>()
+
+    private val preTriggerHistoryCapacity =
+        config.analysisWindowSize / config.hopSize
+
     /** The adaptive threshold frozen at the moment the current event's `DETECTING` began. */
     private var frozenEventThreshold = 0.0
 
@@ -49,6 +59,19 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
             "adaptiveThreshold must be finite, was $adaptiveThreshold."
         }
 
+        if (state == AdaptiveDetectionState.IDLE) {
+            preTriggerHistory.addLast(
+                PeakCandidate(
+                    blockIndex = blockIndex,
+                    dbfs = currentDbfs
+                )
+            )
+
+            while (preTriggerHistory.size > preTriggerHistoryCapacity) {
+                preTriggerHistory.removeFirst()
+            }
+        }
+
         return when (state) {
             AdaptiveDetectionState.IDLE -> handleIdle(trigger, currentDbfs, blockIndex, adaptiveThreshold)
             AdaptiveDetectionState.DETECTING -> handleDetecting(currentPower, currentDbfs, blockIndex)
@@ -62,6 +85,7 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
         cooldownHopCount = 0
         activeCooldownTargetHops = 0
         resetEventTracking()
+        preTriggerHistory.clear()
     }
 
     private fun handleIdle(
@@ -75,8 +99,12 @@ class AdaptiveDetectionStateMachine(private val config: AdaptiveEngineConfig) {
             frozenEventThreshold = adaptiveThreshold
             eventStartBlockIndex = blockIndex
             lastActiveBlockIndex = blockIndex
-            eventPeakDbfs = dbfs
-            eventPeakBlockIndex = blockIndex
+            val peak = preTriggerHistory.maxByOrNull { it.dbfs }
+
+            eventPeakDbfs = peak?.dbfs ?: dbfs
+            eventPeakBlockIndex = peak?.blockIndex ?: blockIndex
+
+            preTriggerHistory.clear()
             consecutiveInactiveHops = 0
         }
         return null

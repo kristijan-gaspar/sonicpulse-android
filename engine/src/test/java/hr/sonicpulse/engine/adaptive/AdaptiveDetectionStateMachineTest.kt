@@ -369,4 +369,161 @@ class AdaptiveDetectionStateMachineTest {
             sm.process(trigger = false, currentPower = 0.0, currentDbfs = 0.0, blockIndex = -1, adaptiveThreshold = 0.0)
         }
     }
+
+    @Test
+    fun `pre-trigger peak is used when it is louder than trigger hop`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+
+        sm.process(
+            trigger = false,
+            currentPower = 1.0,
+            currentDbfs = -4.0,
+            blockIndex = 0,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.process(
+            trigger = true,
+            currentPower = 5.0,
+            currentDbfs = -10.0,
+            blockIndex = 1,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.process(
+            trigger = false,
+            currentPower = 0.0,
+            currentDbfs = -50.0,
+            blockIndex = 2,
+            adaptiveThreshold = 2.0
+        )
+        sm.process(
+            trigger = false,
+            currentPower = 0.0,
+            currentDbfs = -50.0,
+            blockIndex = 3,
+            adaptiveThreshold = 2.0
+        )
+        val event = sm.process(
+            trigger = false,
+            currentPower = 0.0,
+            currentDbfs = -50.0,
+            blockIndex = 4,
+            adaptiveThreshold = 2.0
+        )!!
+
+        assertEquals(-4.0, event.peakDbfs, 0.0)
+        assertEquals(0L, event.peakBlockIndex)
+    }
+
+    @Test
+    fun `stronger detecting hop replaces pre-trigger peak`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+
+        sm.process(
+            trigger = false,
+            currentPower = 1.0,
+            currentDbfs = -4.0,
+            blockIndex = 0,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.process(
+            trigger = true,
+            currentPower = 5.0,
+            currentDbfs = -10.0,
+            blockIndex = 1,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.process(
+            trigger = false,
+            currentPower = 5.0,
+            currentDbfs = -2.0,
+            blockIndex = 2,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.process(
+            trigger = false,
+            currentPower = 0.0,
+            currentDbfs = -50.0,
+            blockIndex = 3,
+            adaptiveThreshold = 2.0
+        )
+        sm.process(
+            trigger = false,
+            currentPower = 0.0,
+            currentDbfs = -50.0,
+            blockIndex = 4,
+            adaptiveThreshold = 2.0
+        )
+        val event = sm.process(
+            trigger = false,
+            currentPower = 0.0,
+            currentDbfs = -50.0,
+            blockIndex = 5,
+            adaptiveThreshold = 2.0
+        )!!
+
+        assertEquals(-2.0, event.peakDbfs, 0.0)
+        assertEquals(2L, event.peakBlockIndex)
+    }
+
+    @Test
+    fun `hop older than pre-trigger history is not used as event peak`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+
+        // Very loud, but it must fall out of the 4-hop history before trigger.
+        sm.process(false, 1.0, -1.0, 0, 2.0)
+
+        sm.process(false, 1.0, -30.0, 1, 2.0)
+        sm.process(false, 1.0, -30.0, 2, 2.0)
+        sm.process(false, 1.0, -30.0, 3, 2.0)
+
+        sm.process(
+            trigger = true,
+            currentPower = 5.0,
+            currentDbfs = -10.0,
+            blockIndex = 4,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.process(false, 0.0, -50.0, 5, 2.0)
+        sm.process(false, 0.0, -50.0, 6, 2.0)
+        val event = sm.process(false, 0.0, -50.0, 7, 2.0)!!
+
+        assertEquals(-10.0, event.peakDbfs, 0.0)
+        assertEquals(4L, event.peakBlockIndex)
+    }
+
+    @Test
+    fun `reset clears pre-trigger peak history`() {
+        val sm = AdaptiveDetectionStateMachine(config)
+
+        sm.process(
+            trigger = false,
+            currentPower = 1.0,
+            currentDbfs = -1.0,
+            blockIndex = 0,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.reset()
+
+        sm.process(
+            trigger = true,
+            currentPower = 5.0,
+            currentDbfs = -10.0,
+            blockIndex = 1,
+            adaptiveThreshold = 2.0
+        )
+
+        sm.process(false, 0.0, -50.0, 2, 2.0)
+        sm.process(false, 0.0, -50.0, 3, 2.0)
+        val event = sm.process(false, 0.0, -50.0, 4, 2.0)!!
+
+        assertEquals(-10.0, event.peakDbfs, 0.0)
+        assertEquals(1L, event.peakBlockIndex)
+    }
 }
