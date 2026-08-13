@@ -219,17 +219,17 @@ class AdaptiveBackgroundEstimatorTest {
 
     @Test
     fun `robustVariation selects e(k-d), not the sorted median position - chronological order matters`() {
-        // capacity 5: d = 5/2-1 = 1, delayed chronological index (from oldest) = 5-1-1 = 3.
+        // capacity 5 (odd): d = (5-1)/2 = 2, delayed chronological index (from oldest) = 5-1-2 = 2.
         val estimator = AdaptiveBackgroundEstimator(config)
-        // Descending insertion order oldest->newest: [5,4,3,2,1]. Chronological index 3 = 2.
-        for (value in listOf(5.0, 4.0, 3.0, 2.0, 1.0)) estimator.addObservation(value)
+        // Insertion order oldest->newest: [5,4,9,2,1]. Chronological index 2 (3rd inserted) = 9.
+        for (value in listOf(5.0, 4.0, 9.0, 2.0, 1.0)) estimator.addObservation(value)
 
         // Large threshold: cmfa passes through unsuppressed, so conditionalMedianPower == e(k-d).
         val result = estimator.robustVariation(conditionalMedianThreshold = 1000.0)!!
 
-        assertEquals(2.0, result.conditionalMedianPower, 1e-12)
-        // mfa = sorted median of {1,2,3,4,5} = 3.0, distinct from e(k-d) = 2.0.
-        assertEquals(3.0, result.medianPower, 1e-12)
+        assertEquals(9.0, result.conditionalMedianPower, 1e-12)
+        // mfa = sorted median of {1,2,4,5,9} = 4.0, distinct from e(k-d) = 9.0.
+        assertEquals(4.0, result.medianPower, 1e-12)
     }
 
     @Test
@@ -246,11 +246,12 @@ class AdaptiveBackgroundEstimatorTest {
 
     @Test
     fun `robustVariation suppresses an isolated spike at the delayed sample position`() {
-        // capacity 5: delayed chronological index (from oldest) = 3. Put the spike there.
+        // capacity 5 (odd): d = (5-1)/2 = 2, delayed chronological index (from oldest) = 2.
+        // Put the spike there (3rd inserted).
         val estimator = AdaptiveBackgroundEstimator(config)
         val baseline = 0.01
         val spike = 5.0
-        for (value in listOf(baseline, baseline, baseline, spike, baseline)) {
+        for (value in listOf(baseline, baseline, spike, baseline, baseline)) {
             estimator.addObservation(value)
         }
 

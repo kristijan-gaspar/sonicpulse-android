@@ -189,11 +189,13 @@ class RobustVariationThresholdHistoryTest {
     }
 
     @Test
-    fun `a negative variation is accepted since variation can legitimately be negative`() {
+    fun `a negative variation is accepted since variation can legitimately be negative, but th is clamped at 0`() {
         val history = RobustVariationThresholdHistory(config)
         for (value in listOf(-5.0, -3.0, -1.0, -4.0, -2.0)) history.addVariation(value)
 
-        assertEquals(-2.0, history.threshold!!, 1e-12) // ov=2.0 * max(-5..-1)=-1 -> -2.0
+        // Raw variations remain negative (accepted, unrejected by addVariation), but an
+        // all-negative retained window must never make th negative: th = ov * max(0.0, -1) = 0.0.
+        assertEquals(0.0, history.threshold!!, 1e-12)
     }
 
     @Test

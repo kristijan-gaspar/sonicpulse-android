@@ -141,8 +141,8 @@ class AdaptiveRobustThresholdCalculatorTest {
     @Test
     fun `conditional median uses the previous th, not the final threshold T`() {
         val (background, variationHistory, calculator) = setup()
-        // Chronological oldest->newest: sorted median mfa=10.0; e(k-d) (index 3) = 17.0.
-        for (value in listOf(10.0, 10.0, 10.0, 17.0, 10.0)) background.addObservation(value)
+        // Chronological oldest->newest: sorted median mfa=10.0; e(k-d) (index 2) = 17.0.
+        for (value in listOf(10.0, 10.0, 17.0, 10.0, 10.0)) background.addObservation(value)
         // D-window ready with max 1.0 -> th(k-1) = ov*1.0 = 2.0. T(k-1) would be mfa+th = 12.0.
         for (value in listOf(1.0, 1.0, 1.0, 1.0, 1.0)) variationHistory.addVariation(value)
 
@@ -156,7 +156,7 @@ class AdaptiveRobustThresholdCalculatorTest {
     @Test
     fun `variation is exactly conditionalMedianPower minus medianPower`() {
         val (background, variationHistory, calculator) = setup()
-        for (value in listOf(10.0, 10.0, 10.0, 17.0, 10.0)) background.addObservation(value)
+        for (value in listOf(10.0, 10.0, 17.0, 10.0, 10.0)) background.addObservation(value)
         for (value in listOf(1.0, 1.0, 1.0, 1.0, 1.0)) variationHistory.addVariation(value)
 
         val result = calculator.evaluate(currentPower = 0.5)!!

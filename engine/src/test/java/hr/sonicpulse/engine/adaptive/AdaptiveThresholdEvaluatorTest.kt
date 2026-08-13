@@ -16,10 +16,12 @@ class AdaptiveThresholdEvaluatorTest {
     }
 
     @Test
-    fun `calculateThreshold accepts a negative th`() {
+    fun `rejects a negative th`() {
         val evaluator = AdaptiveThresholdEvaluator()
 
-        assertEquals(0.01, evaluator.calculateThreshold(mfa = 0.02, th = -0.01), 1e-12)
+        assertThrows(IllegalArgumentException::class.java) {
+            evaluator.calculateThreshold(mfa = 0.02, th = -0.01)
+        }
     }
 
     @Test

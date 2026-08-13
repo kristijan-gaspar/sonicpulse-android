@@ -17,12 +17,18 @@ package hr.sonicpulse.engine.adaptive
  * single early sample collapse the recursion: variation(1)=0 -> th=0 -> tha(2)=0 -> ..., so
  * the switch is deliberately keyed off [RobustVariationThresholdHistory.isReady] instead.)
  * Once warm-up completes, `tha(k) = th(k-1)` (pure Eq. 3.9 recursion) and stdPower no longer
- * participates in `tha` or the active threshold at all. Crucially, the std-based seed only
- * ever feeds `tha` (the conditional-median suppression threshold) — `th(k)` itself always
- * goes through [RobustVariationThresholdHistory.thresholdIncluding], so the std-based seed is
- * never used as the active detection threshold. [RobustThresholdEvaluation.isBootstrapping]
- * mirrors [RobustVariationThresholdHistory.isReady] and governs whether the adaptive engine
- * is allowed to actually use this threshold for detection.
+ * participates in `tha` or the active threshold at all — EXCEPT for one SonicPulse recovery
+ * case: `th(k-1) = 0.0` is an absorbing state for Eq. 3.9's rolling max once every retained
+ * variation is `<= 0` (see [RobustVariationThresholdHistory.threshold]'s `0.0` floor), and
+ * feeding `tha(k) = 0.0` back into the conditional-median step would suppress nothing,
+ * yielding `variation(k) = e(k-d) - mfa` — not obviously `0` again, but with no principled
+ * floor either. To recover from `th=0`, `tha(k)` falls back to the std-based seed whenever
+ * `th(k-1) <= 0.0`, even after warm-up. Crucially, the std-based seed only ever feeds `tha`
+ * (the conditional-median suppression threshold) — `th(k)` itself always goes through
+ * [RobustVariationThresholdHistory.thresholdIncluding], so the std-based seed is never used as
+ * the active detection threshold. [RobustThresholdEvaluation.isBootstrapping] mirrors
+ * [RobustVariationThresholdHistory.isReady] and governs whether the adaptive engine is allowed
+ * to actually use this threshold for detection.
  *
  * [evaluate] is purely a read: it never mutates [backgroundEstimator] or
  * [variationHistory]. Admission of the current power into background history
@@ -41,10 +47,12 @@ class AdaptiveRobustThresholdCalculator(
         val statistics = backgroundEstimator.statistics ?: return null
         val variationHistoryReady = variationHistory.isReady
 
+        val bootstrapTha = config.initialThaStdMultiplier * statistics.stdPower
         val tha = if (variationHistoryReady) {
-            requireNotNull(variationHistory.threshold)
+            val previousTh = requireNotNull(variationHistory.threshold)
+            if (previousTh > 0.0) previousTh else bootstrapTha
         } else {
-            config.initialThaStdMultiplier * statistics.stdPower
+            bootstrapTha
         }
 
         val variationResult = backgroundEstimator.robustVariation(conditionalMedianThreshold = tha)

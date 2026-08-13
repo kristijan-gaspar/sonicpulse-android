@@ -28,16 +28,24 @@ class RobustVariationThresholdHistory(private val config: AdaptiveEngineConfig) 
     private val isFull: Boolean get() = filledCount >= capacity
 
     /**
-     * `th`, based only on variation values already explicitly added. `null` until at least one
-     * variation has been added — deliberately NOT gated by [isReady]: Eq. 3.9's rolling max is
-     * well-defined over however many variations are currently retained, even a single one.
-     * Always reads the values CURRENTLY retained — never excludes the oldest one. FIFO
-     * eviction only ever happens as a side effect of a real [addVariation] call; a plain read
-     * must never simulate an eviction that hasn't actually happened yet (that simulation is
-     * exactly what [thresholdIncluding] does, for a hypothetical candidate).
+     * `th = ov * max(0.0, maxVariation)`, based only on variation values already explicitly
+     * added. `null` until at least one variation has been added — deliberately NOT gated by
+     * [isReady]: Eq. 3.9's rolling max is well-defined over however many variations are
+     * currently retained, even a single one. Always reads the values CURRENTLY retained —
+     * never excludes the oldest one. FIFO eviction only ever happens as a side effect of a
+     * real [addVariation] call; a plain read must never simulate an eviction that hasn't
+     * actually happened yet (that simulation is exactly what [thresholdIncluding] does, for a
+     * hypothetical candidate). Clamped at `0.0`: an all-negative (or all-zero) retained window
+     * must never make `th` negative, since a negative `th` would push the active threshold
+     * `T = mfa + th` below `mfa` itself. The raw retained variations themselves stay signed —
+     * only the derived `th` is floored.
      */
     val threshold: Double?
-        get() = if (filledCount == 0) null else config.ov * maxOfRetained(candidate = null, excludeOldest = false)
+        get() = if (filledCount == 0) {
+            null
+        } else {
+            config.ov * maxOf(0.0, maxOfRetained(candidate = null, excludeOldest = false))
+        }
 
     /**
      * The Eq. 3.9 threshold as it would be if [candidateVariation] were also included in
@@ -56,7 +64,7 @@ class RobustVariationThresholdHistory(private val config: AdaptiveEngineConfig) 
         require(candidateVariation.isFinite()) {
             "candidateVariation must be finite, was $candidateVariation."
         }
-        return config.ov * maxOfRetained(candidate = candidateVariation, excludeOldest = isFull)
+        return config.ov * maxOf(0.0, maxOfRetained(candidate = candidateVariation, excludeOldest = isFull))
     }
 
     fun addVariation(value: Double) {

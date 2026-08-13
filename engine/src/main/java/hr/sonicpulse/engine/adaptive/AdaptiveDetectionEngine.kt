@@ -70,12 +70,14 @@ class AdaptiveDetectionEngine(private val config: AdaptiveEngineConfig = Adaptiv
         val crestDb = CrestFactorCalculator.calculate(hop)
 
         val evaluation = robustThresholdCalculator.evaluate(currentPower)
-        val adaptiveReady = evaluation != null && !evaluation.isBootstrapping
-        val energyExceeded = evaluation?.exceedsThreshold ?: false
-        val relativePowerExceeded =
-            evaluation != null && currentPower > evaluation.mfa * relativePowerRiseFactor
+        val energyExceeded = evaluation?.let {
+            !it.isBootstrapping && it.exceedsThreshold
+        } ?: false
+        val relativePowerExceeded = evaluation?.let {
+            !it.isBootstrapping && currentPower > it.mfa * relativePowerRiseFactor
+        } ?: false
         val impulsive = (crestDb != null && crestDb > config.crestMinDb) || clipRatio > config.clipRatioMin
-        val trigger = adaptiveReady && energyExceeded && relativePowerExceeded && impulsive
+        val trigger = energyExceeded && relativePowerExceeded && impulsive
 
         val stateAtEntry = stateMachine.state
         val event = stateMachine.process(

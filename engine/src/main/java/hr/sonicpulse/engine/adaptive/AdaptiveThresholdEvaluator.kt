@@ -10,7 +10,7 @@ class AdaptiveThresholdEvaluator {
     /** `T(k) = mfa(k) + th(k)`, the Dufaux Method-3 robust adaptive threshold. */
     fun calculateThreshold(mfa: Double, th: Double): Double {
         require(mfa.isFinite() && mfa >= 0.0) { "mfa must be finite and non-negative, was $mfa." }
-        require(th.isFinite()) { "th must be finite, was $th." }
+        require(th.isFinite() && th >= 0.0) { "th must be finite and non-negative, was $th." }
         return mfa + th
     }
 
