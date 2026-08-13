@@ -49,7 +49,7 @@ class JsonDetectionSessionLogger @Inject constructor(
 
     private companion object {
         /** Upper bound on the number of per-hop diagnostics records retained in detail for a
-         * single session. 5,000 hops is roughly 1.9 minutes at the default 1024/44100 hop
+         * single session. 10,000 hops is roughly 3.9 minutes at the default 1024/44100 hop
          * duration (~23.2ms/hop) — a manual, controlled test/validation session
          * (this is a testing-only feature, not a bound on production monitoring duration).
          * Every hop past this limit still counts toward [ActiveSession.totalHopCount]; only
@@ -113,9 +113,6 @@ class JsonDetectionSessionLogger @Inject constructor(
                 DeviceInfoSnapshot(manufacturer, model, sdkInt)
             )
             activeSession = null
-
-            completedDocument = null
-            _hasCompletedSession.value = false
         }
     }
 
@@ -149,6 +146,10 @@ class JsonDetectionSessionLogger @Inject constructor(
         )
         activeSession = activated
         preparedSession = null
+
+        completedDocument = null
+        _hasCompletedSession.value = false
+
         return activated
     }
 
@@ -219,6 +220,7 @@ private fun AdaptiveHopDiagnostics.toLogEntry(event: DetectionEvent?): HopLogEnt
     dbfs = dbfs,
     power = power,
     crestDb = crestDb,
+    crestWindowDb = crestWindowDb,
     clipRatio = clipRatio,
     mfa = mfa,
     variation = variation,

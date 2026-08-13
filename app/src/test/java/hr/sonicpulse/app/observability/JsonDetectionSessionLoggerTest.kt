@@ -18,7 +18,7 @@ class JsonDetectionSessionLoggerTest {
     /** Mirrors [JsonDetectionSessionLogger]'s private `MAX_RECORDED_HOPS_PER_SESSION` — kept as
      * a literal here (the constant is intentionally private) rather than duplicating the
      * engine's own calculation. */
-    private val maxRecordedHops = 5_000
+    private val maxRecordedHops = 10_000
 
     private fun newLogger(config: AdaptiveEngineConfig = this.config) = JsonDetectionSessionLogger(config)
 
@@ -28,6 +28,7 @@ class JsonDetectionSessionLoggerTest {
         dbfs: Double = -60.0,
         power: Double? = 0.001,
         crestDb: Double? = 5.0,
+        crestWindowDb: Double? = 4.0,
         clipRatio: Double? = 0.0,
         mfa: Double? = 0.001,
         variation: Double? = 0.0,
@@ -46,6 +47,7 @@ class JsonDetectionSessionLoggerTest {
         dbfs = dbfs,
         power = power,
         crestDb = crestDb,
+        crestWindowDb = crestWindowDb,
         clipRatio = clipRatio,
         mfa = mfa,
         variation = variation,
@@ -132,6 +134,7 @@ class JsonDetectionSessionLoggerTest {
                 hopIndex = 0,
                 analysisReady = false,
                 power = null,
+                crestWindowDb = null,
                 mfa = null,
                 variation = null,
                 th = null,
@@ -149,6 +152,7 @@ class JsonDetectionSessionLoggerTest {
         val hop = decode(requireNotNull(logger.exportJson())).hops.single()
         assertEquals(false, hop.analysisReady)
         assertNull(hop.power)
+        assertNull(hop.crestWindowDb)
         assertNull(hop.mfa)
         assertNull(hop.variation)
         assertNull(hop.th)
@@ -360,7 +364,7 @@ class JsonDetectionSessionLoggerTest {
     // --- valid JSON serialization ---
 
     @Test
-    fun `exported JSON is valid, pretty-printed and round-trips with schema version exactly 5`() {
+    fun `exported JSON is valid, pretty-printed and round-trips with schema version exactly 6`() {
         val logger = newLogger()
         logger.startTestSession()
         logger.onHop(diagnostics(0), null)
@@ -370,8 +374,21 @@ class JsonDetectionSessionLoggerTest {
 
         assertTrue("expected pretty-printed output to contain newlines", json.contains("\n"))
         val document = decode(json) // throws on invalid JSON
-        assertEquals(5, SESSION_LOG_SCHEMA_VERSION)
+        assertEquals(6, SESSION_LOG_SCHEMA_VERSION)
         assertEquals(SESSION_LOG_SCHEMA_VERSION, document.schemaVersion)
+    }
+
+    @Test
+    fun `crestWindowDb round-trips as the exact 4096-window crest, distinct from the 1024-hop crestDb`() {
+        val logger = newLogger()
+        logger.startTestSession()
+
+        logger.onHop(diagnostics(hopIndex = 0, crestDb = 5.0, crestWindowDb = 8.25), null)
+        logger.finishSession()
+
+        val hop = decode(requireNotNull(logger.exportJson())).hops.single()
+        assertEquals(5.0, hop.crestDb!!, 0.0)
+        assertEquals(8.25, hop.crestWindowDb!!, 0.0)
     }
 
     @Test

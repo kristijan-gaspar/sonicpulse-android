@@ -20,11 +20,15 @@ package hr.sonicpulse.engine.adaptive
  * participates in `tha` or the active threshold at all — EXCEPT for one SonicPulse recovery
  * case: `th(k-1) = 0.0` is an absorbing state for Eq. 3.9's rolling max once every retained
  * variation is `<= 0` (see [RobustVariationThresholdHistory.threshold]'s `0.0` floor), and
- * feeding `tha(k) = 0.0` back into the conditional-median step would suppress nothing,
- * yielding `variation(k) = e(k-d) - mfa` — not obviously `0` again, but with no principled
- * floor either. To recover from `th=0`, `tha(k)` falls back to the std-based seed whenever
- * `th(k-1) <= 0.0`, even after warm-up. Crucially, the std-based seed only ever feeds `tha`
- * (the conditional-median suppression threshold) — `th(k)` itself always goes through
+ * feeding `tha(k) = 0.0` back into the conditional-median step suppresses every non-zero
+ * deviation from `mf` (any `|referencePower - mf| > 0.0` already exceeds a `0.0` threshold),
+ * forcing `cmf = mf` and `variation(k) = 0`; the one case that ISN'T suppressed —
+ * `referencePower == mf` exactly — already yields `variation(k) = cmf - mf = 0` on its own too.
+ * Either way `variation(k) = 0`, so `th` stays pinned at `0` forever with no way for the
+ * ordinary recursion to escape it. To recover from `th=0`, `tha(k)` falls back to the
+ * std-based seed whenever `th(k-1) <= 0.0`, even after warm-up. Crucially, the std-based seed
+ * only ever feeds `tha` (the conditional-median suppression threshold) — `th(k)` itself always
+ * goes through
  * [RobustVariationThresholdHistory.thresholdIncluding], so the std-based seed is never used as
  * the active detection threshold. [RobustThresholdEvaluation.isBootstrapping] mirrors
  * [RobustVariationThresholdHistory.isReady] and governs whether the adaptive engine is allowed

@@ -14,10 +14,13 @@ import kotlinx.serialization.Serializable
  * [HopLogEntry.relativePowerExceeded] (the 18dB relative-power-rise pre-gate's own pass/fail,
  * previously invisible in the log even though it already gated [HopLogEntry.trigger]) and
  * completed [AdaptiveEngineConfigSnapshot] with the previously-missing `variationWarmupMillis`,
- * `minRelativePowerRiseDb` and `rejectedCooldownHops` fields. A testing-only artifact gated
- * behind `BuildConfig.ENABLE_SESSION_LOGGING`, so no migration path for existing exported
- * files. */
-const val SESSION_LOG_SCHEMA_VERSION = 5
+ * `minRelativePowerRiseDb` and `rejectedCooldownHops` fields. Version 6 added
+ * [HopLogEntry.crestWindowDb], the crest factor of the whole current 4096-sample rolling
+ * analysis window (diagnostic only, alongside the existing 1024-sample-hop [HopLogEntry.crestDb]
+ * that detection actually uses), so 1024-vs-4096 crest can be compared on real recordings. A
+ * testing-only artifact gated behind `BuildConfig.ENABLE_SESSION_LOGGING`, so no migration path
+ * for existing exported files. */
+const val SESSION_LOG_SCHEMA_VERSION = 6
 
 /** One completed monitoring session, ready to serialize and export — the top-level exported
  * document. All instants are ISO-8601 strings (`java.time.Instant.toString()`), not epoch
@@ -92,7 +95,8 @@ data class DetectionEventLogEntry(
  * `Dbfs`/`db`-adjacent naming, crest factor is never dBFS. [stateBefore]/[stateAfter] mirror
  * [hr.sonicpulse.engine.adaptive.AdaptiveDetectionState] as plain name strings, not a mirrored
  * `@Serializable` enum, so `:engine` never gains a serialization dependency. [event] is
- * non-null exactly on the hop a candidate was accepted on. */
+ * non-null exactly on the hop a candidate was accepted on. [crestWindowDb] is diagnostic only —
+ * see [hr.sonicpulse.engine.adaptive.AdaptiveHopDiagnostics.crestWindowDb]. */
 @Serializable
 data class HopLogEntry(
     val hopIndex: Long,
@@ -100,6 +104,7 @@ data class HopLogEntry(
     val dbfs: Double,
     val power: Double?,
     val crestDb: Double?,
+    val crestWindowDb: Double?,
     val clipRatio: Double?,
     val mfa: Double?,
     val variation: Double?,

@@ -17,6 +17,7 @@ class NoOpDetectionSessionLoggerTest {
         dbfs = -10.0,
         power = 0.01,
         crestDb = 12.0,
+        crestWindowDb = 10.0,
         clipRatio = 0.0,
         mfa = 0.01,
         variation = 0.0,

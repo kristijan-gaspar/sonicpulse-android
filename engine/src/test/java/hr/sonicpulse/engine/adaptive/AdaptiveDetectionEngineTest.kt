@@ -272,6 +272,7 @@ class AdaptiveDetectionEngineTest {
         assertEquals(true, diagnostics.dbfs > -120.0) // genuinely available, not fabricated
         assertNull(diagnostics.power)
         assertNull(diagnostics.crestDb)
+        assertNull(diagnostics.crestWindowDb)
         assertNull(diagnostics.clipRatio)
         assertNull(diagnostics.mfa)
         assertNull(diagnostics.variation)

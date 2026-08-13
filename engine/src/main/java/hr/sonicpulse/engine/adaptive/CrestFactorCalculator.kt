@@ -5,11 +5,12 @@ import kotlin.math.log10
 import kotlin.math.sqrt
 
 /**
- * Single-hop crest factor (peak / RMS, in dB): `20 * log10(peak / rms)`. Unlike V1's
+ * Crest factor (peak / RMS, in dB): `20 * log10(peak / rms)`. Unlike V1's
  * `hr.sonicpulse.engine.metrics.CrestFactorTracker`, this has no rolling multi-block
- * window — V2's onset semantics only need the current hop's own crest factor, at the
- * same 1024-sample granularity V1 uses per block. Returns `null` for pure silence
- * (rms == 0), where crest factor is undefined.
+ * window of its own — it simply works over whatever sample array or [SampleWindow] the
+ * caller supplies, at any granularity (the current 1024-sample hop, the 4096-sample
+ * rolling analysis window, or otherwise). Returns `null` for pure silence (rms == 0),
+ * where crest factor is undefined.
  */
 object CrestFactorCalculator {
 
@@ -22,6 +23,24 @@ object CrestFactorCalculator {
             value * value
         } / samples.size
         val rms = sqrt(meanSquare)
+
+        if (rms == 0.0) return null
+        return 20.0 * log10(peak / rms)
+    }
+
+    fun calculate(window: SampleWindow): Double? {
+        require(window.size > 0) { "Sample window must not be empty." }
+
+        var peak = 0
+        var sumOfSquares = 0.0
+        for (i in 0 until window.size) {
+            val sample = window[i]
+            val absSample = abs(sample.toInt())
+            if (absSample > peak) peak = absSample
+            val value = sample.toDouble()
+            sumOfSquares += value * value
+        }
+        val rms = sqrt(sumOfSquares / window.size)
 
         if (rms == 0.0) return null
         return 20.0 * log10(peak / rms)
