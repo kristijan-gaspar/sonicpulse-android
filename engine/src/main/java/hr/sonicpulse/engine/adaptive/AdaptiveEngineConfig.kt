@@ -35,9 +35,10 @@ data class AdaptiveEngineConfig(
 
     /**
      * Number of causal background-variation observations retained for the Eq. 3.9 rolling
-     * maximum (Dufaux's `D`). Kept as a separate config capacity from
-     * [backgroundHistoryCapacity] even though both default to the same ~5 s duration and
-     * therefore the same count.
+     * maximum (Dufaux's `D`). Deliberately a much longer retention window than
+     * [backgroundHistoryCapacity] by default (~18.5 s vs ~5 s) — see [variationWarmupCapacity]
+     * for the separate, shorter warm-up gate that lets detection start well before this full
+     * `D`-sized window fills.
      */
     val variationHistoryCapacity: Int = ceilingCapacity(variationHistoryMillis, sampleRate, hopSize)
 
@@ -98,6 +99,12 @@ data class AdaptiveEngineConfig(
                 "sampleRate=$sampleRate, hopSize=$hopSize must be at least 1; increase " +
                 "variationWarmupMillis or decrease hopSize."
         }
+        require(variationWarmupCapacity <= variationHistoryCapacity) {
+            "variationWarmupCapacity ($variationWarmupCapacity, from variationWarmupMillis=" +
+                "$variationWarmupMillis) must be <= variationHistoryCapacity " +
+                "($variationHistoryCapacity, from variationHistoryMillis=$variationHistoryMillis) " +
+                "- warm-up cannot require more variations than the D window can ever retain."
+        }
         require(ov > 0.0) { "ov must be positive, was $ov." }
         require(minRelativePowerRiseDb.isFinite() && minRelativePowerRiseDb >= 0.0) {
             "minRelativePowerRiseDb must be finite and non-negative, was $minRelativePowerRiseDb."
@@ -124,8 +131,8 @@ data class AdaptiveEngineConfig(
             "cooldownHops derived from cooldownMillis=$cooldownMillis, sampleRate=$sampleRate, " +
                 "hopSize=$hopSize must be at least 1."
         }
-        require(rejectedCooldownHops > 0) {
-            "rejectedCooldownHops must be positive, was $rejectedCooldownHops."
+        require(rejectedCooldownHops >= 0) {
+            "rejectedCooldownHops must be non-negative, was $rejectedCooldownHops."
         }
     }
 

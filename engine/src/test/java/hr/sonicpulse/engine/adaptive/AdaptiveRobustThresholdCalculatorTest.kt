@@ -72,10 +72,14 @@ class AdaptiveRobustThresholdCalculatorTest {
     }
 
     @Test
-    fun `after the first variation is admitted, tha comes from the previous Eq 3_9 threshold, not stdPower again`() {
+    fun `once variation warm-up completes, tha comes from the previous Eq 3_9 threshold, not stdPower again`() {
         val (background, variationHistory, calculator) = setup()
         for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)
-        variationHistory.addVariation(0.5) // one variation admitted -> threshold no longer null
+        // variationWarmupCapacity is 5 for this config (matched to D): admit exactly that
+        // many variations to reach isReady - a single variation is NOT enough (see the
+        // dedicated bootstrap-persistence test below for that distinction).
+        for (value in listOf(0.5, 0.5, 0.5, 0.5, 0.5)) variationHistory.addVariation(value)
+        assertTrue(variationHistory.isReady)
         val previousTh = variationHistory.threshold!!
         val stats = background.statistics!!
         val stdSeed = config.initialThaStdMultiplier * stats.stdPower
@@ -84,6 +88,35 @@ class AdaptiveRobustThresholdCalculatorTest {
 
         val result = calculator.evaluate(currentPower = 0.5)!!
 
+        assertEquals(expectedVariation, result.variation, 0.0)
+    }
+
+    @Test
+    fun `tha keeps using the std seed for the entire warm-up window, not just before the first variation`() {
+        // D=10, warmup=3 (decoupled): with the bug this test guards against, tha would
+        // incorrectly switch to variationHistory.threshold as soon as it becomes non-null
+        // (after the first admitted variation), well before isReady - risking the
+        // variation(1)=0 -> th=0 -> tha(2)=0 -> ... collapse described in the task.
+        val decoupledConfig = config.copy(variationHistoryMillis = 1000, variationWarmupMillis = 300)
+        val background = AdaptiveBackgroundEstimator(decoupledConfig)
+        val variationHistory = RobustVariationThresholdHistory(decoupledConfig)
+        val evaluator = AdaptiveThresholdEvaluator()
+        val calculator = AdaptiveRobustThresholdCalculator(decoupledConfig, background, variationHistory, evaluator)
+        for (value in listOf(1.0, 1.0, 1.0, 1.0, 10.0)) background.addObservation(value)
+        // 2 variations admitted (threshold already non-null, per the fixed getter) but still
+        // short of variationWarmupCapacity (3) - isReady must still be false.
+        variationHistory.addVariation(0.2)
+        variationHistory.addVariation(0.2)
+        assertFalse(variationHistory.isReady)
+        assertEquals(0.4, variationHistory.threshold!!, 1e-12) // already non-null: ov=2.0 * max(0.2,0.2)
+
+        val stats = background.statistics!!
+        val expectedTha = decoupledConfig.initialThaStdMultiplier * stats.stdPower
+        val expectedVariation = background.robustVariation(conditionalMedianThreshold = expectedTha)!!.difference
+
+        val result = calculator.evaluate(currentPower = 0.5)!!
+
+        assertTrue(result.isBootstrapping)
         assertEquals(expectedVariation, result.variation, 0.0)
     }
 

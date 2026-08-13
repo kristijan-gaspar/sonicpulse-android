@@ -23,6 +23,7 @@ data class AdaptiveHopDiagnostics(
     val threshold: Double?,
     val isBootstrapping: Boolean?,
     val energyExceeded: Boolean?,
+    val relativePowerExceeded: Boolean?,
     val impulsive: Boolean?,
     val trigger: Boolean?,
     val stateBefore: AdaptiveDetectionState,

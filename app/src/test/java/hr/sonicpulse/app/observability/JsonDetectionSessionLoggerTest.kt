@@ -35,6 +35,7 @@ class JsonDetectionSessionLoggerTest {
         threshold: Double? = 0.0015,
         isBootstrapping: Boolean? = false,
         energyExceeded: Boolean? = false,
+        relativePowerExceeded: Boolean? = false,
         impulsive: Boolean? = false,
         trigger: Boolean? = false,
         stateBefore: AdaptiveDetectionState = AdaptiveDetectionState.IDLE,
@@ -52,6 +53,7 @@ class JsonDetectionSessionLoggerTest {
         threshold = threshold,
         isBootstrapping = isBootstrapping,
         energyExceeded = energyExceeded,
+        relativePowerExceeded = relativePowerExceeded,
         impulsive = impulsive,
         trigger = trigger,
         stateBefore = stateBefore,
@@ -136,6 +138,7 @@ class JsonDetectionSessionLoggerTest {
                 threshold = null,
                 isBootstrapping = null,
                 energyExceeded = null,
+                relativePowerExceeded = null,
                 impulsive = null,
                 trigger = null
             ),
@@ -152,6 +155,7 @@ class JsonDetectionSessionLoggerTest {
         assertNull(hop.threshold)
         assertNull(hop.isBootstrapping)
         assertNull(hop.energyExceeded)
+        assertNull(hop.relativePowerExceeded)
         assertNull(hop.impulsive)
         assertNull(hop.trigger)
         assertNotNull(hop.dbfs) // genuinely available, not fabricated
@@ -356,7 +360,7 @@ class JsonDetectionSessionLoggerTest {
     // --- valid JSON serialization ---
 
     @Test
-    fun `exported JSON is valid, pretty-printed and round-trips with schema version exactly 4`() {
+    fun `exported JSON is valid, pretty-printed and round-trips with schema version exactly 5`() {
         val logger = newLogger()
         logger.startTestSession()
         logger.onHop(diagnostics(0), null)
@@ -366,7 +370,7 @@ class JsonDetectionSessionLoggerTest {
 
         assertTrue("expected pretty-printed output to contain newlines", json.contains("\n"))
         val document = decode(json) // throws on invalid JSON
-        assertEquals(4, SESSION_LOG_SCHEMA_VERSION)
+        assertEquals(5, SESSION_LOG_SCHEMA_VERSION)
         assertEquals(SESSION_LOG_SCHEMA_VERSION, document.schemaVersion)
     }
 
@@ -395,13 +399,16 @@ class JsonDetectionSessionLoggerTest {
             backgroundHistoryMillis = 6000,
             initialThaStdMultiplier = 4.0,
             variationHistoryMillis = 4000,
+            variationWarmupMillis = 2000,
             ov = 1.8,
+            minRelativePowerRiseDb = 12.0,
             crestMinDb = 9.0,
             clipLevel = 30_000,
             clipRatioMin = 0.03,
             endSilenceHops = 4,
             maxEventDurationMillis = 600,
-            cooldownMillis = 500
+            cooldownMillis = 500,
+            rejectedCooldownHops = 3
         )
         val logger = newLogger(customConfig)
         logger.startTestSession()
@@ -416,13 +423,16 @@ class JsonDetectionSessionLoggerTest {
         assertEquals(customConfig.backgroundHistoryMillis, snapshot.backgroundHistoryMillis)
         assertEquals(customConfig.initialThaStdMultiplier, snapshot.initialThaStdMultiplier, 0.0)
         assertEquals(customConfig.variationHistoryMillis, snapshot.variationHistoryMillis)
+        assertEquals(customConfig.variationWarmupMillis, snapshot.variationWarmupMillis)
         assertEquals(customConfig.ov, snapshot.ov, 0.0)
+        assertEquals(customConfig.minRelativePowerRiseDb, snapshot.minRelativePowerRiseDb, 0.0)
         assertEquals(customConfig.crestMinDb, snapshot.crestMinDb, 0.0)
         assertEquals(customConfig.clipLevel, snapshot.clipLevel)
         assertEquals(customConfig.clipRatioMin, snapshot.clipRatioMin, 0.0)
         assertEquals(customConfig.endSilenceHops, snapshot.endSilenceHops)
         assertEquals(customConfig.maxEventDurationMillis, snapshot.maxEventDurationMillis)
         assertEquals(customConfig.cooldownMillis, snapshot.cooldownMillis)
+        assertEquals(customConfig.rejectedCooldownHops, snapshot.rejectedCooldownHops)
     }
 
     // --- device info ---

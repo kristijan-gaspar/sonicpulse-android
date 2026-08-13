@@ -195,13 +195,16 @@ private fun AdaptiveEngineConfig.toSnapshot(): AdaptiveEngineConfigSnapshot = Ad
     backgroundHistoryMillis = backgroundHistoryMillis,
     initialThaStdMultiplier = initialThaStdMultiplier,
     variationHistoryMillis = variationHistoryMillis,
+    variationWarmupMillis = variationWarmupMillis,
     ov = ov,
+    minRelativePowerRiseDb = minRelativePowerRiseDb,
     crestMinDb = crestMinDb,
     clipLevel = clipLevel,
     clipRatioMin = clipRatioMin,
     endSilenceHops = endSilenceHops,
     maxEventDurationMillis = maxEventDurationMillis,
-    cooldownMillis = cooldownMillis
+    cooldownMillis = cooldownMillis,
+    rejectedCooldownHops = rejectedCooldownHops
 )
 
 private fun DetectionEvent.toLogEntry(): DetectionEventLogEntry = DetectionEventLogEntry(
@@ -223,6 +226,7 @@ private fun AdaptiveHopDiagnostics.toLogEntry(event: DetectionEvent?): HopLogEnt
     threshold = threshold,
     isBootstrapping = isBootstrapping,
     energyExceeded = energyExceeded,
+    relativePowerExceeded = relativePowerExceeded,
     impulsive = impulsive,
     trigger = trigger,
     stateBefore = stateBefore.name,

@@ -8,19 +8,21 @@ package hr.sonicpulse.engine.adaptive
  * ([variationHistory]) implementing Eq. 3.9, and final threshold evaluation
  * ([thresholdEvaluator]) — into the single active detection threshold `T(k) = mfa(k) + th(k)`.
  *
- * Bootstrap: before the very first variation is admitted into [variationHistory] (i.e. while
- * [RobustVariationThresholdHistory.threshold] is still `null`), there is no real `th(k-1)`
- * yet, so the conditional-median reference threshold `tha(k)` falls back to
- * [AdaptiveEngineConfig.initialThaStdMultiplier] `* stdPower` — a SonicPulse
- * initialization seed, not a claim from Dufaux's paper. From the first admitted variation
- * onward, `tha(k) = th(k-1)` (pure Eq. 3.9 recursion) and the std-based seed is never
- * consulted again. Crucially, this seed only ever feeds `tha` (the conditional-median
- * suppression threshold) — `th(k)` itself always goes through
- * [RobustVariationThresholdHistory.thresholdIncluding], so the std-based seed is never
- * used as the active detection threshold. [RobustThresholdEvaluation.isBootstrapping]
- * separately tracks [RobustVariationThresholdHistory.isReady] (the shorter warmup window),
- * which governs whether the adaptive engine is allowed to actually use this threshold for
- * detection.
+ * Bootstrap: for the ENTIRE variation warm-up period — i.e. until
+ * [RobustVariationThresholdHistory.isReady] becomes `true`, not merely until the first
+ * variation is admitted — there is no trustworthy `th(k-1)` yet, so the conditional-median
+ * reference threshold `tha(k)` falls back to [AdaptiveEngineConfig.initialThaStdMultiplier]
+ * `* stdPower` — a SonicPulse initialization/warm-up seed, not a claim from Dufaux's paper.
+ * (Switching on `threshold != null`, i.e. as soon as a single variation exists, would let a
+ * single early sample collapse the recursion: variation(1)=0 -> th=0 -> tha(2)=0 -> ..., so
+ * the switch is deliberately keyed off [RobustVariationThresholdHistory.isReady] instead.)
+ * Once warm-up completes, `tha(k) = th(k-1)` (pure Eq. 3.9 recursion) and stdPower no longer
+ * participates in `tha` or the active threshold at all. Crucially, the std-based seed only
+ * ever feeds `tha` (the conditional-median suppression threshold) — `th(k)` itself always
+ * goes through [RobustVariationThresholdHistory.thresholdIncluding], so the std-based seed is
+ * never used as the active detection threshold. [RobustThresholdEvaluation.isBootstrapping]
+ * mirrors [RobustVariationThresholdHistory.isReady] and governs whether the adaptive engine
+ * is allowed to actually use this threshold for detection.
  *
  * [evaluate] is purely a read: it never mutates [backgroundEstimator] or
  * [variationHistory]. Admission of the current power into background history
@@ -37,8 +39,13 @@ class AdaptiveRobustThresholdCalculator(
 
     fun evaluate(currentPower: Double): RobustThresholdEvaluation? {
         val statistics = backgroundEstimator.statistics ?: return null
-        val seededThreshold = variationHistory.threshold
-        val tha = seededThreshold ?: (config.initialThaStdMultiplier * statistics.stdPower)
+        val variationHistoryReady = variationHistory.isReady
+
+        val tha = if (variationHistoryReady) {
+            requireNotNull(variationHistory.threshold)
+        } else {
+            config.initialThaStdMultiplier * statistics.stdPower
+        }
 
         val variationResult = backgroundEstimator.robustVariation(conditionalMedianThreshold = tha)
             ?: return null
@@ -54,7 +61,7 @@ class AdaptiveRobustThresholdCalculator(
             variation = variation,
             threshold = threshold,
             exceedsThreshold = exceeds,
-            isBootstrapping = !variationHistory.isReady
+            isBootstrapping = !variationHistoryReady
         )
     }
 }

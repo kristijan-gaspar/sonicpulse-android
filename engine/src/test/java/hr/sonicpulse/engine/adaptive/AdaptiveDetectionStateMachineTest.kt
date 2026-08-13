@@ -311,6 +311,27 @@ class AdaptiveDetectionStateMachineTest {
     }
 
     @Test
+    fun `a TOO_LONG rejected candidate with rejectedCooldownHops=0 returns directly to IDLE`() {
+        val zeroRejectedCooldownConfig = config.copy(rejectedCooldownHops = 0)
+        val sm = AdaptiveDetectionStateMachine(zeroRejectedCooldownConfig)
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -10.0, blockIndex = 0, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 1, adaptiveThreshold = 2.0)
+        sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 2, adaptiveThreshold = 2.0)
+
+        // blockIndex 3 -> duration 4 > maxEventDurationHops=3: rejected as TOO_LONG, and with
+        // rejectedCooldownHops=0 there is no COOLDOWN pause at all - straight back to IDLE.
+        val rejected =
+            sm.process(trigger = false, currentPower = 5.0, currentDbfs = -6.0, blockIndex = 3, adaptiveThreshold = 2.0)
+
+        assertNull(rejected)
+        assertEquals(AdaptiveDetectionState.IDLE, sm.state)
+
+        // Immediately re-triggerable - no leftover cooldown state from the targetHops=0 path.
+        sm.process(trigger = true, currentPower = 5.0, currentDbfs = -10.0, blockIndex = 4, adaptiveThreshold = 2.0)
+        assertEquals(AdaptiveDetectionState.DETECTING, sm.state)
+    }
+
+    @Test
     fun `rejects a negative or non-finite currentPower`() {
         val sm = AdaptiveDetectionStateMachine(config)
 

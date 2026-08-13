@@ -24,6 +24,7 @@ class NoOpDetectionSessionLoggerTest {
         threshold = 0.015,
         isBootstrapping = false,
         energyExceeded = trigger,
+        relativePowerExceeded = trigger,
         impulsive = trigger,
         trigger = trigger,
         stateBefore = AdaptiveDetectionState.IDLE,

@@ -3,6 +3,7 @@ package hr.sonicpulse.engine.adaptive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdaptiveDetectionEngineTest {
@@ -50,9 +51,11 @@ class AdaptiveDetectionEngineTest {
 
     @Test
     fun `a loud and impulsive hop does not trigger while the adaptive model is still bootstrapping`() {
-        // variationWarmupMillis far beyond L: background readies at hop 5, but isReady
-        // (gated by variationWarmupCapacity=50) stays false throughout this test's warmup.
-        val slowWarmupConfig = config.copy(variationWarmupMillis = 5000)
+        // variationWarmupMillis (and variationHistoryMillis, to satisfy the
+        // variationWarmupCapacity <= variationHistoryCapacity invariant) far beyond L:
+        // background readies at hop 5, but isReady (gated by variationWarmupCapacity=50)
+        // stays false throughout this test's 15-hop warmup.
+        val slowWarmupConfig = config.copy(variationHistoryMillis = 5000, variationWarmupMillis = 5000)
         val engine = AdaptiveDetectionEngine(slowWarmupConfig)
         val quietAmplitudes = listOf(95, 100, 105, 90, 110)
         repeat(15) { i -> engine.process(uniformHop(quietAmplitudes[i % quietAmplitudes.size])) }
@@ -78,6 +81,7 @@ class AdaptiveDetectionEngineTest {
 
         assertEquals(false, diagnostics.isBootstrapping)
         assertEquals(true, diagnostics.energyExceeded)
+        assertEquals(false, diagnostics.relativePowerExceeded) // the pre-gate itself failed
         assertEquals(true, diagnostics.impulsive)
         assertEquals(false, diagnostics.trigger) // blocked by the missing 18dB relative rise
         assertEquals(AdaptiveDetectionState.IDLE, engine.state)
@@ -105,62 +109,91 @@ class AdaptiveDetectionEngineTest {
     }
 
     @Test
-    fun `background and variation history are frozen during DETECTING and COOLDOWN`() {
+    fun `background history continues adapting while DETECTING`() {
         val engine = warmedUpEngine()
         val spike = mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3)
 
-        // Trigger the event.
         engine.process(spike)
         assertEquals(AdaptiveDetectionState.DETECTING, engine.state)
+        val mfaAtOnset = engine.lastDiagnostics!!.mfa!!
 
-        // Feed more copies of the same loud spike while DETECTING/COOLDOWN. If background
-        // admission were NOT frozen here, these would drag the background median far
-        // upward, and the same spike would very likely stop exceeding the (now
-        // contaminated) threshold afterward.
-        repeat(6) { engine.process(spike) }
+        // Still well within maxEventDurationHops (20 at this config): stays DETECTING
+        // throughout, but continuous admission must keep shifting the background median
+        // toward these loud spikes rather than freezing it at onset.
+        repeat(5) { engine.process(spike) }
+        assertEquals(AdaptiveDetectionState.DETECTING, engine.state)
+        val mfaAfterFiveMoreHops = engine.lastDiagnostics!!.mfa!!
 
-        // 3 quiet hops to end the event (endSilenceHops=3) via the normal release path.
+        assertTrue(
+            "background admission must continue during DETECTING, not freeze at onset",
+            mfaAfterFiveMoreHops > mfaAtOnset
+        )
+    }
+
+    @Test
+    fun `background history continues adapting while in COOLDOWN`() {
+        // A longer cooldown window than the shared config's 2 hops, so there is room to feed
+        // enough additional loud hops during COOLDOWN for the L=5 background median to
+        // actually shift (a single admission only replaces one of five retained slots and
+        // cannot move the median on its own - see AdaptiveBackgroundThresholdCausalityTest).
+        val roomyCooldownConfig = config.copy(cooldownMillis = 1000) // cooldownHops=10
+        val engine = AdaptiveDetectionEngine(roomyCooldownConfig)
+        val quietAmplitudes = listOf(95, 100, 105, 90, 110)
+        repeat(15) { i -> engine.process(uniformHop(quietAmplitudes[i % quietAmplitudes.size])) }
+        val spike = mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3)
         val quiet = uniformHop(100)
+
+        engine.process(spike)
         engine.process(quiet)
         engine.process(quiet)
-        val event = engine.process(quiet)
-        assertNotNull(event)
+        engine.process(quiet) // 3rd consecutive quiet hop -> accepted, enters COOLDOWN
         assertEquals(AdaptiveDetectionState.COOLDOWN, engine.state)
+        val mfaAtCooldownStart = engine.lastDiagnostics!!.mfa!!
 
-        // cooldownHops=2: feed loud spikes here too - must also be frozen, not admitted.
-        engine.process(spike)
-        engine.process(spike)
-        assertEquals(AdaptiveDetectionState.IDLE, engine.state)
+        // Still well within cooldownHops (10): stays COOLDOWN throughout, but continuous
+        // admission must let enough of these loud hops become the retained majority to shift
+        // the background median well above its value at the start of COOLDOWN.
+        repeat(4) { engine.process(spike) }
+        assertEquals(AdaptiveDetectionState.COOLDOWN, engine.state)
+        val mfaAfterFourMoreSpikesInCooldown = engine.lastDiagnostics!!.mfa!!
 
-        // Back in IDLE: since background/variation were never contaminated by the spikes
-        // above, the exact same spike must be able to trigger again, unchanged.
+        assertTrue(
+            "background admission must continue during COOLDOWN, not freeze until IDLE",
+            mfaAfterFourMoreSpikesInCooldown > mfaAtCooldownStart
+        )
+    }
+
+    @Test
+    fun `the triggering hop cannot self-contaminate the threshold that decided it`() {
+        val engine = warmedUpEngine()
+        val spike = mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3)
+        val mfaBeforeTrigger = engine.lastDiagnostics!!.mfa!!
+
         engine.process(spike)
+
+        // The triggering hop's own diagnostics must reflect mfa computed BEFORE this hop's
+        // own admission - evaluation always happens against previously admitted history only.
+        assertEquals(mfaBeforeTrigger, engine.lastDiagnostics!!.mfa!!, 0.0)
         assertEquals(AdaptiveDetectionState.DETECTING, engine.state)
     }
 
     @Test
-    fun `the triggering hop itself is admitted into neither history`() {
+    fun `the hop after a triggering hop observes that triggering hop's own admitted power`() {
         val engine = warmedUpEngine()
         val spike = mixedHop(bulkValue = 25_000, spikeValue = 32_500, spikeCount = 3)
+        val mfaBeforeTrigger = engine.lastDiagnostics!!.mfa!!
 
-        engine.process(spike)
-        assertEquals(AdaptiveDetectionState.DETECTING, engine.state)
+        engine.process(spike) // triggers; the spike's own power is admitted AFTER this decision
+        val mfaOnTriggeringHop = engine.lastDiagnostics!!.mfa!!
+        assertEquals(mfaBeforeTrigger, mfaOnTriggeringHop, 0.0) // unaffected by itself
 
-        // End the event and return to IDLE via the normal release + cooldown path.
-        val quiet = uniformHop(100)
-        engine.process(quiet)
-        engine.process(quiet)
-        engine.process(quiet)
-        assertEquals(AdaptiveDetectionState.COOLDOWN, engine.state)
-        engine.process(quiet)
-        engine.process(quiet)
-        assertEquals(AdaptiveDetectionState.IDLE, engine.state)
+        engine.process(spike) // next hop: history now includes the previous spike's power
+        val mfaOnNextHop = engine.lastDiagnostics!!.mfa!!
 
-        // If the triggering hop itself had been admitted, background would already reflect
-        // one loud sample; instead, the same spike must still trigger identically again,
-        // exactly as it did the first time.
-        engine.process(spike)
-        assertEquals(AdaptiveDetectionState.DETECTING, engine.state)
+        assertTrue(
+            "the hop after the triggering hop must observe the triggering hop's own admitted power",
+            mfaOnNextHop > mfaOnTriggeringHop
+        )
     }
 
     @Test
@@ -246,6 +279,7 @@ class AdaptiveDetectionEngineTest {
         assertNull(diagnostics.threshold)
         assertNull(diagnostics.isBootstrapping)
         assertNull(diagnostics.energyExceeded)
+        assertNull(diagnostics.relativePowerExceeded)
         assertNull(diagnostics.impulsive)
         assertNull(diagnostics.trigger)
         assertEquals(AdaptiveDetectionState.IDLE, diagnostics.stateBefore)
@@ -286,6 +320,7 @@ class AdaptiveDetectionEngineTest {
         val diagnostics = engine.lastDiagnostics!!
 
         assertEquals(true, diagnostics.energyExceeded)
+        assertEquals(true, diagnostics.relativePowerExceeded)
         assertEquals(true, diagnostics.impulsive)
         assertEquals(true, diagnostics.trigger)
         assertEquals(AdaptiveDetectionState.IDLE, diagnostics.stateBefore)

@@ -45,7 +45,6 @@ class RobustVariationThresholdHistoryTest {
         repeat(capacity - 1) { history.addVariation(1.0) }
 
         assertFalse(history.isReady)
-        assertNull(history.threshold)
     }
 
     @Test
@@ -67,6 +66,18 @@ class RobustVariationThresholdHistoryTest {
 
         // ov = 2.0, max = 5.0.
         assertEquals(10.0, history.threshold!!, 1e-12)
+    }
+
+    @Test
+    fun `reading threshold from a full buffer includes ALL currently retained D values, not D-1`() {
+        val history = RobustVariationThresholdHistory(config)
+        for (value in listOf(100.0, 1.0, 2.0, 3.0, 4.0)) history.addVariation(value) // exactly full, D=5
+        assertTrue(history.isReady)
+
+        // A plain read must never simulate an eviction that hasn't actually happened - all 5
+        // currently retained values count, including the oldest (100.0), which is still
+        // physically retained until a further addVariation() actually evicts it.
+        assertEquals(200.0, history.threshold!!, 1e-12) // ov=2.0 * max(100,1,2,3,4)=100 -> 200
     }
 
     @Test

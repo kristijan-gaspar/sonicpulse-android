@@ -10,9 +10,14 @@ import kotlinx.serialization.Serializable
  * full [HopLogEntry] trace (so a hop where the detector never triggered is still visible —
  * needed to diagnose false negatives, which a candidate-only log cannot show, since a missed
  * impulse may never create a candidate at all) and an [AdaptiveEngineConfigSnapshot] mirroring
- * [hr.sonicpulse.engine.adaptive.AdaptiveEngineConfig]. A testing-only artifact gated behind
- * `BuildConfig.ENABLE_SESSION_LOGGING`, so no migration path for existing exported files. */
-const val SESSION_LOG_SCHEMA_VERSION = 4
+ * [hr.sonicpulse.engine.adaptive.AdaptiveEngineConfig]. Version 5 added
+ * [HopLogEntry.relativePowerExceeded] (the 18dB relative-power-rise pre-gate's own pass/fail,
+ * previously invisible in the log even though it already gated [HopLogEntry.trigger]) and
+ * completed [AdaptiveEngineConfigSnapshot] with the previously-missing `variationWarmupMillis`,
+ * `minRelativePowerRiseDb` and `rejectedCooldownHops` fields. A testing-only artifact gated
+ * behind `BuildConfig.ENABLE_SESSION_LOGGING`, so no migration path for existing exported
+ * files. */
+const val SESSION_LOG_SCHEMA_VERSION = 5
 
 /** One completed monitoring session, ready to serialize and export — the top-level exported
  * document. All instants are ISO-8601 strings (`java.time.Instant.toString()`), not epoch
@@ -49,8 +54,8 @@ data class DeviceInfoSnapshot(
  * type rather than annotating the engine config itself, so `:engine` never gains a
  * serialization dependency it doesn't otherwise need. Only the configured inputs are mirrored
  * here, not the capacities/hop counts derived from them (`backgroundHistoryCapacity`,
- * `variationHistoryCapacity`, `maxEventDurationHops`, `cooldownHops`) — those are always
- * reproducible from the inputs above. */
+ * `variationHistoryCapacity`, `variationWarmupCapacity`, `maxEventDurationHops`,
+ * `cooldownHops`) — those are always reproducible from the inputs above. */
 @Serializable
 data class AdaptiveEngineConfigSnapshot(
     val sampleRate: Int,
@@ -59,13 +64,16 @@ data class AdaptiveEngineConfigSnapshot(
     val backgroundHistoryMillis: Int,
     val initialThaStdMultiplier: Double,
     val variationHistoryMillis: Int,
+    val variationWarmupMillis: Int,
     val ov: Double,
+    val minRelativePowerRiseDb: Double,
     val crestMinDb: Double,
     val clipLevel: Int,
     val clipRatioMin: Double,
     val endSilenceHops: Int,
     val maxEventDurationMillis: Int,
-    val cooldownMillis: Int
+    val cooldownMillis: Int,
+    val rejectedCooldownHops: Int
 )
 
 /** The [hr.sonicpulse.engine.DetectionEvent] that closed on a given hop, copied verbatim —
@@ -99,6 +107,7 @@ data class HopLogEntry(
     val threshold: Double?,
     val isBootstrapping: Boolean?,
     val energyExceeded: Boolean?,
+    val relativePowerExceeded: Boolean?,
     val impulsive: Boolean?,
     val trigger: Boolean?,
     val stateBefore: String,

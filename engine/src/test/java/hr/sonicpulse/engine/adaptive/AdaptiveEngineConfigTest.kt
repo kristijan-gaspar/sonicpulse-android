@@ -119,32 +119,62 @@ class AdaptiveEngineConfigTest {
     }
 
     @Test
-    fun `default ov is 1_5 and default variationHistoryMillis is 5000`() {
+    fun `default ov is 1_5 and default variationHistoryMillis is 18500`() {
         val config = AdaptiveEngineConfig()
 
         assertEquals(1.5, config.ov, 0.0)
-        assertEquals(5000, config.variationHistoryMillis)
+        assertEquals(18_500, config.variationHistoryMillis)
     }
 
     @Test
-    fun `default variation history capacity (D) is 216`() {
+    fun `default variation history capacity (D) is approximately 797`() {
         val config = AdaptiveEngineConfig()
 
-        assertEquals(216, config.variationHistoryCapacity)
+        assertEquals(797, config.variationHistoryCapacity)
     }
 
     @Test
-    fun `L and D are independently configurable even though defaults coincide`() {
-        val defaultConfig = AdaptiveEngineConfig()
-        assertEquals(defaultConfig.backgroundHistoryCapacity, defaultConfig.variationHistoryCapacity)
+    fun `default variationWarmupMillis is 5000 and default variationWarmupCapacity is approximately 216`() {
+        val config = AdaptiveEngineConfig()
 
-        val differentD = AdaptiveEngineConfig(variationHistoryMillis = 2000)
-        assertEquals(defaultConfig.backgroundHistoryCapacity, differentD.backgroundHistoryCapacity)
-        assertTrue(differentD.variationHistoryCapacity < defaultConfig.variationHistoryCapacity)
+        assertEquals(5000, config.variationWarmupMillis)
+        assertEquals(216, config.variationWarmupCapacity)
+    }
+
+    @Test
+    fun `default L and D capacities no longer coincide - D is a much longer retention window`() {
+        val config = AdaptiveEngineConfig()
+
+        assertEquals(216, config.backgroundHistoryCapacity)
+        assertEquals(797, config.variationHistoryCapacity)
+        assertTrue(config.variationHistoryCapacity > config.backgroundHistoryCapacity)
+    }
+
+    @Test
+    fun `backgroundHistoryMillis and variationHistoryMillis are independently configurable`() {
+        val defaultConfig = AdaptiveEngineConfig()
 
         val differentL = AdaptiveEngineConfig(backgroundHistoryMillis = 2000)
         assertEquals(defaultConfig.variationHistoryCapacity, differentL.variationHistoryCapacity)
         assertTrue(differentL.backgroundHistoryCapacity < defaultConfig.backgroundHistoryCapacity)
+
+        // variationWarmupMillis must be lowered alongside a smaller D here, to satisfy
+        // variationWarmupCapacity <= variationHistoryCapacity.
+        val differentD = AdaptiveEngineConfig(variationHistoryMillis = 2000, variationWarmupMillis = 2000)
+        assertEquals(defaultConfig.backgroundHistoryCapacity, differentD.backgroundHistoryCapacity)
+        assertTrue(differentD.variationHistoryCapacity < defaultConfig.variationHistoryCapacity)
+    }
+
+    @Test
+    fun `rejects a variationWarmupCapacity greater than variationHistoryCapacity`() {
+        assertRejected { AdaptiveEngineConfig(variationHistoryMillis = 1000, variationWarmupMillis = 2000) }
+    }
+
+    @Test
+    fun `accepts variationWarmupCapacity exactly equal to variationHistoryCapacity`() {
+        val config = AdaptiveEngineConfig(variationHistoryMillis = 1000, variationWarmupMillis = 1000)
+
+        assertEquals(config.variationHistoryCapacity, config.variationWarmupCapacity)
     }
 
     @Test
@@ -194,5 +224,17 @@ class AdaptiveEngineConfigTest {
         assertRejected { AdaptiveEngineConfig(endSilenceHops = 0) }
         assertRejected { AdaptiveEngineConfig(maxEventDurationMillis = 0) }
         assertRejected { AdaptiveEngineConfig(cooldownMillis = 0) }
+    }
+
+    @Test
+    fun `accepts rejectedCooldownHops of exactly 0 - the state machine treats it as direct-to-IDLE`() {
+        val config = AdaptiveEngineConfig(rejectedCooldownHops = 0)
+
+        assertEquals(0, config.rejectedCooldownHops)
+    }
+
+    @Test
+    fun `rejects a negative rejectedCooldownHops`() {
+        assertRejected { AdaptiveEngineConfig(rejectedCooldownHops = -1) }
     }
 }

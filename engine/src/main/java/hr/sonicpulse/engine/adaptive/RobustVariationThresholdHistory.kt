@@ -31,9 +31,13 @@ class RobustVariationThresholdHistory(private val config: AdaptiveEngineConfig) 
      * `th`, based only on variation values already explicitly added. `null` until at least one
      * variation has been added — deliberately NOT gated by [isReady]: Eq. 3.9's rolling max is
      * well-defined over however many variations are currently retained, even a single one.
+     * Always reads the values CURRENTLY retained — never excludes the oldest one. FIFO
+     * eviction only ever happens as a side effect of a real [addVariation] call; a plain read
+     * must never simulate an eviction that hasn't actually happened yet (that simulation is
+     * exactly what [thresholdIncluding] does, for a hypothetical candidate).
      */
     val threshold: Double?
-        get() = if (filledCount == 0) null else config.ov * maxOfRetained(candidate = null, excludeOldest = isFull)
+        get() = if (filledCount == 0) null else config.ov * maxOfRetained(candidate = null, excludeOldest = false)
 
     /**
      * The Eq. 3.9 threshold as it would be if [candidateVariation] were also included in
