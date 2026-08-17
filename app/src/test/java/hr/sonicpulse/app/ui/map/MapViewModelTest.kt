@@ -62,7 +62,6 @@ class MapViewModelTest {
         latitude = 45.8,
         longitude = 16.0,
         radiusMeters = 100.0,
-        confidence = 84,
         deviceCount = deviceCount,
         firstReceivedAtUtc = Instant.parse("2026-08-03T10:00:00Z"),
         lastReceivedAtUtc = Instant.parse("2026-08-03T10:00:12Z")

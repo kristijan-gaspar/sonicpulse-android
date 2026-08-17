@@ -11,14 +11,13 @@ class SelectedHotspotFromTest {
 
     private fun hotspot(
         id: UUID = UUID.randomUUID(),
-        confidence: Int = 84,
+        radiusMeters: Double = 100.0,
         deviceCount: Int = 3
     ) = Hotspot(
         id = id,
         latitude = 45.8,
         longitude = 16.0,
-        radiusMeters = 100.0,
-        confidence = confidence,
+        radiusMeters = radiusMeters,
         deviceCount = deviceCount,
         firstReceivedAtUtc = Instant.parse("2026-08-03T10:00:00Z"),
         lastReceivedAtUtc = Instant.parse("2026-08-03T10:00:12Z")
@@ -41,14 +40,14 @@ class SelectedHotspotFromTest {
     @Test
     fun `a selected hotspot updated by a refresh reflects the new data, not the stale snapshot`() {
         val id = UUID.randomUUID()
-        val updated = hotspot(id = id, confidence = 99, deviceCount = 7)
-        val staleList = listOf(hotspot(id = id, confidence = 50, deviceCount = 2))
+        val updated = hotspot(id = id, radiusMeters = 250.0, deviceCount = 7)
+        val staleList = listOf(hotspot(id = id, radiusMeters = 100.0, deviceCount = 2))
         check(selectedHotspotFrom(staleList, id) != updated) { "test setup invalid" }
 
         val result = selectedHotspotFrom(listOf(updated), selectedId = id)
 
         assertEquals(updated, result)
-        assertEquals(99, result?.confidence)
+        assertEquals(250.0, result?.radiusMeters)
     }
 
     @Test

@@ -85,14 +85,7 @@ internal fun HotspotListBottomSheet(
 private fun HotspotListRow(hotspot: Hotspot, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val bucketColor = bucketFor(hotspot.deviceCount).color
     val deviceCountLabel = HotspotGeoJson.deviceCountLabel(hotspot.deviceCount)
-    val timeSpan = hotspotTimeSpanFor(hotspot.firstReceivedAtUtc, hotspot.lastReceivedAtUtc)
-    val timeSpanText = when (timeSpan) {
-        is HotspotTimeSpan.Seconds -> stringResource(R.string.duration_seconds, timeSpan.seconds)
-        is HotspotTimeSpan.MinutesSeconds -> stringResource(R.string.duration_minutes_seconds, timeSpan.minutes, timeSpan.seconds)
-        is HotspotTimeSpan.HoursMinutes -> stringResource(R.string.duration_hours_minutes, timeSpan.hours, timeSpan.minutes)
-    }
     val radiusText = stringResource(R.string.unit_meters_short, hotspot.radiusMeters.roundToInt())
-    val confidenceText = confidenceScoreText(hotspot.confidence)
 
     Surface(
         modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
@@ -105,13 +98,7 @@ private fun HotspotListRow(hotspot: Hotspot, onClick: () -> Unit, modifier: Modi
             }
             Spacer(modifier = Modifier.width(Spacing.sm))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = confidenceText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "$radiusText · $timeSpanText",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
+                Text(text = radiusText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             }
         }
     }

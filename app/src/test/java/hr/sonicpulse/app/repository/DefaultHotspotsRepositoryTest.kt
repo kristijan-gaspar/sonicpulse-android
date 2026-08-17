@@ -16,7 +16,6 @@ class DefaultHotspotsRepositoryTest {
         latitude = 45.8,
         longitude = 16.0,
         radiusMeters = 120.5,
-        confidence = 84,
         deviceCount = deviceCount,
         firstReceivedAtUtc = "2026-08-03T10:00:00Z",
         lastReceivedAtUtc = "2026-08-03T10:00:12Z"

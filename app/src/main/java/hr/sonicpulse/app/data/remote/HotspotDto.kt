@@ -11,7 +11,6 @@ data class HotspotDto(
     val latitude: Double,
     val longitude: Double,
     val radiusMeters: Double,
-    val confidence: Int,
     val deviceCount: Int,
     val firstReceivedAtUtc: String,
     val lastReceivedAtUtc: String

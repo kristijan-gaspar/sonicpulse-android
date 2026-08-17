@@ -11,7 +11,6 @@ class HotspotBoundsTest {
     private fun polygon(vararg points: Pair<Double, Double>) = HotspotPolygon(
         hotspotId = UUID.randomUUID(),
         deviceCount = 3,
-        confidence = 84,
         ring = points.map { (lon, lat) -> GeoPosition(longitude = lon, latitude = lat) }
     )
 
@@ -70,7 +69,6 @@ class HotspotBoundsTest {
         val withNaN = HotspotPolygon(
             hotspotId = UUID.randomUUID(),
             deviceCount = 3,
-            confidence = 84,
             ring = listOf(GeoPosition(Double.NaN, Double.NaN), GeoPosition(16.0, 45.8))
         )
 
@@ -85,7 +83,6 @@ class HotspotBoundsTest {
         val allNaN = HotspotPolygon(
             hotspotId = UUID.randomUUID(),
             deviceCount = 3,
-            confidence = 84,
             ring = listOf(GeoPosition(Double.NaN, Double.NaN))
         )
 

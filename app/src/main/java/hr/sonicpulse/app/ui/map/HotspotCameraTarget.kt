@@ -73,7 +73,6 @@ object HotspotCamera {
                     it.radiusMeters
                 },
                 deviceCount = it.deviceCount,
-                confidence = it.confidence,
                 applyMinimumRadius = false
             )
         }

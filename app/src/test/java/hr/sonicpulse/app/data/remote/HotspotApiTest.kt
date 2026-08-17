@@ -50,7 +50,6 @@ class HotspotApiTest {
           "latitude": 45.8,
           "longitude": 16.0,
           "radiusMeters": 120.5,
-          "confidence": 84,
           "deviceCount": 3,
           "firstReceivedAtUtc": "2026-08-03T10:00:00Z",
           "lastReceivedAtUtc": "2026-08-03T10:00:12Z"
@@ -114,7 +113,6 @@ class HotspotApiTest {
         assertEquals(45.8, hotspot.latitude, 0.0)
         assertEquals(16.0, hotspot.longitude, 0.0)
         assertEquals(120.5, hotspot.radiusMeters, 0.0)
-        assertEquals(84, hotspot.confidence)
         assertEquals(3, hotspot.deviceCount)
         assertEquals("2026-08-03T10:00:00Z", hotspot.firstReceivedAtUtc)
         assertEquals("2026-08-03T10:00:12Z", hotspot.lastReceivedAtUtc)

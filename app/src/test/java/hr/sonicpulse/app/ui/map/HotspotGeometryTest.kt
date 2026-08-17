@@ -31,8 +31,7 @@ class HotspotGeometryTest {
             centerLatitude = 45.8,
             centerLongitude = 16.0,
             radiusMeters = 200.0,
-            deviceCount = 3,
-            confidence = 84
+            deviceCount = 3
         )
 
         assertEquals(HotspotGeometry.SEGMENTS + 1, polygon.ring.size)
@@ -40,14 +39,14 @@ class HotspotGeometryTest {
 
     @Test
     fun `the final coordinate equals the first coordinate`() {
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 200.0, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 200.0, 3)
 
         assertEquals(polygon.ring.first(), polygon.ring.last())
     }
 
     @Test
     fun `every generated coordinate is finite and within valid ranges`() {
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 500.0, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 500.0, 3)
 
         polygon.ring.forEach { point ->
             assertTrue(point.latitude.isFinite())
@@ -60,7 +59,7 @@ class HotspotGeometryTest {
     @Test
     fun `each generated point is approximately radiusMeters from the centroid`() {
         val radius = 300.0
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3)
 
         polygon.ring.dropLast(1).forEach { point ->
             val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
@@ -71,7 +70,7 @@ class HotspotGeometryTest {
     @Test
     fun `GeoJSON coordinate order is longitude then latitude`() {
         // A point due east of the centroid at the equator increases longitude, latitude unchanged.
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 0.0, 0.0, 1000.0, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 0.0, 0.0, 1000.0, 3)
 
         val east = polygon.ring[HotspotGeometry.SEGMENTS / 4] // bearing 90 degrees
         assertTrue(east.longitude > 0.0)
@@ -80,7 +79,7 @@ class HotspotGeometryTest {
 
     @Test
     fun `zero radius renders at the MIN_EFFECTIVE_RADIUS_METERS floor, not a degenerate point`() {
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 0.0, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 0.0, 3)
 
         polygon.ring.dropLast(1).forEach { point ->
             val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
@@ -95,7 +94,7 @@ class HotspotGeometryTest {
     fun `a very small positive radius below the floor also renders at MIN_EFFECTIVE_RADIUS_METERS`() {
         val tinyRadius = 1.0
         check(tinyRadius < HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS)
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, tinyRadius, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, tinyRadius, 3)
 
         polygon.ring.dropLast(1).forEach { point ->
             val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
@@ -109,7 +108,7 @@ class HotspotGeometryTest {
     @Test
     fun `a radius already above the floor is rendered at its own real value, unmodified`() {
         val radius = HotspotGeometry.MIN_EFFECTIVE_RADIUS_METERS + 500.0
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3)
 
         polygon.ring.dropLast(1).forEach { point ->
             val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
@@ -120,7 +119,7 @@ class HotspotGeometryTest {
     @Test
     fun `a large valid radius is rendered at its own real value, unmodified`() {
         val radius = 50_000.0
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, radius, 3)
 
         polygon.ring.dropLast(1).forEach { point ->
             val distance = haversineMeters(45.8, 16.0, point.latitude, point.longitude)
@@ -130,7 +129,7 @@ class HotspotGeometryTest {
 
     @Test
     fun `coordinates near the anti-meridian remain normalized`() {
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 0.0, 179.999, 5000.0, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 0.0, 179.999, 5000.0, 3)
 
         polygon.ring.forEach { point ->
             assertTrue(point.longitude in -180.0..180.0)
@@ -141,7 +140,7 @@ class HotspotGeometryTest {
 
     @Test
     fun `high-latitude coordinates remain valid`() {
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 89.9, 10.0, 5000.0, 3, 84)
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 89.9, 10.0, 5000.0, 3)
 
         polygon.ring.forEach { point ->
             assertTrue(point.latitude.isFinite())
@@ -151,11 +150,10 @@ class HotspotGeometryTest {
     }
 
     @Test
-    fun `the polygon carries hotspotId deviceCount and confidence properties`() {
-        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 200.0, 4, 91)
+    fun `the polygon carries hotspotId and deviceCount properties`() {
+        val polygon = HotspotGeometry.polygonFor(hotspotId, 45.8, 16.0, 200.0, 4)
 
         assertEquals(hotspotId, polygon.hotspotId)
         assertEquals(4, polygon.deviceCount)
-        assertEquals(91, polygon.confidence)
     }
 }

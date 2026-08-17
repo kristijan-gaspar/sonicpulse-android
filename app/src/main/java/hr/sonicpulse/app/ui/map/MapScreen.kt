@@ -775,7 +775,7 @@ private fun openAppSettings(context: Context) {
 }
 
 /** The 3 device-count buckets that decide polygon *and* marker color (§10, plan item 2) — color
- * depends only on [Hotspot.deviceCount], never [Hotspot.confidence]. `internal` (not `private`) so
+ * depends only on [Hotspot.deviceCount]. `internal` (not `private`) so
  * [HotspotListBottomSheet] can reuse the same classification for its per-row color dot instead of
  * re-deriving it. */
 internal enum class DeviceCountBucket(val color: Color) {
@@ -838,8 +838,7 @@ private fun bucketPolygons(hotspots: List<Hotspot>): Map<DeviceCountBucket, List
                 centerLatitude = it.latitude,
                 centerLongitude = it.longitude,
                 radiusMeters = it.radiusMeters,
-                deviceCount = it.deviceCount,
-                confidence = it.confidence
+                deviceCount = it.deviceCount
             )
         }
     }
@@ -1006,17 +1005,7 @@ private fun SubsequentErrorBanner(onRetry: () -> Unit, modifier: Modifier = Modi
 @Composable
 private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState()
-    // Not remembered: hotspot.id alone doesn't change when a refresh updates lastReceivedAtUtc for
-    // the same hotspot, and these calls are cheap pure computations — recomputing on every
-    // recomposition is correct and simpler than keying remember() by every timestamp involved.
-    val timeSpan = hotspotTimeSpanFor(hotspot.firstReceivedAtUtc, hotspot.lastReceivedAtUtc)
-    val timeSpanText = when (timeSpan) {
-        is HotspotTimeSpan.Seconds -> stringResource(R.string.duration_seconds, timeSpan.seconds)
-        is HotspotTimeSpan.MinutesSeconds -> stringResource(R.string.duration_minutes_seconds, timeSpan.minutes, timeSpan.seconds)
-        is HotspotTimeSpan.HoursMinutes -> stringResource(R.string.duration_hours_minutes, timeSpan.hours, timeSpan.minutes)
-    }
     val radiusText = stringResource(R.string.unit_meters_short, hotspot.radiusMeters.roundToInt())
-    val confidenceText = confidenceScoreText(hotspot.confidence)
     val zone = ZoneId.systemDefault()
     val locale = Locale.getDefault()
     val firstDetectionText = detailTimestampTextFor(hotspot.firstReceivedAtUtc, zone, locale)
@@ -1024,9 +1013,9 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = AppShapes.BottomSheet) {
         // verticalScroll: at a compact screen height combined with a large system font scale, this
-        // sheet's content (2 rows of cells + the confidence note + 2 detail rows, all grown taller)
-        // can exceed what ModalBottomSheet is able to show at once — without this, the excess would
-        // simply be clipped and unreachable rather than scrollable.
+        // sheet's content (1 row of cells + 2 detail rows, all grown taller) can exceed what
+        // ModalBottomSheet is able to show at once — without this, the excess would simply be
+        // clipped and unreachable rather than scrollable.
         Column(
             modifier = Modifier
                 .padding(horizontal = Spacing.lg, vertical = Spacing.md)
@@ -1051,17 +1040,6 @@ private fun HotspotDetailBottomSheet(hotspot: Hotspot, onDismiss: () -> Unit) {
                 DetailCell(label = stringResource(R.string.detail_label_devices), value = hotspot.deviceCount.toString(), modifier = Modifier.weight(1f))
                 DetailCell(label = stringResource(R.string.detail_label_radius), value = radiusText, modifier = Modifier.weight(1f))
             }
-            Spacer(modifier = Modifier.height(Spacing.sm))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                DetailCell(label = stringResource(R.string.detail_label_confidence), value = confidenceText, modifier = Modifier.weight(1f))
-                DetailCell(label = stringResource(R.string.detail_label_time_span), value = timeSpanText, modifier = Modifier.weight(1f))
-            }
-            Text(
-                text = stringResource(R.string.hotspot_detail_confidence_explanation),
-                modifier = Modifier.padding(top = Spacing.xs),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-            )
             Spacer(modifier = Modifier.height(Spacing.md))
             DetailRow(label = stringResource(R.string.detail_label_first_detection), value = firstDetectionText)
             DetailRow(label = stringResource(R.string.detail_label_last_detection), value = lastDetectionText)

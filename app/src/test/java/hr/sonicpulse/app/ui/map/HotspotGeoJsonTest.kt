@@ -23,12 +23,11 @@ class HotspotGeoJsonTest {
     }
 
     @Test
-    fun `a feature carries hotspotId deviceCount and confidence properties`() {
+    fun `a feature carries hotspotId and deviceCount properties`() {
         val id = UUID.fromString("22222222-2222-2222-2222-222222222222")
         val polygon = HotspotPolygon(
             hotspotId = id,
             deviceCount = 3,
-            confidence = 84,
             ring = listOf(GeoPosition(16.0, 45.8), GeoPosition(16.0, 45.8))
         )
 
@@ -38,7 +37,6 @@ class HotspotGeoJsonTest {
 
         assertEquals(id.toString(), properties["hotspotId"]?.jsonPrimitive?.content)
         assertEquals(3, properties["deviceCount"]?.jsonPrimitive?.int)
-        assertEquals(84, properties["confidence"]?.jsonPrimitive?.int)
     }
 
     @Test
@@ -46,7 +44,6 @@ class HotspotGeoJsonTest {
         val polygon = HotspotPolygon(
             hotspotId = UUID.randomUUID(),
             deviceCount = 2,
-            confidence = 70,
             ring = listOf(GeoPosition(longitude = 16.5, latitude = 45.1), GeoPosition(longitude = 16.5, latitude = 45.1))
         )
 
@@ -70,7 +67,6 @@ class HotspotGeoJsonTest {
         latitude = latitude,
         longitude = longitude,
         radiusMeters = 16.0,
-        confidence = 84,
         deviceCount = deviceCount,
         firstReceivedAtUtc = Instant.parse("2026-08-03T10:00:00Z"),
         lastReceivedAtUtc = Instant.parse("2026-08-03T10:00:12Z")
