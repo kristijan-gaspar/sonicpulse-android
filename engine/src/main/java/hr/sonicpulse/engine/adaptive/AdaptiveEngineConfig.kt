@@ -21,7 +21,7 @@ data class AdaptiveEngineConfig(
     /** Consecutive inactive hops in DETECTING before a candidate event is accepted. */
     val endSilenceHops: Int = 3,
     /** Maximum candidate event duration before it is rejected as too long. */
-    val maxEventDurationMillis: Int = 350,
+    val maxEventDurationMillis: Int = 300,
     /** Cooldown duration after leaving DETECTING (accepted or rejected alike). */
     val cooldownMillis: Int = 700,
     // Short cooldown after a rejected candidate.
