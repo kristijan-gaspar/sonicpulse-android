@@ -18,7 +18,6 @@ object HotspotMapper {
         require(latitude.isFinite() && latitude in -90.0..90.0) { "Invalid latitude: $latitude" }
         require(longitude.isFinite() && longitude in -180.0..180.0) { "Invalid longitude: $longitude" }
         require(dto.radiusMeters.isFinite() && dto.radiusMeters >= 0.0) { "Invalid radiusMeters: ${dto.radiusMeters}" }
-        require(dto.confidence in 0..100) { "Invalid confidence: ${dto.confidence}" }
         require(dto.deviceCount >= 2) { "Invalid deviceCount: ${dto.deviceCount}" }
 
         val firstReceivedAtUtc = Instant.parse(dto.firstReceivedAtUtc)
@@ -32,7 +31,6 @@ object HotspotMapper {
             latitude = latitude,
             longitude = longitude,
             radiusMeters = dto.radiusMeters,
-            confidence = dto.confidence,
             deviceCount = dto.deviceCount,
             firstReceivedAtUtc = firstReceivedAtUtc,
             lastReceivedAtUtc = lastReceivedAtUtc

@@ -28,7 +28,6 @@ data class DetectionHistoryItemUiModel(
      * template for the detail bottom sheet only. */
     val gpsAccuracyText: String,
     /** True renders "Grupirano"/"Grouped", false renders "Nije grupirano"/"Not grouped" — string
-     * resource lookup happens in the Composable layer, not here. No confidence value: that's
-     * Map-screen-only. */
+     * resource lookup happens in the Composable layer, not here. */
     val grouped: Boolean
 )

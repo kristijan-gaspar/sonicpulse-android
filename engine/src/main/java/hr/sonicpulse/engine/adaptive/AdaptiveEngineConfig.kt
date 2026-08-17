@@ -13,15 +13,15 @@ data class AdaptiveEngineConfig(
 
     val ov: Double = 1.5,
     /** Minimum crest factor (peak/RMS, dB) for a hop to count as impulsive. */
-    val crestMinDb: Double = 10.0,
+    val crestMinDb: Double = 15.0,
     /** Absolute PCM16 sample magnitude at/above which a sample counts as clipped. */
     val clipLevel: Int = 32_000,
     /** Minimum fraction of clipped samples in a hop for it to count as impulsive. */
-    val clipRatioMin: Double = 0.02,
+    val clipRatioMin: Double = 0.001,
     /** Consecutive inactive hops in DETECTING before a candidate event is accepted. */
     val endSilenceHops: Int = 3,
     /** Maximum candidate event duration before it is rejected as too long. */
-    val maxEventDurationMillis: Int = 300,
+    val maxEventDurationMillis: Int = 350,
     /** Cooldown duration after leaving DETECTING (accepted or rejected alike). */
     val cooldownMillis: Int = 700,
     // Short cooldown after a rejected candidate.

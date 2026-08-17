@@ -13,7 +13,6 @@ class HotspotMapperTest {
         latitude: Double = 45.8,
         longitude: Double = 16.0,
         radiusMeters: Double = 120.5,
-        confidence: Int = 84,
         deviceCount: Int = 3,
         firstReceivedAtUtc: String = "2026-08-03T10:00:00Z",
         lastReceivedAtUtc: String = "2026-08-03T10:00:12Z"
@@ -22,7 +21,6 @@ class HotspotMapperTest {
         latitude = latitude,
         longitude = longitude,
         radiusMeters = radiusMeters,
-        confidence = confidence,
         deviceCount = deviceCount,
         firstReceivedAtUtc = firstReceivedAtUtc,
         lastReceivedAtUtc = lastReceivedAtUtc
@@ -50,13 +48,6 @@ class HotspotMapperTest {
         val hotspot = HotspotMapper.toDomain(dto(radiusMeters = 0.0))
 
         assertEquals(0.0, hotspot.radiusMeters, 0.0)
-    }
-
-    @Test
-    fun `maps confidence unchanged`() {
-        val hotspot = HotspotMapper.toDomain(dto(confidence = 0))
-
-        assertEquals(0, hotspot.confidence)
     }
 
     @Test
@@ -126,20 +117,6 @@ class HotspotMapperTest {
     fun `negative radius fails`() {
         assertThrows(IllegalArgumentException::class.java) {
             HotspotMapper.toDomain(dto(radiusMeters = -0.1))
-        }
-    }
-
-    @Test
-    fun `confidence above 100 fails`() {
-        assertThrows(IllegalArgumentException::class.java) {
-            HotspotMapper.toDomain(dto(confidence = 101))
-        }
-    }
-
-    @Test
-    fun `confidence below 0 fails`() {
-        assertThrows(IllegalArgumentException::class.java) {
-            HotspotMapper.toDomain(dto(confidence = -1))
         }
     }
 

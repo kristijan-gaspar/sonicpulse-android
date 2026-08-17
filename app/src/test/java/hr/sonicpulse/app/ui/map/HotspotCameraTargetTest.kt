@@ -19,7 +19,6 @@ class HotspotCameraTargetTest {
         latitude = latitude,
         longitude = longitude,
         radiusMeters = radiusMeters,
-        confidence = 84,
         deviceCount = deviceCount,
         firstReceivedAtUtc = Instant.parse("2026-08-03T10:00:00Z"),
         lastReceivedAtUtc = Instant.parse("2026-08-03T10:00:12Z")

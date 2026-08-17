@@ -155,19 +155,9 @@
     <string name="hotspot_detail_title">Detalji žarišta</string>
     <string name="detail_label_devices">Broj uređaja</string>
     <string name="detail_label_radius">Radijus</string>
-    <string name="detail_label_confidence">Ocjena pouzdanosti</string>
-    <!-- Raspon je lastReceivedAtUtc - firstReceivedAtUtc, dakle između detekcija zaprimljenih na
-         poslužitelju — "Raspon zaprimanja" to precizno imenuje; sam izračun ostaje nepromijenjen. -->
-    <string name="detail_label_time_span">Raspon zaprimanja</string>
     <string name="detail_label_first_detection">Prva zaprimljena detekcija</string>
     <string name="detail_label_last_detection">Posljednja zaprimljena detekcija</string>
-    <!-- Pouzdanost je heuristička ocjena 0–100, ne vjerojatnost — ova napomena to pojašnjava unutar
-         detalja žarišta, vizualno je sekundarna kako ne bi opterećivala samu kartu. -->
-    <string name="hotspot_detail_confidence_explanation">Heuristička ocjena temeljena na broju uređaja i vremenskoj blizini detekcija.</string>
     <string name="unit_meters_short">%1$d m</string>
-    <string name="duration_seconds">%1$d s</string>
-    <string name="duration_minutes_seconds">%1$d min %2$d s</string>
-    <string name="duration_hours_minutes">%1$d h %2$d min</string>
 
     <!-- Map — bottom sheet s popisom žarišta (sekundarna navigacija) -->
     <string name="action_hotspot_list">Popis hotspotova</string>

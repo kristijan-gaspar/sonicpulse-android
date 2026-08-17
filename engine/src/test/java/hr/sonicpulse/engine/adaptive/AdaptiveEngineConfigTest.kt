@@ -197,7 +197,7 @@ class AdaptiveEngineConfigTest {
         assertEquals(32_000, config.clipLevel)
         assertEquals(0.02, config.clipRatioMin, 0.0)
         assertEquals(3, config.endSilenceHops)
-        assertEquals(700, config.maxEventDurationMillis)
+        assertEquals(300, config.maxEventDurationMillis)
         assertEquals(700, config.cooldownMillis)
     }
 
@@ -206,7 +206,7 @@ class AdaptiveEngineConfigTest {
         val config = AdaptiveEngineConfig()
 
         // ceil(700ms * 44100Hz / (1000 * 1024 samples-per-hop)) = ceil(30.146...) = 31.
-        assertEquals(31, config.maxEventDurationHops)
+        assertEquals(13, config.maxEventDurationHops)
         assertEquals(31, config.cooldownHops)
     }
 

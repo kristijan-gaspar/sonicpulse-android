@@ -16,7 +16,6 @@ data class GeoPosition(val longitude: Double, val latitude: Double)
 data class HotspotPolygon(
     val hotspotId: UUID,
     val deviceCount: Int,
-    val confidence: Int,
     val ring: List<GeoPosition>
 )
 
@@ -56,7 +55,6 @@ object HotspotGeometry {
         centerLongitude: Double,
         radiusMeters: Double,
         deviceCount: Int,
-        confidence: Int,
         applyMinimumRadius: Boolean = true
     ): HotspotPolygon {
         val effectiveRadiusMeters = if (applyMinimumRadius) maxOf(radiusMeters, MIN_EFFECTIVE_RADIUS_METERS) else radiusMeters
@@ -72,7 +70,6 @@ object HotspotGeometry {
         return HotspotPolygon(
             hotspotId = hotspotId,
             deviceCount = deviceCount,
-            confidence = confidence,
             ring = ring
         )
     }

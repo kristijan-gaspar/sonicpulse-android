@@ -34,7 +34,6 @@ object HotspotGeoJson {
         put("properties", buildJsonObject {
             put("hotspotId", polygon.hotspotId.toString())
             put("deviceCount", polygon.deviceCount)
-            put("confidence", polygon.confidence)
         })
         put("geometry", buildJsonObject {
             put("type", "Polygon")

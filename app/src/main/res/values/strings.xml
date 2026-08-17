@@ -157,19 +157,9 @@
     <string name="hotspot_detail_title">Hotspot details</string>
     <string name="detail_label_devices">Devices</string>
     <string name="detail_label_radius">Radius</string>
-    <string name="detail_label_confidence">Confidence score</string>
-    <!-- The span is lastReceivedAtUtc - firstReceivedAtUtc, i.e. between backend-received
-         detections — "Reception span" names that precisely; the calculation itself is unchanged. -->
-    <string name="detail_label_time_span">Reception span</string>
     <string name="detail_label_first_detection">First detection received</string>
     <string name="detail_label_last_detection">Last detection received</string>
-    <!-- Confidence is a heuristic 0–100 score, not a probability — this caption clarifies that in
-         the hotspot detail sheet, kept visually secondary so it doesn't clutter the map itself. -->
-    <string name="hotspot_detail_confidence_explanation">Heuristic score based on device count and detection timing.</string>
     <string name="unit_meters_short">%1$d m</string>
-    <string name="duration_seconds">%1$d s</string>
-    <string name="duration_minutes_seconds">%1$d min %2$d s</string>
-    <string name="duration_hours_minutes">%1$d h %2$d min</string>
 
     <!-- Map — hotspot list bottom sheet (secondary navigation) -->
     <string name="action_hotspot_list">Hotspot list</string>
